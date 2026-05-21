@@ -8,6 +8,7 @@ Skill 装卸：修改 backend/skills/ 目录下的 Skill，重启即生效。
 
 import json
 import os
+import re
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
@@ -249,6 +250,38 @@ def extract_json(text: str) -> dict:
                 if depth == 0:
                     return json.loads(text[start : idx + 1])
         raise
+
+
+async def repair_and_extract_json(text: str) -> dict:
+    """Repair slightly malformed model JSON and parse it again."""
+    try:
+        return extract_json(text)
+    except json.JSONDecodeError:
+        repair_prompt = f"""下面是一段模型输出的检修方案 JSON，但它可能存在漏逗号、尾随逗号、代码块包裹或混入说明文字等格式问题。
+请在不改变语义和字段内容的前提下，把它修复为严格合法 JSON。
+
+要求：
+- 只输出 JSON 对象
+- 不要输出 markdown
+- 不要解释
+- 保留 document、sections、tables、steps 等原有结构
+
+原始输出：
+{text}
+"""
+        response = await get_model()(
+            [
+                {"role": "system", "content": "你是 JSON 修复器，只输出严格合法 JSON。"},
+                {"role": "user", "content": repair_prompt},
+            ],
+        )
+        try:
+            return extract_json(get_response_text(response))
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="模型返回的方案 JSON 无法解析，请重试或补充更明确的需求。",
+            ) from exc
 
 
 def build_user_prompt(
@@ -530,6 +563,60 @@ def infer_updates_from_text(user_message: str) -> dict[str, str]:
     if text:
         updates["background"] = text
 
+    def labeled_value(*labels: str, multiline: bool = False) -> str:
+        label_group = "|".join(re.escape(label) for label in labels)
+        if multiline:
+            next_labels = (
+                "检修背景|检修类型|网络环境|内外网环境|实施地点|涉及实例|检修窗口|"
+                "方案提供人|检修执行人|检修复核人|安全责任人|ASCM 授权账号|"
+                "ASCM授权账号|堡垒机账号|技术参数|补充要求"
+            )
+            pattern = rf"(?:{label_group})\s*[:：]\s*(.*?)(?=\n\s*(?:{next_labels})\s*[:：]|\Z)"
+            match = re.search(pattern, text, re.S | re.I)
+        else:
+            match = re.search(rf"(?:{label_group})\s*[:：]\s*([^\n]+)", text, re.I)
+        return match.group(1).strip() if match else ""
+
+    labeled_background = labeled_value("检修背景", multiline=True)
+    if labeled_background:
+        updates["background"] = labeled_background
+
+    label_map = {
+        "maintenance_type": ("检修类型",),
+        "network": ("网络环境", "内外网环境"),
+        "location": ("实施地点",),
+        "instances": ("涉及实例", "涉及的组件实例"),
+        "provider": ("方案提供人",),
+        "executor": ("检修执行人",),
+        "reviewer": ("检修复核人",),
+        "security_officer": ("安全责任人",),
+        "ascm_account": ("ASCM 授权账号", "ASCM授权账号"),
+        "bastion_account": ("堡垒机账号",),
+    }
+    for field, labels in label_map.items():
+        value = labeled_value(*labels)
+        if value:
+            updates[field] = value
+
+    tech_params = labeled_value("技术参数", multiline=True)
+    if tech_params:
+        updates["tech_params"] = tech_params
+    ops_detail = labeled_value("补充要求", multiline=True)
+    if ops_detail:
+        updates["ops_detail"] = ops_detail
+
+    schedule = labeled_value("检修窗口")
+    if schedule:
+        year_match = re.search(r"(\d{4}年)", schedule)
+        if year_match:
+            updates["schedule_year"] = year_match.group(1)
+        parts = re.split(r"\s*(?:至|到|-|—|~)\s*", schedule, maxsplit=1)
+        if len(parts) == 2:
+            updates["schedule_start"] = parts[0].strip()
+            updates["schedule_end"] = parts[1].strip()
+        else:
+            updates["schedule_start"] = schedule
+
     has_internal = "内网" in text
     has_external = "外网" in text
     if has_internal and has_external:
@@ -543,7 +630,8 @@ def infer_updates_from_text(user_message: str) -> dict[str, str]:
         keyword in text for keyword in ("创建", "新建", "申请", "开通")
     ):
         updates["maintenance_type"] = "配置变更"
-        updates["instances"] = text
+        if not updates.get("instances"):
+            updates["instances"] = text
     elif any(keyword in text for keyword in ("扩容", "缩容", "扩缩容")):
         updates["maintenance_type"] = "组件扩缩容"
     elif any(keyword in text for keyword in ("升级", "版本")):
@@ -583,17 +671,26 @@ async def extract_chat_updates(state: dict[str, str], user_message: str) -> dict
 }}
 
 不要输出 markdown，不要解释。"""
-    response = await get_model()(
-        [
-            {"role": "system", "content": "你只输出可解析 JSON。"},
-            {"role": "user", "content": prompt},
-        ],
-    )
-    data = extract_json(get_response_text(response))
+    inferred_updates = infer_updates_from_text(user_message)
+    try:
+        response = await get_model()(
+            [
+                {"role": "system", "content": "你只输出可解析 JSON。"},
+                {"role": "user", "content": prompt},
+            ],
+        )
+    except Exception:
+        return {
+            "updates": inferred_updates,
+            "assistant_note": "已收到需求描述，我先整理出可识别的信息。",
+        }
+    try:
+        data = extract_json(get_response_text(response))
+    except json.JSONDecodeError:
+        data = {"updates": {}, "assistant_note": "已收到需求描述，我先整理出可识别的信息。"}
     if not isinstance(data, dict):
         data = {"updates": {}}
 
-    inferred_updates = infer_updates_from_text(user_message)
     model_updates = data.get("updates") if isinstance(data.get("updates"), dict) else {}
     data["updates"] = {**inferred_updates, **model_updates}
     if not data.get("assistant_note") and data["updates"]:
@@ -605,7 +702,7 @@ async def generate_docx_from_state(state: dict[str, str]) -> tuple[str, Path, st
     user_prompt = build_user_prompt(**state)
     response = await run_plan_agent(user_prompt)
     text = get_response_text(response)
-    data = extract_json(text)
+    data = await repair_and_extract_json(text)
 
     data.setdefault("department", "云运营中心平台运维处")
     data.setdefault("date", datetime.now().strftime("%Y年%m月%d日"))
@@ -667,7 +764,7 @@ async def generate_plan(
         response = await run_plan_agent(user_prompt)
 
         text = get_response_text(response)
-        data = extract_json(text)
+        data = await repair_and_extract_json(text)
 
         data.setdefault("department", "云运营中心平台运维处")
         data.setdefault("date", datetime.now().strftime("%Y年%m月%d日"))
