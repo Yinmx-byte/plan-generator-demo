@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local secrets
+.env
+backend/.env
+*.key
+
+# Runtime output
+*.log
+uvicorn.*.log
+.agentscope_rag/
+backend/.agentscope_rag/
+
+# Generated documents
+*.docx
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store

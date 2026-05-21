@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>检修方案生成器</title>
+<style>
+  :root {
+    --primary: #1a73e8;
+    --border: #ddd;
+    --bg: #f8f9fa;
+    --radius: 6px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei", sans-serif; background: #eef1f5; color: #333; line-height: 1.6; }
+  .container { max-width: 960px; margin: 40px auto; padding: 0 20px; }
+  h1 { text-align: center; color: var(--primary); margin-bottom: 8px; font-size: 24px; }
+  .subtitle { text-align: center; color: #888; margin-bottom: 30px; font-size: 14px; }
+
+  .card {
+    background: #fff; border-radius: 8px; padding: 24px 28px;
+    margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  }
+  .card h2 {
+    font-size: 16px; color: var(--primary); margin-bottom: 16px;
+    padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+
+  .form-row { display: flex; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
+  .form-group { flex: 1; min-width: 180px; }
+  .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #555; }
+  .form-group input, .form-group textarea, .form-group select {
+    width: 100%; padding: 8px 12px; border: 1px solid var(--border);
+    border-radius: var(--radius); font-size: 14px; font-family: inherit;
+    transition: border-color 0.2s;
+  }
+  .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+    outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(26,115,232,0.1);
+  }
+  .form-group textarea { resize: vertical; min-height: 80px; }
+  .form-group.full { flex: 100%; }
+
+  .btn {
+    display: block; width: 100%; padding: 12px; background: var(--primary);
+    color: #fff; border: none; border-radius: var(--radius); font-size: 16px;
+    cursor: pointer; font-family: inherit; font-weight: 600;
+    transition: opacity 0.2s;
+  }
+  .btn:hover { opacity: 0.9; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .status {
+    text-align: center; margin-top: 16px; padding: 12px; border-radius: var(--radius);
+    display: none;
+  }
+  .status.info { display: block; background: #e8f0fe; color: #1a73e8; }
+  .status.success { display: block; background: #e6f4ea; color: #137333; }
+  .status.error { display: block; background: #fce8e6; color: #c5221f; }
+
+  .hint { font-size: 12px; color: #999; margin-top: 2px; }
+
+  footer { text-align: center; color: #aaa; font-size: 12px; margin-top: 40px; padding-bottom: 20px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>国网云平台检修方案生成器</h1>
+  <p class="subtitle">填写检修需求 → 调用 AI 生成标准化文档 → 下载 Word</p>
+
+  <form id="planForm">
+    <!-- 背景与检修事项 -->
+    <div class="card">
+      <h2>一、背景与检修事项</h2>
+      <div class="form-group full">
+        <label>检修背景（每行一条检修事项）</label>
+        <textarea name="background" rows="4" placeholder="内网总部ESB组件创建ecs实例&#10;内网i国网企业微信创建polardb实例&#10;以上事项项目组提报问题工单，需检修进行处理。"></textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>检修类型</label>
+          <select name="maintenance_type">
+            <option value="配置变更">配置变更</option>
+            <option value="组件升级">组件升级</option>
+            <option value="组件扩缩容">组件扩缩容</option>
+            <option value="数据库变更">数据库变更</option>
+            <option value="日常维护（原硬件设备）">日常维护（原硬件设备）</option>
+            <option value="其他">其他</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>内/外网环境</label>
+          <select name="network">
+            <option value="内网">内网</option>
+            <option value="外网">外网</option>
+            <option value="内、外网">内、外网</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>实施地点</label>
+          <input name="location" value="国网亦庄数据中心二期运维专区">
+        </div>
+      </div>
+      <div class="form-group full">
+        <label>涉及的组件实例（每行一个实例，格式：事项名称 | 组织 | 资源集）</label>
+        <textarea name="instances" rows="4" placeholder="内网总部ESB组件创建ecs实例 | 数字化工作部 | 总部ESB组件系统&#10;内网i国网企业微信创建polardb实例 | 数字化工作部 | i国网系统-企业微信模块资源集"></textarea>
+        <p class="hint">用 "事项名称 | 组织 | 资源集" 格式，每行一个实例</p>
+      </div>
+    </div>
+
+    <!-- 检修窗口与人员 -->
+    <div class="card">
+      <h2>二、检修窗口与人员</h2>
+      <div class="form-row">
+        <div class="form-group">
+          <label>年份</label>
+          <input name="schedule_year" value="2025年">
+        </div>
+        <div class="form-group">
+          <label>开始时间</label>
+          <input name="schedule_start" placeholder="10月15日 18:00">
+        </div>
+        <div class="form-group">
+          <label>结束时间</label>
+          <input name="schedule_end" placeholder="10月15日 20:00">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>方案提供人</label>
+          <input name="provider">
+        </div>
+        <div class="form-group">
+          <label>检修执行人</label>
+          <input name="executor">
+        </div>
+        <div class="form-group">
+          <label>检修复核人（多人用逗号分隔）</label>
+          <input name="reviewer">
+        </div>
+        <div class="form-group">
+          <label>安全责任人</label>
+          <input name="security_officer">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>ASCM 授权账号</label>
+          <input name="ascm_account">
+        </div>
+        <div class="form-group">
+          <label>堡垒机账号</label>
+          <input name="bastion_account">
+        </div>
+      </div>
+    </div>
+
+    <!-- 检修操作详情 -->
+    <div class="card">
+      <h2>三、检修操作详情</h2>
+      <div class="form-group full">
+        <label>操作步骤描述（描述每项检修的具体操作，越详细越好）</label>
+        <textarea name="ops_detail" rows="5" placeholder="事项1：使用账号XX登陆ASCM平台，产品选择ECS，选择组织XX-资源集XX，创建实例，规格4c16g...&#10;事项2：使用账号XX登陆ASCM平台，产品选择PolarDB，选择组织XX-资源集XX，创建实例..."></textarea>
+        <p class="hint">写出平台操作路径（产品→组织→资源集→具体操作），AI 会自动规范化表述</p>
+      </div>
+    </div>
+
+    <!-- 技术参数 -->
+    <div class="card">
+      <h2>四、技术参数</h2>
+      <div class="form-group full">
+        <label>实例技术参数（JSON 格式，按需填写）</label>
+        <textarea name="tech_params" rows="6" placeholder='{"ecs": [{"cloud_env": "内网", "instance_name": "总部ESB-物资", "disk": "系统盘100G", "image": "centos7.9-latest-v1-勿删", "password": "New6&7*oa", "vpc": "VPC10", "vswitch": "总部ESB组件生产Vswitch", "security_group": "总部ESB组件系统生产安全组", "spec": "4c16g", "count": "2"}], "polardb": [], "mongodb": [], "restart_nodes": []}'></textarea>
+        <p class="hint">可选：如果前端表单不方便填写表格，可以直接在这里贴 JSON（对应 template.md 中的表格 schema）</p>
+      </div>
+    </div>
+
+    <button type="submit" class="btn" id="submitBtn">生成检修方案</button>
+  </form>
+
+  <div id="status" class="status"></div>
+</div>
+
+<footer>国网云平台检修方案生成器 v0.1</footer>
+
+<script>
+const form = document.getElementById('planForm');
+const btn = document.getElementById('submitBtn');
+const statusEl = document.getElementById('status');
+
+function setStatus(msg, type) {
+  statusEl.textContent = msg;
+  statusEl.className = 'status ' + type;
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  btn.disabled = true;
+  setStatus('正在生成检修方案，请耐心等待（通常需要 20-60 秒）...', 'info');
+
+  try {
+    const formData = new FormData(form);
+    const resp = await fetch('/api/generate', { method: 'POST', body: formData });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || '生成失败');
+    }
+
+    // 下载文件
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '检修方案.docx';
+    const disposition = resp.headers.get('content-disposition');
+    if (disposition) {
+      const match = disposition.match(/filename\*=UTF-8''(.+)/);
+      if (match) a.download = decodeURIComponent(match[1]);
+    }
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setStatus('检修方案已生成并开始下载！', 'success');
+  } catch (err) {
+    setStatus('生成失败：' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
