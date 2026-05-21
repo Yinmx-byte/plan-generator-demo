@@ -232,8 +232,10 @@ def build_user_prompt(
 ASCM账号：{ascm_account}
 堡垒机账号：{bastion_account}
 
-## 检修操作详情
+## 检修操作补充说明（可选）
 {ops_detail}
+
+注意：即使补充说明为空，也必须根据已激活 Skill 自动生成完整的“六、实施步骤”，不要要求用户手工提供详细操作步骤。
 
 ## 技术参数
 {tech_params}

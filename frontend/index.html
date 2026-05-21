@@ -154,13 +154,13 @@
       </div>
     </div>
 
-    <!-- 检修操作详情 -->
+    <!-- 检修操作补充说明 -->
     <div class="card">
-      <h2>三、检修操作详情</h2>
+      <h2>三、检修操作补充说明</h2>
       <div class="form-group full">
-        <label>操作步骤描述（描述每项检修的具体操作，越详细越好）</label>
-        <textarea name="ops_detail" rows="5" placeholder="事项1：使用账号XX登陆ASCM平台，产品选择ECS，选择组织XX-资源集XX，创建实例，规格4c16g...&#10;事项2：使用账号XX登陆ASCM平台，产品选择PolarDB，选择组织XX-资源集XX，创建实例..."></textarea>
-        <p class="hint">写出平台操作路径（产品→组织→资源集→具体操作），AI 会自动规范化表述</p>
+        <label>补充要求（可选，例如特殊账号、审批要求、不能重启、需要脚本等）</label>
+        <textarea name="ops_detail" rows="5" placeholder="例如：必须使用指定 ASCM 账号；变更前需要截图留痕；不得影响业务；需要在方案中附参考执行脚本。"></textarea>
+        <p class="hint">详细实施步骤会由匹配的 Skill 自动生成，这里只填写额外约束</p>
       </div>
     </div>
 
