@@ -3,231 +3,250 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>检修方案生成器</title>
+<title>检修方案生成助手</title>
 <style>
   :root {
     --primary: #1a73e8;
-    --border: #ddd;
-    --bg: #f8f9fa;
-    --radius: 6px;
+    --border: #dfe3ea;
+    --bg: #eef1f5;
+    --panel: #fff;
+    --text: #273142;
+    --muted: #6b7280;
+    --assistant: #f6f8fb;
+    --user: #e8f0fe;
+    --danger: #c5221f;
+    --success: #137333;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: "Microsoft YaHei", sans-serif; background: #eef1f5; color: #333; line-height: 1.6; }
-  .container { max-width: 960px; margin: 40px auto; padding: 0 20px; }
-  h1 { text-align: center; color: var(--primary); margin-bottom: 8px; font-size: 24px; }
-  .subtitle { text-align: center; color: #888; margin-bottom: 30px; font-size: 14px; }
-
-  .card {
-    background: #fff; border-radius: 8px; padding: 24px 28px;
-    margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Microsoft YaHei", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
   }
-  .card h2 {
-    font-size: 16px; color: var(--primary); margin-bottom: 16px;
-    padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  .app {
+    max-width: 1040px;
+    height: 100vh;
+    margin: 0 auto;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    padding: 18px;
+    gap: 12px;
   }
-
-  .form-row { display: flex; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
-  .form-group { flex: 1; min-width: 180px; }
-  .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #555; }
-  .form-group input, .form-group textarea, .form-group select {
-    width: 100%; padding: 8px 12px; border: 1px solid var(--border);
-    border-radius: var(--radius); font-size: 14px; font-family: inherit;
-    transition: border-color 0.2s;
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
   }
-  .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
-    outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(26,115,232,0.1);
+  h1 { font-size: 20px; margin: 0; color: var(--primary); }
+  .subtitle { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  .reset {
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--text);
+    border-radius: 6px;
+    padding: 8px 12px;
+    cursor: pointer;
   }
-  .form-group textarea { resize: vertical; min-height: 80px; }
-  .form-group.full { flex: 100%; }
-
-  .btn {
-    display: block; width: 100%; padding: 12px; background: var(--primary);
-    color: #fff; border: none; border-radius: var(--radius); font-size: 16px;
-    cursor: pointer; font-family: inherit; font-weight: 600;
-    transition: opacity 0.2s;
+  .chat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: 1fr;
+    min-height: 0;
   }
-  .btn:hover { opacity: 0.9; }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  .status {
-    text-align: center; margin-top: 16px; padding: 12px; border-radius: var(--radius);
-    display: none;
+  .messages {
+    padding: 18px;
+    overflow-y: auto;
   }
-  .status.info { display: block; background: #e8f0fe; color: #1a73e8; }
-  .status.success { display: block; background: #e6f4ea; color: #137333; }
-  .status.error { display: block; background: #fce8e6; color: #c5221f; }
-
-  .hint { font-size: 12px; color: #999; margin-top: 2px; }
-
-  footer { text-align: center; color: #aaa; font-size: 12px; margin-top: 40px; padding-bottom: 20px; }
+  .msg {
+    max-width: 78%;
+    margin-bottom: 12px;
+    padding: 11px 13px;
+    border-radius: 8px;
+    white-space: pre-wrap;
+    line-height: 1.6;
+    font-size: 14px;
+  }
+  .msg.assistant {
+    background: var(--assistant);
+    border: 1px solid var(--border);
+  }
+  .msg.user {
+    background: var(--user);
+    margin-left: auto;
+  }
+  .msg.error {
+    background: #fce8e6;
+    color: var(--danger);
+    border: 1px solid #f4b6b1;
+  }
+  .download {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: var(--success);
+    color: #fff;
+    text-decoration: none;
+  }
+  .composer {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    display: grid;
+    gap: 10px;
+  }
+  textarea {
+    width: 100%;
+    min-height: 112px;
+    resize: vertical;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 11px 12px;
+    font: inherit;
+    line-height: 1.5;
+  }
+  textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(26,115,232,0.12);
+  }
+  .actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .hint { color: var(--muted); font-size: 12px; }
+  button.primary {
+    min-width: 108px;
+    border: none;
+    background: var(--primary);
+    color: #fff;
+    border-radius: 6px;
+    padding: 10px 16px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
+  @media (max-width: 720px) {
+    .app { padding: 10px; }
+    header { align-items: flex-start; flex-direction: column; }
+    .msg { max-width: 94%; }
+    .actions { align-items: stretch; flex-direction: column; }
+    button.primary { width: 100%; }
+  }
 </style>
 </head>
 <body>
-<div class="container">
-  <h1>国网云平台检修方案生成器</h1>
-  <p class="subtitle">填写检修需求 → 调用 AI 生成标准化文档 → 下载 Word</p>
-
-  <form id="planForm">
-    <!-- 背景与检修事项 -->
-    <div class="card">
-      <h2>一、背景与检修事项</h2>
-      <div class="form-group full">
-        <label>检修背景（每行一条检修事项）</label>
-        <textarea name="background" rows="4" placeholder="内网总部ESB组件创建ecs实例&#10;内网i国网企业微信创建polardb实例&#10;以上事项项目组提报问题工单，需检修进行处理。"></textarea>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>检修类型</label>
-          <select name="maintenance_type">
-            <option value="配置变更">配置变更</option>
-            <option value="组件升级">组件升级</option>
-            <option value="组件扩缩容">组件扩缩容</option>
-            <option value="数据库变更">数据库变更</option>
-            <option value="日常维护（原硬件设备）">日常维护（原硬件设备）</option>
-            <option value="其他">其他</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>内/外网环境</label>
-          <select name="network">
-            <option value="内网">内网</option>
-            <option value="外网">外网</option>
-            <option value="内、外网">内、外网</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>实施地点</label>
-          <input name="location" value="国网亦庄数据中心二期运维专区">
-        </div>
-      </div>
-      <div class="form-group full">
-        <label>涉及的组件实例（每行一个实例，格式：事项名称 | 组织 | 资源集）</label>
-        <textarea name="instances" rows="4" placeholder="内网总部ESB组件创建ecs实例 | 数字化工作部 | 总部ESB组件系统&#10;内网i国网企业微信创建polardb实例 | 数字化工作部 | i国网系统-企业微信模块资源集"></textarea>
-        <p class="hint">用 "事项名称 | 组织 | 资源集" 格式，每行一个实例</p>
-      </div>
+<div class="app">
+  <header>
+    <div>
+      <h1>国网云平台检修方案生成助手</h1>
+      <p class="subtitle">直接粘贴需求描述或需求文档，助手会追问缺失信息并生成 Word 方案</p>
     </div>
+    <button class="reset" id="resetBtn">新建对话</button>
+  </header>
 
-    <!-- 检修窗口与人员 -->
-    <div class="card">
-      <h2>二、检修窗口与人员</h2>
-      <div class="form-row">
-        <div class="form-group">
-          <label>年份</label>
-          <input name="schedule_year" value="2025年">
-        </div>
-        <div class="form-group">
-          <label>开始时间</label>
-          <input name="schedule_start" placeholder="10月15日 18:00">
-        </div>
-        <div class="form-group">
-          <label>结束时间</label>
-          <input name="schedule_end" placeholder="10月15日 20:00">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>方案提供人</label>
-          <input name="provider">
-        </div>
-        <div class="form-group">
-          <label>检修执行人</label>
-          <input name="executor">
-        </div>
-        <div class="form-group">
-          <label>检修复核人（多人用逗号分隔）</label>
-          <input name="reviewer">
-        </div>
-        <div class="form-group">
-          <label>安全责任人</label>
-          <input name="security_officer">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>ASCM 授权账号</label>
-          <input name="ascm_account">
-        </div>
-        <div class="form-group">
-          <label>堡垒机账号</label>
-          <input name="bastion_account">
-        </div>
-      </div>
+  <main class="chat">
+    <div class="messages" id="messages"></div>
+  </main>
+
+  <section class="composer">
+    <textarea id="messageInput" placeholder="例如：需要为内网总部 ESB 组件创建 ECS 实例，组织为数字化工作部，资源集为总部ESB组件系统，窗口为 2026年5月25日 18:00 至 20:00，执行人..."></textarea>
+    <div class="actions">
+      <span class="hint">缺少人员、窗口、账号等关键信息时，助手会继续追问。</span>
+      <button class="primary" id="sendBtn">发送</button>
     </div>
-
-    <!-- 检修操作补充说明 -->
-    <div class="card">
-      <h2>三、检修操作补充说明</h2>
-      <div class="form-group full">
-        <label>补充要求（可选，例如特殊账号、审批要求、不能重启、需要脚本等）</label>
-        <textarea name="ops_detail" rows="5" placeholder="例如：必须使用指定 ASCM 账号；变更前需要截图留痕；不得影响业务；需要在方案中附参考执行脚本。"></textarea>
-        <p class="hint">详细实施步骤会由匹配的 Skill 自动生成，这里只填写额外约束</p>
-      </div>
-    </div>
-
-    <!-- 技术参数 -->
-    <div class="card">
-      <h2>四、技术参数</h2>
-      <div class="form-group full">
-        <label>实例技术参数（JSON 格式，按需填写）</label>
-        <textarea name="tech_params" rows="6" placeholder='{"ecs": [{"cloud_env": "内网", "instance_name": "总部ESB-物资", "disk": "系统盘100G", "image": "centos7.9-latest-v1-勿删", "password": "New6&7*oa", "vpc": "VPC10", "vswitch": "总部ESB组件生产Vswitch", "security_group": "总部ESB组件系统生产安全组", "spec": "4c16g", "count": "2"}], "polardb": [], "mongodb": [], "restart_nodes": []}'></textarea>
-        <p class="hint">可选：如果前端表单不方便填写表格，可以直接在这里贴 JSON（对应 template.md 中的表格 schema）</p>
-      </div>
-    </div>
-
-    <button type="submit" class="btn" id="submitBtn">生成检修方案</button>
-  </form>
-
-  <div id="status" class="status"></div>
+  </section>
 </div>
 
-<footer>国网云平台检修方案生成器 v0.1</footer>
-
 <script>
-const form = document.getElementById('planForm');
-const btn = document.getElementById('submitBtn');
-const statusEl = document.getElementById('status');
+const messagesEl = document.getElementById('messages');
+const inputEl = document.getElementById('messageInput');
+const sendBtn = document.getElementById('sendBtn');
+const resetBtn = document.getElementById('resetBtn');
+let sessionId = localStorage.getItem('planGeneratorSessionId') || null;
 
-function setStatus(msg, type) {
-  statusEl.textContent = msg;
-  statusEl.className = 'status ' + type;
+function addMessage(role, text, extraHtml = '') {
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.textContent = text;
+  if (extraHtml) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = extraHtml;
+    div.appendChild(wrap);
+  }
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  btn.disabled = true;
-  setStatus('正在生成检修方案，请耐心等待（通常需要 20-60 秒）...', 'info');
+function setBusy(busy) {
+  sendBtn.disabled = busy;
+  inputEl.disabled = busy;
+  sendBtn.textContent = busy ? '处理中...' : '发送';
+}
 
+async function sendMessage() {
+  const text = inputEl.value.trim();
+  if (!text) return;
+  addMessage('user', text);
+  inputEl.value = '';
+  setBusy(true);
   try {
-    const formData = new FormData(form);
-    const resp = await fetch('/api/generate', { method: 'POST', body: formData });
-    if (!resp.ok) {
-      const err = await resp.json();
-      throw new Error(err.detail || '生成失败');
+    const resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, message: text })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '请求失败');
+    sessionId = data.session_id;
+    localStorage.setItem('planGeneratorSessionId', sessionId);
+    if (data.status === 'generated') {
+      addMessage('assistant', data.message, `<a class="download" href="${data.download_url}">下载检修方案</a>`);
+    } else {
+      addMessage('assistant', data.message);
     }
-
-    // 下载文件
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = '检修方案.docx';
-    const disposition = resp.headers.get('content-disposition');
-    if (disposition) {
-      const match = disposition.match(/filename\*=UTF-8''(.+)/);
-      if (match) a.download = decodeURIComponent(match[1]);
-    }
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    setStatus('检修方案已生成并开始下载！', 'success');
   } catch (err) {
-    setStatus('生成失败：' + err.message, 'error');
+    addMessage('error', '处理失败：' + err.message);
   } finally {
-    btn.disabled = false;
+    setBusy(false);
+    inputEl.focus();
+  }
+}
+
+async function resetChat() {
+  if (sessionId) {
+    await fetch('/api/chat/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId })
+    }).catch(() => {});
+  }
+  sessionId = null;
+  localStorage.removeItem('planGeneratorSessionId');
+  messagesEl.innerHTML = '';
+  addMessage('assistant', '请粘贴检修需求描述或需求文档。我会先抽取关键信息，缺什么再继续问你；信息齐全后自动生成 Word 检修方案。');
+  inputEl.focus();
+}
+
+sendBtn.addEventListener('click', sendMessage);
+resetBtn.addEventListener('click', resetChat);
+inputEl.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    sendMessage();
   }
 });
+
+addMessage('assistant', '请粘贴检修需求描述或需求文档。我会先抽取关键信息，缺什么再继续问你；信息齐全后自动生成 Word 检修方案。');
 </script>
 </body>
 </html>

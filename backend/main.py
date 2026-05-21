@@ -13,7 +13,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from agentscope.agent import ReActAgent
 from agentscope.formatter import AnthropicChatFormatter, OpenAIChatFormatter
@@ -26,20 +26,67 @@ from fastapi import FastAPI, Form, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from rag import get_knowledge_base
 from skills_runtime import SkillRegistry
-from scripts.generate_plan import build_document
-
-load_dotenv()
-
 ROOT = Path(__file__).parent
 SKILLS_ROOT = ROOT / "skills"
+
+from scripts.generate_plan import build_document
+
+load_dotenv(ROOT / ".env")
 
 # ── Skill 注册 ──────────────────────────────────────────────────
 _skill_registry: Optional[SkillRegistry] = None
 _toolkit: Optional[Toolkit] = None
 _rag_enabled: bool = False
+_chat_sessions: dict[str, dict[str, Any]] = {}
+_generated_files: dict[str, Path] = {}
+
+REQUIRED_FIELDS = {
+    "background": "检修背景/检修事项",
+    "maintenance_type": "检修类型",
+    "network": "内外网环境",
+    "location": "实施地点",
+    "instances": "涉及的组件实例、组织、资源集",
+    "schedule_start": "检修开始时间",
+    "schedule_end": "检修结束时间",
+    "provider": "方案提供人",
+    "executor": "检修执行人",
+    "reviewer": "检修复核人",
+    "security_officer": "安全责任人",
+    "ascm_account": "ASCM 授权账号",
+    "bastion_account": "堡垒机账号",
+}
+
+FORM_FIELDS = [
+    "background",
+    "maintenance_type",
+    "network",
+    "location",
+    "instances",
+    "schedule_year",
+    "schedule_start",
+    "schedule_end",
+    "provider",
+    "executor",
+    "reviewer",
+    "security_officer",
+    "ascm_account",
+    "bastion_account",
+    "ops_detail",
+    "tech_params",
+]
+
+
+class ChatRequest(BaseModel):
+    message: str
+    session_id: Optional[str] = None
+
+
+class ChatResetRequest(BaseModel):
+    session_id: str
 
 
 def get_skill_registry() -> SkillRegistry:
@@ -125,6 +172,14 @@ def get_model() -> AnthropicChatModel | OpenAIChatModel:
                 api_key=api_key,
                 stream=False,
                 client_kwargs=client_kwargs if client_kwargs else None,
+                generate_kwargs={
+                    "max_tokens": int(os.getenv("MAX_TOKENS", "4096")),
+                    **(
+                        {"extra_body": {"thinking": {"type": "disabled"}}}
+                        if provider == "deepseek"
+                        else {}
+                    ),
+                },
             )
         else:
             raise RuntimeError(f"不支持的 MODEL_PROVIDER: {provider}")
@@ -256,7 +311,7 @@ async def run_plan_agent(user_prompt: str):
         max_iters=int(os.getenv("AGENT_MAX_ITERS", "8")),
     )
     agent.set_console_output_enabled(False)
-    return agent(Msg("user", user_prompt, "user"))
+    return await agent(Msg("user", user_prompt, "user"))
 
 
 # ── API 路由 ────────────────────────────────────────────────────
@@ -325,13 +380,91 @@ async def retrieve_rag(query: str = Query(default="", description="检索问题"
     }
 
 
+@app.post("/api/chat")
+async def chat(request: ChatRequest):
+    session_id = request.session_id or uuid.uuid4().hex
+    session = _chat_sessions.setdefault(
+        session_id,
+        {
+            "state": default_form_state(),
+            "history": [],
+            "generated": None,
+        },
+    )
+    message = request.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="请输入需求描述或补充信息")
+
+    session["history"].append({"role": "user", "content": message})
+    extracted = await extract_chat_updates(session["state"], message)
+    merge_updates(session["state"], extracted.get("updates", {}))
+    missing = find_missing_fields(session["state"])
+
+    if missing:
+        assistant_message = extracted.get("assistant_note") or "已收到，我先整理这些信息。"
+        assistant_message = f"{assistant_message}\n\n{build_missing_question(missing)}"
+        session["history"].append({"role": "assistant", "content": assistant_message})
+        return {
+            "session_id": session_id,
+            "status": "need_more",
+            "message": assistant_message,
+            "missing_fields": missing,
+            "collected": session["state"],
+        }
+
+    file_id, _path, filename = await generate_docx_from_state(session["state"])
+    download_url = f"/api/download/{file_id}"
+    assistant_message = "关键信息已收集完整，检修方案已生成。"
+    session["generated"] = {
+        "file_id": file_id,
+        "filename": filename,
+        "download_url": download_url,
+    }
+    session["history"].append({"role": "assistant", "content": assistant_message})
+    return {
+        "session_id": session_id,
+        "status": "generated",
+        "message": assistant_message,
+        "download_url": download_url,
+        "filename": filename,
+        "collected": session["state"],
+    }
+
+
+@app.post("/api/chat/reset")
+async def reset_chat(request: ChatResetRequest):
+    _chat_sessions.pop(request.session_id, None)
+    return {"status": "ok"}
+
+
+@app.get("/api/download/{file_id}")
+async def download_generated(file_id: str):
+    path = _generated_files.get(file_id)
+    if path is None or not path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在或已过期")
+    return FileResponse(
+        path=str(path),
+        filename=path.name,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
 def get_response_text(response) -> str:
     """Extract text from AgentScope 1.x ChatResponse."""
-    if hasattr(response, "get_text_content"):
-        return response.get_text_content()
-    if hasattr(response, "text"):
-        return response.text
-    content = getattr(response, "content", response)
+    content = response
+    for attr in ("get_text_content", "text", "content"):
+        try:
+            value = getattr(response, attr)
+        except (AttributeError, KeyError):
+            continue
+        if callable(value):
+            return value()
+        if isinstance(value, str):
+            return value
+        if value is not None:
+            content = value
+            break
+
     if isinstance(content, str):
         return content
     texts = []
@@ -339,6 +472,165 @@ def get_response_text(response) -> str:
         if isinstance(block, dict) and block.get("type") == "text":
             texts.append(block.get("text", ""))
     return "\n".join(texts)
+
+
+def default_form_state() -> dict[str, str]:
+    return {
+        "background": "",
+        "maintenance_type": "",
+        "network": "",
+        "location": "国网亦庄数据中心二期运维专区",
+        "instances": "",
+        "schedule_year": str(datetime.now().year) + "年",
+        "schedule_start": "",
+        "schedule_end": "",
+        "provider": "",
+        "executor": "",
+        "reviewer": "",
+        "security_officer": "",
+        "ascm_account": "",
+        "bastion_account": "",
+        "ops_detail": "",
+        "tech_params": "",
+    }
+
+
+def normalize_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value).strip()
+
+
+def merge_updates(state: dict[str, str], updates: dict[str, Any]) -> None:
+    for key in FORM_FIELDS:
+        value = normalize_value(updates.get(key))
+        if value:
+            state[key] = value
+
+
+def find_missing_fields(state: dict[str, str]) -> list[str]:
+    return [key for key in REQUIRED_FIELDS if not state.get(key, "").strip()]
+
+
+def build_missing_question(missing: list[str]) -> str:
+    labels = [REQUIRED_FIELDS[key] for key in missing[:4]]
+    if not labels:
+        return ""
+    return "还需要补充：" + "、".join(labels) + "。请直接回复这些信息即可。"
+
+
+def infer_updates_from_text(user_message: str) -> dict[str, str]:
+    """Capture obvious requirement clues before relying on free-form LLM output."""
+    text = user_message.strip()
+    lower_text = text.lower()
+    updates: dict[str, str] = {}
+
+    if text:
+        updates["background"] = text
+
+    has_internal = "内网" in text
+    has_external = "外网" in text
+    if has_internal and has_external:
+        updates["network"] = "内、外网"
+    elif has_internal:
+        updates["network"] = "内网"
+    elif has_external:
+        updates["network"] = "外网"
+
+    if any(keyword in lower_text for keyword in ("ecs", "云服务器")) and any(
+        keyword in text for keyword in ("创建", "新建", "申请", "开通")
+    ):
+        updates["maintenance_type"] = "配置变更"
+        updates["instances"] = text
+    elif any(keyword in text for keyword in ("扩容", "缩容", "扩缩容")):
+        updates["maintenance_type"] = "组件扩缩容"
+    elif any(keyword in text for keyword in ("升级", "版本")):
+        updates["maintenance_type"] = "组件升级"
+    elif any(keyword in lower_text for keyword in ("数据库", "polardb", "mysql", "mongodb", "redis")):
+        updates["maintenance_type"] = "数据库变更"
+
+    return updates
+
+
+async def extract_chat_updates(state: dict[str, str], user_message: str) -> dict[str, Any]:
+    """Use the current LLM to update the structured requirement state."""
+    prompt = f"""你是检修方案需求信息抽取助手。请从用户最新消息中抽取检修方案生成所需字段，并结合已有状态更新。
+
+已有状态 JSON：
+{json.dumps(state, ensure_ascii=False, indent=2)}
+
+用户最新消息：
+{user_message}
+
+字段说明：
+- background: 检修背景/检修事项，可多行
+- maintenance_type: 配置变更/组件升级/组件扩缩容/数据库变更/日常维护（原硬件设备）/其他
+- network: 内网/外网/内、外网
+- location: 实施地点
+- instances: 涉及实例，尽量包含事项名称、组织、资源集
+- schedule_year/schedule_start/schedule_end: 检修窗口
+- provider/executor/reviewer/security_officer: 人员信息
+- ascm_account/bastion_account: 授权账号
+- ops_detail: 用户额外约束或补充说明，不要把它当成详细步骤来源
+- tech_params: 技术参数 JSON 或自然语言参数
+
+只输出 JSON：
+{{
+  "updates": {{"field": "value"}},
+  "assistant_note": "对已收到信息的简短确认，不超过60字"
+}}
+
+不要输出 markdown，不要解释。"""
+    response = await get_model()(
+        [
+            {"role": "system", "content": "你只输出可解析 JSON。"},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    data = extract_json(get_response_text(response))
+    if not isinstance(data, dict):
+        data = {"updates": {}}
+
+    inferred_updates = infer_updates_from_text(user_message)
+    model_updates = data.get("updates") if isinstance(data.get("updates"), dict) else {}
+    data["updates"] = {**inferred_updates, **model_updates}
+    if not data.get("assistant_note") and data["updates"]:
+        data["assistant_note"] = "已收到需求描述，我先整理出可识别的信息。"
+    return data
+
+
+async def generate_docx_from_state(state: dict[str, str]) -> tuple[str, Path, str]:
+    user_prompt = build_user_prompt(**state)
+    response = await run_plan_agent(user_prompt)
+    text = get_response_text(response)
+    data = extract_json(text)
+
+    data.setdefault("department", "云运营中心平台运维处")
+    data.setdefault("date", datetime.now().strftime("%Y年%m月%d日"))
+
+    doc = build_document(data)
+    output_dir = Path(tempfile.gettempdir()) / "plan-generator"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    file_id = uuid.uuid4().hex
+    output_path = output_dir / f"检修方案_{file_id[:8]}.docx"
+    doc.save(str(output_path))
+    _generated_files[file_id] = output_path
+
+    files = sorted(
+        output_dir.glob("检修方案_*.docx"),
+        key=lambda f: f.stat().st_mtime,
+        reverse=True,
+    )
+    for old_file in files[10:]:
+        try:
+            old_file.unlink()
+        except OSError:
+            pass
+
+    filename = data.get("title") or data.get("document", {}).get("title", "检修方案")
+    return file_id, output_path, filename + ".docx"
 
 
 @app.post("/api/generate")
