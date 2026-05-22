@@ -11,6 +11,7 @@ import os
 import re
 import tempfile
 import uuid
+import zipfile
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -23,9 +24,9 @@ from agentscope.message import Msg, TextBlock
 from agentscope.model import AnthropicChatModel, OpenAIChatModel
 from agentscope.tool import Toolkit, ToolResponse
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, HTTPException, Query
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -96,6 +97,13 @@ def get_skill_registry() -> SkillRegistry:
     if _skill_registry is None:
         _skill_registry = SkillRegistry(SKILLS_ROOT)
     return _skill_registry
+
+
+def reset_skill_runtime() -> None:
+    """Reload skill metadata/toolkit after skill files change."""
+    global _skill_registry, _toolkit
+    _skill_registry = None
+    _toolkit = None
 
 
 async def read_file(file_path: str) -> ToolResponse:
@@ -398,6 +406,88 @@ async def list_skills():
     }
 
 
+def safe_skill_dir_name(name: str) -> str:
+    value = re.sub(r"[^A-Za-z0-9_.-]+", "-", name.strip()).strip(".-")
+    if not value:
+        raise HTTPException(status_code=400, detail="Skill 名称不能为空")
+    return value
+
+
+def ensure_within_directory(base: Path, target: Path) -> None:
+    base_resolved = base.resolve()
+    target_resolved = target.resolve()
+    if not str(target_resolved).startswith(str(base_resolved)):
+        raise HTTPException(status_code=400, detail="非法文件路径")
+
+
+@app.post("/api/skills/upload")
+async def upload_skill(
+    file: UploadFile = File(...),
+    skill_name: str = Form(default=""),
+):
+    filename = file.filename or ""
+    suffix = Path(filename).suffix.lower()
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="上传文件为空")
+
+    if suffix == ".zip":
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
+            tmp.write(raw)
+            tmp_path = Path(tmp.name)
+        try:
+            with zipfile.ZipFile(tmp_path) as archive:
+                skill_entries = [
+                    name
+                    for name in archive.namelist()
+                    if not name.endswith("/") and Path(name).name == "SKILL.md"
+                ]
+                if not skill_entries:
+                    raise HTTPException(status_code=400, detail="zip 中未找到 SKILL.md")
+                skill_root_parts = Path(skill_entries[0]).parent.parts
+                inferred_name = skill_root_parts[-1] if skill_root_parts else Path(filename).stem
+                target_dir = SKILLS_ROOT / safe_skill_dir_name(skill_name or inferred_name)
+                target_dir.mkdir(parents=True, exist_ok=True)
+                for member in archive.infolist():
+                    if member.is_dir():
+                        continue
+                    member_path = Path(member.filename)
+                    if ".." in member_path.parts:
+                        raise HTTPException(status_code=400, detail="zip 中包含非法路径")
+                    parts = member_path.parts
+                    if skill_root_parts and parts[: len(skill_root_parts)] == skill_root_parts:
+                        parts = parts[len(skill_root_parts) :]
+                    if not parts:
+                        continue
+                    output_path = target_dir.joinpath(*parts)
+                    ensure_within_directory(target_dir, output_path)
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    output_path.write_bytes(archive.read(member))
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    else:
+        text = raw.decode("utf-8")
+        if "name:" not in text and "# " not in text:
+            raise HTTPException(status_code=400, detail="请上传有效的 SKILL.md")
+        target_name = safe_skill_dir_name(skill_name or Path(filename).stem or "uploaded-skill")
+        target_dir = SKILLS_ROOT / target_name
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "SKILL.md").write_text(text, encoding="utf-8")
+
+    reset_skill_runtime()
+    return {
+        "status": "ok",
+        "skills": [
+            {
+                "name": skill.name,
+                "description": skill.description,
+                "path": str(skill.path),
+            }
+            for skill in get_skill_registry().skills
+        ],
+    }
+
+
 @app.get("/api/rag/retrieve")
 async def retrieve_rag(query: str = Query(default="", description="检索问题")):
     knowledge_base = get_knowledge_base(SKILLS_ROOT)
@@ -462,6 +552,107 @@ async def chat(request: ChatRequest):
         "filename": filename,
         "collected": session["state"],
     }
+
+
+def sse_event(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest):
+    async def stream():
+        session_id = request.session_id or uuid.uuid4().hex
+        session = _chat_sessions.setdefault(
+            session_id,
+            {
+                "state": default_form_state(),
+                "history": [],
+                "generated": None,
+            },
+        )
+        message = request.message.strip()
+        if not message:
+            yield sse_event(
+                "error",
+                {"session_id": session_id, "message": "请输入需求描述或补充信息"},
+            )
+            return
+
+        try:
+            yield sse_event(
+                "status",
+                {"session_id": session_id, "message": "正在抽取需求中的关键信息..."},
+            )
+            session["history"].append({"role": "user", "content": message})
+            extracted = await extract_chat_updates(session["state"], message)
+            merge_updates(session["state"], extracted.get("updates", {}))
+
+            yield sse_event(
+                "collected",
+                {
+                    "session_id": session_id,
+                    "message": "关键信息抽取完成，正在检查是否需要补充。",
+                    "collected": session["state"],
+                },
+            )
+            missing = find_missing_fields(session["state"])
+
+            if missing:
+                assistant_message = extracted.get("assistant_note") or "已收到，我先整理这些信息。"
+                assistant_message = f"{assistant_message}\n\n{build_missing_question(missing)}"
+                session["history"].append({"role": "assistant", "content": assistant_message})
+                yield sse_event(
+                    "done",
+                    {
+                        "session_id": session_id,
+                        "status": "need_more",
+                        "message": assistant_message,
+                        "missing_fields": missing,
+                        "collected": session["state"],
+                    },
+                )
+                return
+
+            yield sse_event(
+                "status",
+                {"session_id": session_id, "message": "信息已完整，正在调用 Skill 生成检修方案..."},
+            )
+            file_id, _path, filename = await generate_docx_from_state(session["state"])
+            download_url = f"/api/download/{file_id}"
+            assistant_message = "关键信息已收集完整，检修方案已生成。"
+            session["generated"] = {
+                "file_id": file_id,
+                "filename": filename,
+                "download_url": download_url,
+            }
+            session["history"].append({"role": "assistant", "content": assistant_message})
+            yield sse_event(
+                "done",
+                {
+                    "session_id": session_id,
+                    "status": "generated",
+                    "message": assistant_message,
+                    "download_url": download_url,
+                    "filename": filename,
+                    "collected": session["state"],
+                },
+            )
+        except HTTPException as exc:
+            yield sse_event(
+                "error",
+                {"session_id": session_id, "message": exc.detail, "status_code": exc.status_code},
+            )
+        except Exception as exc:
+            yield sse_event(
+                "error",
+                {"session_id": session_id, "message": f"生成失败：{exc}"},
+            )
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream; charset=utf-8",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/chat/reset")

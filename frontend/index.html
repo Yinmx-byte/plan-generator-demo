@@ -20,44 +20,59 @@
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    font-family: "Microsoft YaHei", Arial, sans-serif;
+    height: 100vh;
     background: var(--bg);
     color: var(--text);
-    height: 100vh;
+    font-family: "Microsoft YaHei", Arial, sans-serif;
   }
   .app {
-    max-width: 1040px;
+    width: min(1280px, 100%);
     height: 100vh;
     margin: 0 auto;
+    padding: 16px;
     display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
     grid-template-rows: auto 1fr auto;
-    padding: 18px;
     gap: 12px;
   }
   header {
+    grid-column: 1 / -1;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
   }
-  h1 { font-size: 20px; margin: 0; color: var(--primary); }
+  h1 { margin: 0; color: var(--primary); font-size: 20px; }
+  h2 { margin: 0; font-size: 15px; }
   .subtitle { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
-  .reset {
+  .header-actions { display: flex; gap: 8px; }
+  button {
     border: 1px solid var(--border);
     background: #fff;
     color: var(--text);
     border-radius: 6px;
     padding: 8px 12px;
     cursor: pointer;
+    font: inherit;
   }
+  button.primary {
+    min-width: 108px;
+    border: none;
+    background: var(--primary);
+    color: #fff;
+    font-weight: 600;
+  }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
   .chat {
+    grid-column: 1;
+    grid-row: 2;
+    min-height: 0;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 8px;
     overflow: hidden;
     display: grid;
     grid-template-rows: 1fr;
-    min-height: 0;
   }
   .messages {
     padding: 18px;
@@ -80,6 +95,12 @@
     background: var(--user);
     margin-left: auto;
   }
+  .msg.status {
+    max-width: 560px;
+    background: #fff8e1;
+    border: 1px solid #f6d57a;
+    color: #6f4c00;
+  }
   .msg.error {
     background: #fce8e6;
     color: var(--danger);
@@ -95,6 +116,8 @@
     text-decoration: none;
   }
   .composer {
+    grid-column: 1;
+    grid-row: 3;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -112,7 +135,8 @@
     font: inherit;
     line-height: 1.5;
   }
-  textarea:focus {
+  textarea:focus,
+  input:focus {
     outline: none;
     border-color: var(--primary);
     box-shadow: 0 0 0 2px rgba(26,115,232,0.12);
@@ -124,21 +148,85 @@
     gap: 12px;
   }
   .hint { color: var(--muted); font-size: 12px; }
-  button.primary {
-    min-width: 108px;
-    border: none;
-    background: var(--primary);
-    color: #fff;
-    border-radius: 6px;
-    padding: 10px 16px;
-    font-weight: 600;
-    cursor: pointer;
+  aside {
+    grid-column: 2;
+    grid-row: 2 / 4;
+    min-height: 0;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    overflow: hidden;
   }
-  button:disabled { opacity: 0.55; cursor: not-allowed; }
-  @media (max-width: 720px) {
+  .skills-head {
+    padding: 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .skill-list {
+    padding: 10px;
+    overflow-y: auto;
+  }
+  .skill-item {
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    background: #fbfcff;
+  }
+  .skill-name {
+    font-size: 14px;
+    font-weight: 700;
+    word-break: break-word;
+  }
+  .skill-desc {
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .upload {
+    border-top: 1px solid var(--border);
+    padding: 12px;
+    display: grid;
+    gap: 9px;
+  }
+  .upload input[type="text"],
+  .upload input[type="file"] {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    font: inherit;
+    font-size: 13px;
+  }
+  .upload-status {
+    min-height: 18px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  @media (max-width: 900px) {
+    .app {
+      height: auto;
+      min-height: 100vh;
+      grid-template-columns: 1fr;
+      grid-template-rows: auto minmax(420px, 1fr) auto auto;
+    }
+    aside { grid-row: auto; }
+    .chat,
+    .composer,
+    aside { grid-column: 1; }
+    .msg { max-width: 94%; }
+  }
+  @media (max-width: 640px) {
     .app { padding: 10px; }
     header { align-items: flex-start; flex-direction: column; }
-    .msg { max-width: 94%; }
+    .header-actions { width: 100%; }
+    .header-actions button { flex: 1; }
     .actions { align-items: stretch; flex-direction: column; }
     button.primary { width: 100%; }
   }
@@ -149,19 +237,36 @@
   <header>
     <div>
       <h1>国网云平台检修方案生成助手</h1>
-      <p class="subtitle">直接粘贴需求描述或需求文档，助手会追问缺失信息并生成 Word 方案</p>
+      <p class="subtitle">粘贴需求描述或需求文档，助手会流式整理信息、追问缺失项并生成 Word 方案</p>
     </div>
-    <button class="reset" id="resetBtn">新建对话</button>
+    <div class="header-actions">
+      <button id="refreshSkillsBtn">刷新 Skill</button>
+      <button id="resetBtn">新建对话</button>
+    </div>
   </header>
 
   <main class="chat">
     <div class="messages" id="messages"></div>
   </main>
 
+  <aside>
+    <div class="skills-head">
+      <h2>当前 Skill</h2>
+      <span class="hint" id="skillCount">0 个</span>
+    </div>
+    <div class="skill-list" id="skillList"></div>
+    <form class="upload" id="uploadForm">
+      <input id="skillNameInput" name="skill_name" type="text" placeholder="Skill 目录名，可选">
+      <input id="skillFileInput" name="file" type="file" accept=".md,.zip">
+      <button class="primary" type="submit">上传 Skill</button>
+      <div class="upload-status" id="uploadStatus"></div>
+    </form>
+  </aside>
+
   <section class="composer">
-    <textarea id="messageInput" placeholder="例如：需要为内网总部 ESB 组件创建 ECS 实例，组织为数字化工作部，资源集为总部ESB组件系统，窗口为 2026年5月25日 18:00 至 20:00，执行人..."></textarea>
+    <textarea id="messageInput" placeholder="例如：请生成一份内网总部 ESB 组件创建 ECS 实例的检修方案。检修窗口、人员、账号、技术参数可以一起粘贴进来。"></textarea>
     <div class="actions">
-      <span class="hint">缺少人员、窗口、账号等关键信息时，助手会继续追问。</span>
+      <span class="hint">发送后会实时显示抽取、检查和生成进度；Ctrl + Enter 可快速发送。</span>
       <button class="primary" id="sendBtn">发送</button>
     </div>
   </section>
@@ -172,7 +277,18 @@ const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('messageInput');
 const sendBtn = document.getElementById('sendBtn');
 const resetBtn = document.getElementById('resetBtn');
+const refreshSkillsBtn = document.getElementById('refreshSkillsBtn');
+const skillListEl = document.getElementById('skillList');
+const skillCountEl = document.getElementById('skillCount');
+const uploadForm = document.getElementById('uploadForm');
+const uploadStatus = document.getElementById('uploadStatus');
+const skillNameInput = document.getElementById('skillNameInput');
+const skillFileInput = document.getElementById('skillFileInput');
 let sessionId = localStorage.getItem('planGeneratorSessionId') || null;
+
+function scrollToBottom() {
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
 
 function addMessage(role, text, extraHtml = '') {
   const div = document.createElement('div');
@@ -184,13 +300,63 @@ function addMessage(role, text, extraHtml = '') {
     div.appendChild(wrap);
   }
   messagesEl.appendChild(div);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  scrollToBottom();
+  return div;
 }
 
 function setBusy(busy) {
   sendBtn.disabled = busy;
   inputEl.disabled = busy;
-  sendBtn.textContent = busy ? '处理中...' : '发送';
+  sendBtn.textContent = busy ? '生成中...' : '发送';
+}
+
+function renderSkills(skills) {
+  skillCountEl.textContent = `${skills.length} 个`;
+  skillListEl.innerHTML = '';
+  if (!skills.length) {
+    skillListEl.innerHTML = '<div class="hint">暂无 Skill</div>';
+    return;
+  }
+  skills.forEach((skill) => {
+    const item = document.createElement('div');
+    item.className = 'skill-item';
+    const name = document.createElement('div');
+    name.className = 'skill-name';
+    name.textContent = skill.name;
+    const desc = document.createElement('div');
+    desc.className = 'skill-desc';
+    desc.textContent = skill.description || '未填写描述';
+    item.appendChild(name);
+    item.appendChild(desc);
+    skillListEl.appendChild(item);
+  });
+}
+
+async function loadSkills() {
+  try {
+    const resp = await fetch('/api/skills');
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '加载失败');
+    renderSkills(data.skills || []);
+  } catch (err) {
+    skillListEl.innerHTML = `<div class="msg error">Skill 加载失败：${err.message}</div>`;
+  }
+}
+
+function parseSseChunk(buffer, onEvent) {
+  const parts = buffer.split('\n\n');
+  const rest = parts.pop();
+  parts.forEach((part) => {
+    let event = 'message';
+    let data = '';
+    part.split('\n').forEach((line) => {
+      if (line.startsWith('event:')) event = line.slice(6).trim();
+      if (line.startsWith('data:')) data += line.slice(5).trim();
+    });
+    if (!data) return;
+    onEvent(event, JSON.parse(data));
+  });
+  return rest;
 }
 
 async function sendMessage() {
@@ -199,21 +365,49 @@ async function sendMessage() {
   addMessage('user', text);
   inputEl.value = '';
   setBusy(true);
+  let statusMsg = null;
   try {
-    const resp = await fetch('/api/chat', {
+    const resp = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId, message: text })
     });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.detail || '请求失败');
-    sessionId = data.session_id;
-    localStorage.setItem('planGeneratorSessionId', sessionId);
-    if (data.status === 'generated') {
-      addMessage('assistant', data.message, `<a class="download" href="${data.download_url}">下载检修方案</a>`);
-    } else {
-      addMessage('assistant', data.message);
+    if (!resp.ok || !resp.body) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || '请求失败');
     }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    const handleEvent = (event, data) => {
+      if (data.session_id) {
+        sessionId = data.session_id;
+        localStorage.setItem('planGeneratorSessionId', sessionId);
+      }
+      if (event === 'status' || event === 'collected') {
+        if (!statusMsg) statusMsg = addMessage('status', data.message || '处理中...');
+        statusMsg.textContent = data.message || '处理中...';
+      } else if (event === 'done') {
+        statusMsg = null;
+        if (data.status === 'generated') {
+          addMessage('assistant', data.message, `<a class="download" href="${data.download_url}">下载检修方案</a>`);
+        } else {
+          addMessage('assistant', data.message);
+        }
+      } else if (event === 'error') {
+        statusMsg = null;
+        addMessage('error', data.message || '处理失败');
+      }
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      buffer = parseSseChunk(buffer, handleEvent);
+    }
+    if (buffer.trim()) parseSseChunk(buffer + '\n\n', handleEvent);
   } catch (err) {
     addMessage('error', '处理失败：' + err.message);
   } finally {
@@ -233,12 +427,37 @@ async function resetChat() {
   sessionId = null;
   localStorage.removeItem('planGeneratorSessionId');
   messagesEl.innerHTML = '';
-  addMessage('assistant', '请粘贴检修需求描述或需求文档。我会先抽取关键信息，缺什么再继续问你；信息齐全后自动生成 Word 检修方案。');
+  addMessage('assistant', '请粘贴检修需求描述或需求文档。我会流式抽取关键信息，缺什么继续问；信息齐全后自动生成 Word 检修方案。');
   inputEl.focus();
 }
 
+uploadForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const file = skillFileInput.files[0];
+  if (!file) {
+    uploadStatus.textContent = '请选择 SKILL.md 或 zip 文件';
+    return;
+  }
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('skill_name', skillNameInput.value.trim());
+  uploadStatus.textContent = '正在上传...';
+  try {
+    const resp = await fetch('/api/skills/upload', { method: 'POST', body: formData });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '上传失败');
+    renderSkills(data.skills || []);
+    uploadStatus.textContent = '上传完成，Skill 已刷新';
+    skillFileInput.value = '';
+    skillNameInput.value = '';
+  } catch (err) {
+    uploadStatus.textContent = '上传失败：' + err.message;
+  }
+});
+
 sendBtn.addEventListener('click', sendMessage);
 resetBtn.addEventListener('click', resetChat);
+refreshSkillsBtn.addEventListener('click', loadSkills);
 inputEl.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
@@ -246,7 +465,8 @@ inputEl.addEventListener('keydown', (event) => {
   }
 });
 
-addMessage('assistant', '请粘贴检修需求描述或需求文档。我会先抽取关键信息，缺什么再继续问你；信息齐全后自动生成 Word 检修方案。');
+addMessage('assistant', '请粘贴检修需求描述或需求文档。我会流式抽取关键信息，缺什么继续问；信息齐全后自动生成 Word 检修方案。');
+loadSkills();
 </script>
 </body>
 </html>
