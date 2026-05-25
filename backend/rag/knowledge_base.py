@@ -82,6 +82,11 @@ class MaintenanceKnowledgeBase:
             documents.extend(await reader(str(path)))
         for path in sorted(self.data_dir.glob("*/references/*.md")):
             documents.extend(await reader(str(path)))
+        knowledge_dir = self.data_dir.parent / "knowledge"
+        if knowledge_dir.exists():
+            for pattern in ("**/*.md", "**/*.txt"):
+                for path in sorted(knowledge_dir.glob(pattern)):
+                    documents.extend(await reader(str(path)))
 
         if documents:
             await self._knowledge.add_documents(documents)
@@ -125,3 +130,9 @@ def get_knowledge_base(data_dir: Path) -> Optional[MaintenanceKnowledgeBase]:
 
     _knowledge_base = knowledge_base
     return _knowledge_base
+
+
+def reset_knowledge_base() -> None:
+    """Clear cached knowledge so new skill/reference files are re-indexed."""
+    global _knowledge_base
+    _knowledge_base = None

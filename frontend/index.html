@@ -388,6 +388,13 @@ async function sendMessage() {
       if (event === 'status' || event === 'collected') {
         if (!statusMsg) statusMsg = addMessage('status', data.message || '处理中...');
         statusMsg.textContent = data.message || '处理中...';
+      } else if (event === 'evidence') {
+        const skills = (data.selected_skills || []).join('、') || '未命中明确 Skill';
+        const ragText = data.rag_enabled
+          ? `RAG 已启用，命中 ${data.rag_chunks_count || 0} 个参考片段`
+          : 'RAG 未启用，当前仅使用 Skill 规则与用户输入';
+        if (!statusMsg) statusMsg = addMessage('status', data.message || '生成依据已准备完成');
+        statusMsg.textContent = `${data.message || '生成依据已准备完成'}\n候选 Skill：${skills}\n${ragText}`;
       } else if (event === 'done') {
         statusMsg = null;
         if (data.status === 'generated') {

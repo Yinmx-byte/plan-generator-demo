@@ -30,7 +30,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from rag import get_knowledge_base
+from rag import get_knowledge_base, reset_knowledge_base
 from skills_runtime import SkillRegistry
 ROOT = Path(__file__).parent
 SKILLS_ROOT = ROOT / "skills"
@@ -104,6 +104,7 @@ def reset_skill_runtime() -> None:
     global _skill_registry, _toolkit
     _skill_registry = None
     _toolkit = None
+    reset_knowledge_base()
 
 
 async def read_file(file_path: str) -> ToolResponse:
@@ -208,6 +209,8 @@ def build_system_prompt() -> str:
 
 遵循 AgentScope Skill 的渐进式披露原则：先根据 Skill 描述判断任务需要哪些 Skill，再通过 read_file 工具读取对应 SKILL.md。
 
+如果用户消息中包含“编排上下文”，其中的候选 Skill 是后端初筛结果，必须优先读取这些 Skill；RAG 参考资料只作为模板、案例、API 约束和风险控制依据，不得覆盖 Skill 的硬性规则。
+
 最终只输出 JSON，不要输出解释文字。JSON 顶层必须包含 document，document.sections 决定 Word 文档结构。"""
 
 
@@ -217,6 +220,106 @@ async def get_agent_knowledge():
     if knowledge_base is None:
         return None
     return await knowledge_base.get_knowledge()
+
+
+def build_state_text(state: dict[str, str]) -> str:
+    return "\n".join(
+        f"{field}: {state.get(field, '')}"
+        for field in FORM_FIELDS
+        if state.get(field, "").strip()
+    )
+
+
+def select_generation_skills(state: dict[str, str]):
+    registry = get_skill_registry()
+    return registry.select_skills(
+        state.get("maintenance_type", ""),
+        build_state_text(state),
+    )
+
+
+def build_selected_skill_context(selected_skills) -> str:
+    if not selected_skills:
+        return "未命中明确候选 Skill，请根据已注册 Skill 自行判断。"
+    lines = [
+        "系统已根据检修类型和需求内容初筛出候选 Skill。你必须优先读取这些 Skill 的 SKILL.md；如判断不充分，再结合已注册 Skill 追加读取。",
+    ]
+    for skill in selected_skills:
+        lines.append(
+            f"- name: {skill.name}\n"
+            f"  description: {skill.description}\n"
+            f"  skill_dir: {skill.path}\n"
+            f"  skill_file: {skill.path / 'SKILL.md'}"
+        )
+    return "\n".join(lines)
+
+
+def build_rag_query(state: dict[str, str], selected_skills) -> str:
+    skill_text = "\n".join(
+        f"{skill.name}: {skill.description}" for skill in selected_skills
+    )
+    return f"""检修方案参考资料检索
+检修类型：{state.get("maintenance_type", "")}
+网络环境：{state.get("network", "")}
+实施地点：{state.get("location", "")}
+涉及实例：{state.get("instances", "")}
+技术参数：{state.get("tech_params", "")}
+补充要求：{state.get("ops_detail", "")}
+候选 Skill：
+{skill_text}
+请检索相似内部模板、阿里云通用检修方案、风险控制、前置检查、实施步骤、回退和验证要求。"""
+
+
+async def retrieve_generation_context(state: dict[str, str], selected_skills) -> list[str]:
+    knowledge_base = get_knowledge_base(SKILLS_ROOT)
+    if knowledge_base is None:
+        return []
+    try:
+        return await knowledge_base.retrieve(
+            build_rag_query(state, selected_skills),
+            top_k=int(os.getenv("PLAN_RAG_TOP_K", os.getenv("RAG_TOP_K", "5"))),
+        )
+    except Exception:
+        return []
+
+
+def build_rag_context(rag_chunks: list[str]) -> str:
+    if not rag_chunks:
+        return "当前未检索到 RAG 参考资料。若后续配置 embedding API 并添加 backend/knowledge 文档，这里会注入内部模板、历史方案和阿里云通用方案片段。"
+    blocks = []
+    max_chars = int(os.getenv("PLAN_RAG_CONTEXT_MAX_CHARS", "6000"))
+    used = 0
+    for idx, chunk in enumerate(rag_chunks, start=1):
+        clean = chunk.strip()
+        if not clean:
+            continue
+        room = max_chars - used
+        if room <= 0:
+            break
+        clean = clean[:room]
+        used += len(clean)
+        blocks.append(f"[RAG-{idx}]\n{clean}")
+    return "\n\n".join(blocks) if blocks else "当前未检索到 RAG 参考资料。"
+
+
+async def build_generation_orchestration_context(state: dict[str, str]) -> dict[str, Any]:
+    selected_skills = select_generation_skills(state)
+    rag_chunks = await retrieve_generation_context(state, selected_skills)
+    return {
+        "selected_skill_names": [skill.name for skill in selected_skills],
+        "rag_enabled": get_knowledge_base(SKILLS_ROOT) is not None,
+        "rag_chunks_count": len(rag_chunks),
+        "prompt_context": (
+            "## 编排上下文：Skill 初筛结果\n"
+            f"{build_selected_skill_context(selected_skills)}\n\n"
+            "## 编排上下文：RAG 参考资料\n"
+            f"{build_rag_context(rag_chunks)}\n\n"
+            "## 使用要求\n"
+            "- Skill 是主规则来源：文档结构、必填章节、风险点、实施步骤和脚本模板优先遵循 Skill。\n"
+            "- RAG 是参考依据：用于补充内部模板措辞、历史方案经验、阿里云通用方案/API 约束，不得覆盖 Skill 的硬性规则。\n"
+            "- 输出 JSON 中建议包含 evidence 字段，记录 selected_skills 和 rag_chunks_count，便于后续审计。\n"
+        ),
+    }
 
 
 def extract_json(text: str) -> dict:
@@ -297,11 +400,14 @@ def build_user_prompt(
     instances: str, schedule_year: str, schedule_start: str, schedule_end: str,
     provider: str, executor: str, reviewer: str, security_officer: str,
     ascm_account: str, bastion_account: str, ops_detail: str, tech_params: str,
+    orchestration_context: str = "",
 ) -> str:
     """Convert form fields into the user task for the Agent."""
     return f"""请根据以下检修需求生成标准化检修方案 JSON。
 
 你必须先根据系统中注册的 Agent Skills 判断需要哪些 Skill，然后使用 read_file 工具读取对应 SKILL.md。若涉及多个检修类型，应组合多个 Skill。
+
+{orchestration_context}
 
 ## 背景与检修事项
 {background}
@@ -535,7 +641,11 @@ async def chat(request: ChatRequest):
             "collected": session["state"],
         }
 
-    file_id, _path, filename = await generate_docx_from_state(session["state"])
+    orchestration = await build_generation_orchestration_context(session["state"])
+    file_id, _path, filename = await generate_docx_from_state(
+        session["state"],
+        orchestration=orchestration,
+    )
     download_url = f"/api/download/{file_id}"
     assistant_message = "关键信息已收集完整，检修方案已生成。"
     session["generated"] = {
@@ -551,6 +661,11 @@ async def chat(request: ChatRequest):
         "download_url": download_url,
         "filename": filename,
         "collected": session["state"],
+        "evidence": {
+            "selected_skills": orchestration["selected_skill_names"],
+            "rag_enabled": orchestration["rag_enabled"],
+            "rag_chunks_count": orchestration["rag_chunks_count"],
+        },
     }
 
 
@@ -615,9 +730,23 @@ async def chat_stream(request: ChatRequest):
 
             yield sse_event(
                 "status",
-                {"session_id": session_id, "message": "信息已完整，正在调用 Skill 生成检修方案..."},
+                {"session_id": session_id, "message": "信息已完整，正在初筛 Skill 并检索 RAG 参考资料..."},
             )
-            file_id, _path, filename = await generate_docx_from_state(session["state"])
+            orchestration = await build_generation_orchestration_context(session["state"])
+            yield sse_event(
+                "evidence",
+                {
+                    "session_id": session_id,
+                    "message": "生成依据已准备完成，正在调用 AgentScope Skill 生成检修方案。",
+                    "selected_skills": orchestration["selected_skill_names"],
+                    "rag_enabled": orchestration["rag_enabled"],
+                    "rag_chunks_count": orchestration["rag_chunks_count"],
+                },
+            )
+            file_id, _path, filename = await generate_docx_from_state(
+                session["state"],
+                orchestration=orchestration,
+            )
             download_url = f"/api/download/{file_id}"
             assistant_message = "关键信息已收集完整，检修方案已生成。"
             session["generated"] = {
@@ -635,6 +764,11 @@ async def chat_stream(request: ChatRequest):
                     "download_url": download_url,
                     "filename": filename,
                     "collected": session["state"],
+                    "evidence": {
+                        "selected_skills": orchestration["selected_skill_names"],
+                        "rag_enabled": orchestration["rag_enabled"],
+                        "rag_chunks_count": orchestration["rag_chunks_count"],
+                    },
                 },
             )
         except HTTPException as exc:
@@ -889,14 +1023,33 @@ async def extract_chat_updates(state: dict[str, str], user_message: str) -> dict
     return data
 
 
-async def generate_docx_from_state(state: dict[str, str]) -> tuple[str, Path, str]:
-    user_prompt = build_user_prompt(**state)
+async def generate_docx_from_state(
+    state: dict[str, str],
+    orchestration: Optional[dict[str, Any]] = None,
+) -> tuple[str, Path, str]:
+    if orchestration is None:
+        orchestration = await build_generation_orchestration_context(state)
+    user_prompt = build_user_prompt(
+        **state,
+        orchestration_context=orchestration["prompt_context"],
+    )
     response = await run_plan_agent(user_prompt)
     text = get_response_text(response)
     data = await repair_and_extract_json(text)
 
     data.setdefault("department", "云运营中心平台运维处")
     data.setdefault("date", datetime.now().strftime("%Y年%m月%d日"))
+    data.setdefault("evidence", {})
+    if isinstance(data["evidence"], dict):
+        data["evidence"].setdefault(
+            "selected_skills",
+            orchestration["selected_skill_names"],
+        )
+        data["evidence"].setdefault("rag_enabled", orchestration["rag_enabled"])
+        data["evidence"].setdefault(
+            "rag_chunks_count",
+            orchestration["rag_chunks_count"],
+        )
 
     doc = build_document(data)
     output_dir = Path(tempfile.gettempdir()) / "plan-generator"
@@ -942,6 +1095,25 @@ async def generate_plan(
 ):
     """接收检修需求，调用 Claude API 生成结构化数据，返回 .docx 文件。"""
     try:
+        state = {
+            "background": background,
+            "maintenance_type": maintenance_type,
+            "network": network,
+            "location": location,
+            "instances": instances,
+            "schedule_year": schedule_year,
+            "schedule_start": schedule_start,
+            "schedule_end": schedule_end,
+            "provider": provider,
+            "executor": executor,
+            "reviewer": reviewer,
+            "security_officer": security_officer,
+            "ascm_account": ascm_account,
+            "bastion_account": bastion_account,
+            "ops_detail": ops_detail,
+            "tech_params": tech_params,
+        }
+        orchestration = await build_generation_orchestration_context(state)
         user_prompt = build_user_prompt(
             background=background, maintenance_type=maintenance_type,
             network=network, location=location, instances=instances,
@@ -950,6 +1122,7 @@ async def generate_plan(
             reviewer=reviewer, security_officer=security_officer,
             ascm_account=ascm_account, bastion_account=bastion_account,
             ops_detail=ops_detail, tech_params=tech_params,
+            orchestration_context=orchestration["prompt_context"],
         )
 
         response = await run_plan_agent(user_prompt)
@@ -959,6 +1132,17 @@ async def generate_plan(
 
         data.setdefault("department", "云运营中心平台运维处")
         data.setdefault("date", datetime.now().strftime("%Y年%m月%d日"))
+        data.setdefault("evidence", {})
+        if isinstance(data["evidence"], dict):
+            data["evidence"].setdefault(
+                "selected_skills",
+                orchestration["selected_skill_names"],
+            )
+            data["evidence"].setdefault("rag_enabled", orchestration["rag_enabled"])
+            data["evidence"].setdefault(
+                "rag_chunks_count",
+                orchestration["rag_chunks_count"],
+            )
 
         doc = build_document(data)
         output_dir = Path(tempfile.gettempdir()) / "plan-generator"
