@@ -147,6 +147,25 @@
     justify-content: space-between;
     gap: 12px;
   }
+  .send-options {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .check-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--text);
+    font-size: 13px;
+    user-select: none;
+  }
+  .check-option input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+  }
   .hint { color: var(--muted); font-size: 12px; }
   aside {
     grid-column: 2;
@@ -156,7 +175,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     display: grid;
-    grid-template-rows: auto 1fr auto auto auto;
+    grid-template-rows: auto 1fr auto auto auto auto;
     overflow: hidden;
   }
   .skills-head {
@@ -209,6 +228,12 @@
     color: var(--muted);
     font-size: 12px;
   }
+  .side-actions {
+    border-top: 1px solid var(--border);
+    padding: 12px;
+    display: grid;
+    gap: 8px;
+  }
   .side-section-title {
     padding: 12px 14px 0;
     font-weight: 700;
@@ -247,6 +272,7 @@
     .header-actions { width: 100%; }
     .header-actions button { flex: 1; }
     .actions { align-items: stretch; flex-direction: column; }
+    .send-options { align-items: flex-start; flex-direction: column; }
     button.primary { width: 100%; }
   }
 </style>
@@ -288,12 +314,22 @@
       <button class="primary" type="submit">上传知识文档</button>
       <div class="upload-status" id="knowledgeUploadStatus"></div>
     </form>
+    <div class="side-actions">
+      <button id="startMcpBtn" type="button">启动 Page Agent</button>
+      <div class="upload-status" id="mcpStatus">Page Agent 会在执行验证时自动启动，也可以先手动启动。</div>
+    </div>
   </aside>
 
   <section class="composer">
     <textarea id="messageInput" placeholder="例如：请生成一份内网总部 ESB 组件创建 ECS 实例的检修方案。检修窗口、人员、账号、技术参数可以一起粘贴进来。"></textarea>
     <div class="actions">
-      <span class="hint">发送后会实时显示抽取、检查和生成进度；Ctrl + Enter 可快速发送。</span>
+      <div class="send-options">
+        <label class="check-option">
+          <input id="executeValidationInput" type="checkbox">
+          <span>生成后执行浏览器验证</span>
+        </label>
+        <span class="hint">验证只做页面/下载链路检查，不执行真实生产变更；Ctrl + Enter 可快速发送。</span>
+      </div>
       <button class="primary" id="sendBtn">发送</button>
     </div>
   </section>
@@ -316,6 +352,9 @@ const knowledgeUploadForm = document.getElementById('knowledgeUploadForm');
 const knowledgeCategoryInput = document.getElementById('knowledgeCategoryInput');
 const knowledgeFileInput = document.getElementById('knowledgeFileInput');
 const knowledgeUploadStatus = document.getElementById('knowledgeUploadStatus');
+const executeValidationInput = document.getElementById('executeValidationInput');
+const startMcpBtn = document.getElementById('startMcpBtn');
+const mcpStatus = document.getElementById('mcpStatus');
 let sessionId = localStorage.getItem('planGeneratorSessionId') || null;
 
 function scrollToBottom() {
@@ -427,7 +466,11 @@ async function sendMessage() {
     const resp = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId, message: text })
+      body: JSON.stringify({
+        session_id: sessionId,
+        message: text,
+        execute_validation: executeValidationInput.checked
+      })
     });
     if (!resp.ok || !resp.body) {
       const data = await resp.json().catch(() => ({}));
@@ -455,7 +498,10 @@ async function sendMessage() {
       } else if (event === 'done') {
         statusMsg = null;
         if (data.status === 'generated') {
-          addMessage('assistant', data.message, `<a class="download" href="${data.download_url}">下载检修方案</a>`);
+          const validationText = data.validation_result
+            ? `\n\nPage Agent 验证结果：\n${data.validation_result}`
+            : '';
+          addMessage('assistant', data.message + validationText, `<a class="download" href="${data.download_url}">下载检修方案</a>`);
         } else {
           addMessage('assistant', data.message);
         }
@@ -539,6 +585,21 @@ knowledgeUploadForm.addEventListener('submit', async (event) => {
     knowledgeFileInput.value = '';
   } catch (err) {
     knowledgeUploadStatus.textContent = '导入失败：' + err.message;
+  }
+});
+
+startMcpBtn.addEventListener('click', async () => {
+  startMcpBtn.disabled = true;
+  mcpStatus.textContent = '正在启动 Page Agent MCP...';
+  try {
+    const resp = await fetch('/api/mcp/start', { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || data.message || '启动失败');
+    mcpStatus.textContent = 'Page Agent 已启动。请在 Chrome 中确认扩展 Hub 已连接。';
+  } catch (err) {
+    mcpStatus.textContent = 'Page Agent 启动失败：' + err.message;
+  } finally {
+    startMcpBtn.disabled = false;
   }
 });
 

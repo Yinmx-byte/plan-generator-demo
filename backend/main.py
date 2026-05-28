@@ -87,6 +87,7 @@ FORM_FIELDS = [
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    execute_validation: bool = False
 
 
 class ChatResetRequest(BaseModel):
@@ -577,6 +578,43 @@ async def run_plan_agent(user_prompt: str):
     return await agent(Msg("user", user_prompt, "user"))
 
 
+async def run_plan_validation_agent(
+    state: dict[str, str],
+    filename: str,
+    download_url: str,
+) -> str:
+    """Use Page Agent MCP to validate the generated plan from a browser."""
+    agent = ReActAgent(
+        name="MaintenancePlanValidator",
+        sys_prompt=(
+            "你是检修方案浏览器验证助手。你只能做只读验证和页面操作验证，"
+            "不得执行任何真实生产变更、删除、重启、扩缩容、创建资源等不可逆操作。"
+            "如果 Page Agent Hub 未连接，直接说明需要在 Chrome 中允许 Page Agent 扩展连接。"
+        ),
+        model=get_model(),
+        formatter=get_formatter(),
+        toolkit=await get_toolkit(),
+        memory=InMemoryMemory(),
+        max_iters=int(os.getenv("VALIDATION_AGENT_MAX_ITERS", "6")),
+    )
+    agent.set_console_output_enabled(False)
+    prompt = f"""请通过 Page Agent MCP 对刚生成的检修方案做浏览器侧验证。
+
+验证范围：
+1. 先调用 Page Agent 状态工具确认浏览器 Hub 是否连接。
+2. 如果已连接，打开 http://127.0.0.1:8000{download_url}，确认检修方案文档可访问或可下载。
+3. 不要执行文档中的真实检修命令，不要登录生产系统，不要进行任何实际资源变更。
+4. 输出验证结论、发现的问题和下一步人工检查建议。
+
+生成文件：{filename}
+检修类型：{state.get("maintenance_type", "")}
+检修背景：{state.get("background", "")}
+涉及实例：{state.get("instances", "")}
+"""
+    response = await agent(Msg("user", prompt, "user"))
+    return get_response_text(response)
+
+
 # ── API 路由 ────────────────────────────────────────────────────
 
 
@@ -637,6 +675,16 @@ async def list_mcp_servers():
             }
         )
     return {"servers": servers, "count": len(servers)}
+
+
+@app.post("/api/mcp/start")
+async def start_mcp_servers():
+    await get_toolkit()
+    return {
+        "status": "ok",
+        "message": "MCP 已启动或已处于可用状态。",
+        "servers": [item.get("name") for item in load_mcp_server_configs()],
+    }
 
 
 @app.get("/api/skills")
@@ -923,6 +971,13 @@ async def chat(request: ChatRequest):
         "filename": filename,
         "download_url": download_url,
     }
+    validation_result = None
+    if request.execute_validation:
+        validation_result = await run_plan_validation_agent(
+            session["state"],
+            filename,
+            download_url,
+        )
     session["history"].append({"role": "assistant", "content": assistant_message})
     return {
         "session_id": session_id,
@@ -930,6 +985,7 @@ async def chat(request: ChatRequest):
         "message": assistant_message,
         "download_url": download_url,
         "filename": filename,
+        "validation_result": validation_result,
         "collected": session["state"],
         "evidence": {
             "selected_skills": orchestration["selected_skill_names"],
@@ -1025,6 +1081,20 @@ async def chat_stream(request: ChatRequest):
                 "download_url": download_url,
             }
             session["history"].append({"role": "assistant", "content": assistant_message})
+            validation_result = None
+            if request.execute_validation:
+                yield sse_event(
+                    "status",
+                    {
+                        "session_id": session_id,
+                        "message": "已生成检修方案，正在通过 Page Agent MCP 执行浏览器侧验证...",
+                    },
+                )
+                validation_result = await run_plan_validation_agent(
+                    session["state"],
+                    filename,
+                    download_url,
+                )
             yield sse_event(
                 "done",
                 {
@@ -1033,6 +1103,7 @@ async def chat_stream(request: ChatRequest):
                     "message": assistant_message,
                     "download_url": download_url,
                     "filename": filename,
+                    "validation_result": validation_result,
                     "collected": session["state"],
                     "evidence": {
                         "selected_skills": orchestration["selected_skill_names"],
