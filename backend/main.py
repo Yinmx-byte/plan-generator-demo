@@ -21,6 +21,7 @@ from agentscope.agent import ReActAgent
 from agentscope.formatter import AnthropicChatFormatter, OpenAIChatFormatter
 from agentscope.memory import InMemoryMemory
 from agentscope.message import Msg, TextBlock
+from agentscope.mcp import HttpStatefulClient, HttpStatelessClient, StdIOStatefulClient
 from agentscope.model import AnthropicChatModel, OpenAIChatModel
 from agentscope.tool import Toolkit, ToolResponse
 from dotenv import load_dotenv
@@ -42,6 +43,7 @@ load_dotenv(ROOT / ".env")
 # ── Skill 注册 ──────────────────────────────────────────────────
 _skill_registry: Optional[SkillRegistry] = None
 _toolkit: Optional[Toolkit] = None
+_mcp_clients: list[Any] = []
 _rag_enabled: bool = False
 _chat_sessions: dict[str, dict[str, Any]] = {}
 _generated_files: dict[str, Path] = {}
@@ -99,9 +101,10 @@ def get_skill_registry() -> SkillRegistry:
     return _skill_registry
 
 
-def reset_skill_runtime() -> None:
+async def reset_skill_runtime() -> None:
     """Reload skill metadata/toolkit after skill files change."""
     global _skill_registry, _toolkit
+    await close_mcp_clients()
     _skill_registry = None
     _toolkit = None
     reset_knowledge_base()
@@ -126,8 +129,111 @@ async def read_file(file_path: str) -> ToolResponse:
     return ToolResponse(content=[TextBlock(type="text", text=content)])
 
 
-def get_toolkit() -> Toolkit:
-    """Create the AgentScope Toolkit with tools and registered Skills."""
+def load_mcp_server_configs() -> list[dict[str, Any]]:
+    config_path = ROOT / "mcp_servers.json"
+    if not config_path.exists():
+        return []
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    servers = config.get("servers", [])
+    if not isinstance(servers, list):
+        raise RuntimeError("mcp_servers.json 中的 servers 必须是数组。")
+    return servers
+
+
+def resolve_backend_path(value: str | None) -> str | None:
+    if not value:
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        path = ROOT / path
+    return str(path.resolve())
+
+
+def build_mcp_env(env_config: dict[str, Any] | None) -> dict[str, str] | None:
+    if not env_config:
+        return None
+    env: dict[str, str] = {}
+    for key, value in env_config.items():
+        if isinstance(value, str) and value.startswith("$"):
+            env[key] = os.getenv(value[1:], "")
+        else:
+            env[key] = str(value)
+    return env
+
+
+async def register_mcp_servers(toolkit: Toolkit) -> list[dict[str, Any]]:
+    """Register configured MCP servers as AgentScope toolkit functions."""
+    global _mcp_clients
+    registered = []
+    for item in load_mcp_server_configs():
+        name = item.get("name")
+        server_type = item.get("type", "http_stateless")
+        if not name:
+            raise RuntimeError("mcp_servers.json 中每个 server 都必须配置 name。")
+
+        if server_type == "http_stateless":
+            client = HttpStatelessClient(
+                name=name,
+                transport=item.get("transport", "streamable_http"),
+                url=item["url"],
+                headers=item.get("headers"),
+                timeout=float(item.get("timeout", 30)),
+                sse_read_timeout=float(item.get("sse_read_timeout", 300)),
+            )
+        elif server_type == "http_stateful":
+            client = HttpStatefulClient(
+                name=name,
+                transport=item.get("transport", "streamable_http"),
+                url=item["url"],
+                headers=item.get("headers"),
+                timeout=float(item.get("timeout", 30)),
+                sse_read_timeout=float(item.get("sse_read_timeout", 300)),
+            )
+            await client.connect()
+            _mcp_clients.append(client)
+        elif server_type == "stdio":
+            client = StdIOStatefulClient(
+                name=name,
+                command=item["command"],
+                args=item.get("args"),
+                env=build_mcp_env(item.get("env")),
+                cwd=resolve_backend_path(item.get("cwd")),
+            )
+            await client.connect()
+            _mcp_clients.append(client)
+        else:
+            raise RuntimeError(f"不支持的 MCP server type: {server_type}")
+
+        await toolkit.register_mcp_client(
+            client,
+            group_name=item.get("group_name", "mcp"),
+            enable_funcs=item.get("enable_funcs"),
+            disable_funcs=item.get("disable_funcs"),
+            preset_kwargs_mapping=item.get("preset_kwargs_mapping"),
+            namesake_strategy=item.get("namesake_strategy", "rename"),
+            execution_timeout=item.get("execution_timeout"),
+        )
+        registered.append(
+            {
+                "name": name,
+                "type": server_type,
+                "group_name": item.get("group_name", "mcp"),
+            }
+        )
+    return registered
+
+
+async def close_mcp_clients() -> None:
+    global _mcp_clients
+    for client in _mcp_clients:
+        close = getattr(client, "close", None)
+        if close:
+            await close(ignore_errors=True)
+    _mcp_clients = []
+
+
+async def get_toolkit() -> Toolkit:
+    """Create the AgentScope Toolkit with tools, Skills and MCP clients."""
     global _toolkit
     if _toolkit is not None:
         return _toolkit
@@ -136,6 +242,7 @@ def get_toolkit() -> Toolkit:
     toolkit.register_tool_function(read_file)
     for skill in get_skill_registry().skills:
         toolkit.register_agent_skill(str(skill.path))
+    await register_mcp_servers(toolkit)
     _toolkit = toolkit
     return _toolkit
 
@@ -451,7 +558,7 @@ async def run_plan_agent(user_prompt: str):
         sys_prompt=build_system_prompt(),
         model=get_model(),
         formatter=get_formatter(),
-        toolkit=get_toolkit(),
+        toolkit=await get_toolkit(),
         memory=InMemoryMemory(),
         knowledge=await get_agent_knowledge(),
         enable_rewrite_query=True,
@@ -471,7 +578,11 @@ async def lifespan(_app: FastAPI):
     print(f"[AgentScope] 已注册 Skills: {[skill.name for skill in registry.skills]}")
     _rag_enabled = get_knowledge_base(SKILLS_ROOT) is not None
     print(f"[AgentScope] RAG enabled: {_rag_enabled}")
-    yield
+    print(f"[AgentScope] MCP servers configured: {[item.get('name') for item in load_mcp_server_configs()]}")
+    try:
+        yield
+    finally:
+        await close_mcp_clients()
 
 
 # ── FastAPI app ─────────────────────────────────────────────────
@@ -492,9 +603,31 @@ async def health():
         "skills_loaded": [skill.name for skill in get_skill_registry().skills],
         "framework": "agentscope",
         "rag_enabled": _rag_enabled,
+        "mcp_servers_configured": len(load_mcp_server_configs()),
         "model_provider": os.getenv("MODEL_PROVIDER", "anthropic"),
         "model_name": os.getenv("MODEL_NAME", "claude-sonnet-4-6"),
     }
+
+
+@app.get("/api/mcp")
+async def list_mcp_servers():
+    servers = []
+    for item in load_mcp_server_configs():
+        servers.append(
+            {
+                "name": item.get("name"),
+                "type": item.get("type", "http_stateless"),
+                "transport": item.get("transport"),
+                "url": item.get("url"),
+                "command": item.get("command"),
+                "args": item.get("args"),
+                "cwd": item.get("cwd"),
+                "group_name": item.get("group_name", "mcp"),
+                "enable_funcs": item.get("enable_funcs"),
+                "disable_funcs": item.get("disable_funcs"),
+            }
+        )
+    return {"servers": servers, "count": len(servers)}
 
 
 @app.get("/api/skills")
@@ -644,7 +777,7 @@ async def upload_skill(
         target_dir.mkdir(parents=True, exist_ok=True)
         (target_dir / "SKILL.md").write_text(text, encoding="utf-8")
 
-    reset_skill_runtime()
+    await reset_skill_runtime()
     return {
         "status": "ok",
         "skills": [

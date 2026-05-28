@@ -1,0 +1,35 @@
+{
+  "servers": [
+    {
+      "name": "aliyun-docs",
+      "type": "http_stateless",
+      "transport": "streamable_http",
+      "url": "http://127.0.0.1:9000/mcp",
+      "group_name": "mcp",
+      "enable_funcs": null,
+      "disable_funcs": [],
+      "timeout": 30,
+      "execution_timeout": 60,
+      "namesake_strategy": "rename"
+    },
+    {
+      "name": "local-script-validator",
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "mcp_servers/local_script_validator.py"
+      ],
+      "cwd": ".",
+      "group_name": "mcp",
+      "enable_funcs": [
+        "validate_script",
+        "run_dry_check"
+      ],
+      "env": {
+        "DASHSCOPE_API_KEY": "$DASHSCOPE_API_KEY"
+      },
+      "execution_timeout": 60,
+      "namesake_strategy": "rename"
+    }
+  ]
+}
