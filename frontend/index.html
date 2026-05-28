@@ -156,7 +156,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     display: grid;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto 1fr auto auto auto;
     overflow: hidden;
   }
   .skills-head {
@@ -208,6 +208,25 @@
     min-height: 18px;
     color: var(--muted);
     font-size: 12px;
+  }
+  .side-section-title {
+    padding: 12px 14px 0;
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .knowledge-list {
+    max-height: 150px;
+    overflow-y: auto;
+    padding: 8px 10px 0;
+  }
+  .knowledge-item {
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    background: #fff;
+    font-size: 12px;
+    word-break: break-word;
   }
   @media (max-width: 900px) {
     .app {
@@ -261,6 +280,14 @@
       <button class="primary" type="submit">上传 Skill</button>
       <div class="upload-status" id="uploadStatus"></div>
     </form>
+    <div class="side-section-title">知识文档</div>
+    <div class="knowledge-list" id="knowledgeList"></div>
+    <form class="upload" id="knowledgeUploadForm">
+      <input id="knowledgeCategoryInput" name="category" type="text" placeholder="分类目录，例如 internal-templates">
+      <input id="knowledgeFileInput" name="file" type="file" accept=".md,.txt,.docx">
+      <button class="primary" type="submit">上传知识文档</button>
+      <div class="upload-status" id="knowledgeUploadStatus"></div>
+    </form>
   </aside>
 
   <section class="composer">
@@ -284,6 +311,11 @@ const uploadForm = document.getElementById('uploadForm');
 const uploadStatus = document.getElementById('uploadStatus');
 const skillNameInput = document.getElementById('skillNameInput');
 const skillFileInput = document.getElementById('skillFileInput');
+const knowledgeListEl = document.getElementById('knowledgeList');
+const knowledgeUploadForm = document.getElementById('knowledgeUploadForm');
+const knowledgeCategoryInput = document.getElementById('knowledgeCategoryInput');
+const knowledgeFileInput = document.getElementById('knowledgeFileInput');
+const knowledgeUploadStatus = document.getElementById('knowledgeUploadStatus');
 let sessionId = localStorage.getItem('planGeneratorSessionId') || null;
 
 function scrollToBottom() {
@@ -340,6 +372,31 @@ async function loadSkills() {
     renderSkills(data.skills || []);
   } catch (err) {
     skillListEl.innerHTML = `<div class="msg error">Skill 加载失败：${err.message}</div>`;
+  }
+}
+
+function renderKnowledge(documents) {
+  knowledgeListEl.innerHTML = '';
+  if (!documents.length) {
+    knowledgeListEl.innerHTML = '<div class="hint">暂无知识文档</div>';
+    return;
+  }
+  documents.forEach((doc) => {
+    const item = document.createElement('div');
+    item.className = 'knowledge-item';
+    item.textContent = `${doc.path} (${Math.ceil(doc.size / 1024)} KB)`;
+    knowledgeListEl.appendChild(item);
+  });
+}
+
+async function loadKnowledge() {
+  try {
+    const resp = await fetch('/api/knowledge');
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '加载失败');
+    renderKnowledge(data.documents || []);
+  } catch (err) {
+    knowledgeListEl.innerHTML = `<div class="msg error">知识文档加载失败：${err.message}</div>`;
   }
 }
 
@@ -462,6 +519,29 @@ uploadForm.addEventListener('submit', async (event) => {
   }
 });
 
+knowledgeUploadForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const file = knowledgeFileInput.files[0];
+  if (!file) {
+    knowledgeUploadStatus.textContent = '请选择 md、txt 或 docx 文件';
+    return;
+  }
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('category', knowledgeCategoryInput.value.trim() || 'uploaded');
+  knowledgeUploadStatus.textContent = '正在导入...';
+  try {
+    const resp = await fetch('/api/knowledge/upload', { method: 'POST', body: formData });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '导入失败');
+    renderKnowledge(data.documents || []);
+    knowledgeUploadStatus.textContent = '导入完成，下一次检索会重建索引';
+    knowledgeFileInput.value = '';
+  } catch (err) {
+    knowledgeUploadStatus.textContent = '导入失败：' + err.message;
+  }
+});
+
 sendBtn.addEventListener('click', sendMessage);
 resetBtn.addEventListener('click', resetChat);
 refreshSkillsBtn.addEventListener('click', loadSkills);
@@ -474,6 +554,7 @@ inputEl.addEventListener('keydown', (event) => {
 
 addMessage('assistant', '请粘贴检修需求描述或需求文档。我会流式抽取关键信息，缺什么继续问；信息齐全后自动生成 Word 检修方案。');
 loadSkills();
+loadKnowledge();
 </script>
 </body>
 </html>

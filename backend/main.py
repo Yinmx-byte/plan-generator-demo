@@ -519,11 +519,75 @@ def safe_skill_dir_name(name: str) -> str:
     return value
 
 
+def safe_relative_dir(name: str) -> str:
+    value = name.strip().replace("\\", "/").strip("/")
+    if not value:
+        return ""
+    parts = [safe_skill_dir_name(part) for part in value.split("/") if part.strip()]
+    return "/".join(parts)
+
+
+def safe_file_stem(name: str) -> str:
+    value = re.sub(r"[^A-Za-z0-9_.\-\u4e00-\u9fff]+", "-", name.strip()).strip(".-")
+    return value or "knowledge"
+
+
 def ensure_within_directory(base: Path, target: Path) -> None:
     base_resolved = base.resolve()
     target_resolved = target.resolve()
     if not str(target_resolved).startswith(str(base_resolved)):
         raise HTTPException(status_code=400, detail="非法文件路径")
+
+
+def docx_to_markdown(raw: bytes) -> str:
+    from docx import Document
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+        tmp.write(raw)
+        tmp_path = Path(tmp.name)
+    try:
+        document = Document(str(tmp_path))
+        lines: list[str] = []
+        for paragraph in document.paragraphs:
+            text = paragraph.text.strip()
+            if text:
+                lines.append(text)
+                lines.append("")
+        for table_idx, table in enumerate(document.tables, start=1):
+            lines.append(f"表格 {table_idx}")
+            rows = []
+            for row in table.rows:
+                rows.append([cell.text.strip().replace("\n", " ") for cell in row.cells])
+            if rows:
+                width = max(len(row) for row in rows)
+                normalized = [row + [""] * (width - len(row)) for row in rows]
+                lines.append("| " + " | ".join(normalized[0]) + " |")
+                lines.append("| " + " | ".join(["---"] * width) + " |")
+                for row in normalized[1:]:
+                    lines.append("| " + " | ".join(row) + " |")
+                lines.append("")
+        return "\n".join(lines).strip() + "\n"
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def list_knowledge_documents() -> list[dict[str, Any]]:
+    knowledge_root = ROOT / "knowledge"
+    if not knowledge_root.exists():
+        return []
+    docs = []
+    for path in sorted([*knowledge_root.glob("**/*.md"), *knowledge_root.glob("**/*.txt")]):
+        if path.name == ".gitkeep":
+            continue
+        docs.append(
+            {
+                "name": path.name,
+                "path": str(path.relative_to(knowledge_root)),
+                "size": path.stat().st_size,
+                "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
+            }
+        )
+    return docs
 
 
 @app.post("/api/skills/upload")
@@ -591,6 +655,70 @@ async def upload_skill(
             }
             for skill in get_skill_registry().skills
         ],
+    }
+
+
+@app.get("/api/knowledge")
+async def list_knowledge():
+    return {
+        "documents": list_knowledge_documents(),
+        "supported_extensions": [".md", ".txt", ".docx"],
+        "rag_enabled": get_knowledge_base(SKILLS_ROOT) is not None,
+        "chunk_size": int(os.getenv("RAG_CHUNK_SIZE", "800")),
+        "split_by": os.getenv("RAG_SPLIT_BY", "paragraph"),
+        "top_k": int(os.getenv("RAG_TOP_K", "5")),
+        "score_threshold": os.getenv("RAG_SCORE_THRESHOLD"),
+    }
+
+
+@app.post("/api/knowledge/upload")
+async def upload_knowledge(
+    file: UploadFile = File(...),
+    category: str = Form(default="uploaded"),
+):
+    filename = file.filename or ""
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".md", ".txt", ".docx"}:
+        raise HTTPException(status_code=400, detail="仅支持 .md、.txt、.docx 知识文档")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="上传文件为空")
+
+    knowledge_root = ROOT / "knowledge"
+    target_dir = knowledge_root / safe_relative_dir(category or "uploaded")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    ensure_within_directory(knowledge_root, target_dir)
+
+    if suffix == ".docx":
+        content = docx_to_markdown(raw)
+        target_path = target_dir / f"{safe_file_stem(Path(filename).stem)}.md"
+    else:
+        content = raw.decode("utf-8")
+        target_path = target_dir / f"{safe_file_stem(Path(filename).stem)}{suffix}"
+    ensure_within_directory(knowledge_root, target_path)
+    target_path.write_text(content, encoding="utf-8")
+
+    reset_knowledge_base()
+    return {
+        "status": "ok",
+        "path": str(target_path.relative_to(knowledge_root)),
+        "documents": list_knowledge_documents(),
+    }
+
+
+@app.post("/api/rag/reindex")
+async def reindex_rag():
+    reset_knowledge_base()
+    knowledge_base = get_knowledge_base(SKILLS_ROOT)
+    if knowledge_base is None:
+        return {
+            "status": "disabled",
+            "message": "RAG 未启用：请配置 OPENAI_API_KEY 或 EMBEDDING_API_KEY。",
+        }
+    await knowledge_base.get_knowledge()
+    return {
+        "status": "ok",
+        "documents": list_knowledge_documents(),
     }
 
 

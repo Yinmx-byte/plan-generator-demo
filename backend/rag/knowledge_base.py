@@ -105,9 +105,11 @@ class MaintenanceKnowledgeBase:
         if not query.strip():
             return []
         knowledge = await self.get_knowledge()
+        score_threshold = os.getenv("RAG_SCORE_THRESHOLD")
         docs = await knowledge.retrieve(
             query=query,
             limit=top_k or self.similarity_top_k,
+            score_threshold=float(score_threshold) if score_threshold else None,
         )
         return [str(doc.metadata.content.get("text", "")) for doc in docs]
 
