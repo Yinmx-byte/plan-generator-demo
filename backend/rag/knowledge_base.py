@@ -89,7 +89,9 @@ class MaintenanceKnowledgeBase:
                     documents.extend(await reader(str(path)))
 
         if documents:
-            await self._knowledge.add_documents(documents)
+            batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "10"))
+            for idx in range(0, len(documents), batch_size):
+                await self._knowledge.add_documents(documents[idx : idx + batch_size])
         self._indexed = True
 
     async def get_knowledge(self) -> SimpleKnowledge:
