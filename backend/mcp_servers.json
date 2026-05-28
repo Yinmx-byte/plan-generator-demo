@@ -1,3 +1,27 @@
 {
-  "servers": []
+  "servers": [
+    {
+      "name": "page-agent",
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "D:\\develop\\page-agent\\packages\\mcp\\src\\index.js"
+      ],
+      "cwd": "D:\\develop\\page-agent",
+      "group_name": "mcp",
+      "enable_funcs": [
+        "execute_task",
+        "get_status",
+        "stop_task"
+      ],
+      "env": {
+        "LLM_BASE_URL": "$LLM_BASE_URL",
+        "LLM_API_KEY": "$LLM_API_KEY",
+        "LLM_MODEL_NAME": "$LLM_MODEL_NAME",
+        "PORT": "$PAGE_AGENT_PORT"
+      },
+      "execution_timeout": 120,
+      "namesake_strategy": "rename"
+    }
+  ]
 }

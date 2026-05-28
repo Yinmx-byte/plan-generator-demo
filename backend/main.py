@@ -204,9 +204,18 @@ async def register_mcp_servers(toolkit: Toolkit) -> list[dict[str, Any]]:
         else:
             raise RuntimeError(f"不支持的 MCP server type: {server_type}")
 
+        group_name = item.get("group_name", "mcp")
+        if group_name != "basic" and group_name not in toolkit.groups:
+            toolkit.create_tool_group(
+                group_name=group_name,
+                description=f"MCP tools from {name}",
+                active=True,
+                notes="Use these tools only when the task needs external MCP capabilities.",
+            )
+
         await toolkit.register_mcp_client(
             client,
-            group_name=item.get("group_name", "mcp"),
+            group_name=group_name,
             enable_funcs=item.get("enable_funcs"),
             disable_funcs=item.get("disable_funcs"),
             preset_kwargs_mapping=item.get("preset_kwargs_mapping"),
@@ -217,7 +226,7 @@ async def register_mcp_servers(toolkit: Toolkit) -> list[dict[str, Any]]:
             {
                 "name": name,
                 "type": server_type,
-                "group_name": item.get("group_name", "mcp"),
+                "group_name": group_name,
             }
         )
     return registered
