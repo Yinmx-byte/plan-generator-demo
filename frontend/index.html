@@ -234,6 +234,15 @@
     display: grid;
     gap: 8px;
   }
+  .side-actions textarea {
+    min-height: 76px;
+    font-size: 13px;
+  }
+  .side-actions .button-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
   .side-section-title {
     padding: 12px 14px 0;
     font-weight: 700;
@@ -315,8 +324,12 @@
       <div class="upload-status" id="knowledgeUploadStatus"></div>
     </form>
     <div class="side-actions">
-      <button id="startMcpBtn" type="button">启动 Page Agent</button>
-      <div class="upload-status" id="mcpStatus">Page Agent 会在执行验证时自动启动，也可以先手动启动。</div>
+      <textarea id="pageAgentTaskInput" placeholder="例如：打开 https://www.baidu.com 并告诉我页面标题"></textarea>
+      <div class="button-row">
+        <button id="startMcpBtn" type="button">启动 Page Agent</button>
+        <button id="runPageAgentBtn" type="button">执行测试</button>
+      </div>
+      <div class="upload-status" id="mcpStatus">可先启动 Page Agent，再输入一条浏览器自动化指令测试效果。</div>
     </div>
   </aside>
 
@@ -354,6 +367,8 @@ const knowledgeFileInput = document.getElementById('knowledgeFileInput');
 const knowledgeUploadStatus = document.getElementById('knowledgeUploadStatus');
 const executeValidationInput = document.getElementById('executeValidationInput');
 const startMcpBtn = document.getElementById('startMcpBtn');
+const runPageAgentBtn = document.getElementById('runPageAgentBtn');
+const pageAgentTaskInput = document.getElementById('pageAgentTaskInput');
 const mcpStatus = document.getElementById('mcpStatus');
 let sessionId = localStorage.getItem('planGeneratorSessionId') || null;
 
@@ -600,6 +615,32 @@ startMcpBtn.addEventListener('click', async () => {
     mcpStatus.textContent = 'Page Agent 启动失败：' + err.message;
   } finally {
     startMcpBtn.disabled = false;
+  }
+});
+
+runPageAgentBtn.addEventListener('click', async () => {
+  const task = pageAgentTaskInput.value.trim();
+  if (!task) {
+    mcpStatus.textContent = '请输入一条 Page Agent 测试指令';
+    return;
+  }
+  runPageAgentBtn.disabled = true;
+  mcpStatus.textContent = 'Page Agent 正在执行测试指令...';
+  try {
+    const resp = await fetch('/api/page-agent/task', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || data.message || '执行失败');
+    mcpStatus.textContent = 'Page Agent 执行完成';
+    addMessage('assistant', `Page Agent 测试结果：\n${data.result || '无返回内容'}`);
+  } catch (err) {
+    mcpStatus.textContent = 'Page Agent 执行失败：' + err.message;
+    addMessage('error', 'Page Agent 执行失败：' + err.message);
+  } finally {
+    runPageAgentBtn.disabled = false;
   }
 });
 

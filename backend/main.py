@@ -12,6 +12,7 @@ import re
 import tempfile
 import uuid
 import zipfile
+import inspect
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -92,6 +93,10 @@ class ChatRequest(BaseModel):
 
 class ChatResetRequest(BaseModel):
     session_id: str
+
+
+class PageAgentTaskRequest(BaseModel):
+    task: str
 
 
 def get_skill_registry() -> SkillRegistry:
@@ -615,6 +620,43 @@ async def run_plan_validation_agent(
     return get_response_text(response)
 
 
+def tool_response_text(response: ToolResponse) -> str:
+    parts = []
+    for block in response.content:
+        text = getattr(block, "text", None)
+        if text is None and isinstance(block, dict):
+            text = block.get("text")
+        if text:
+            parts.append(str(text))
+    return "\n".join(parts).strip()
+
+
+async def run_page_agent_task(task: str) -> str:
+    task = task.strip()
+    if not task:
+        raise HTTPException(status_code=400, detail="请输入 Page Agent 测试指令")
+    toolkit = await get_toolkit()
+    tool_name = "execute_task"
+    if tool_name not in toolkit.tools:
+        raise HTTPException(
+            status_code=503,
+            detail="Page Agent MCP 工具未注册，请检查 backend/mcp_servers.json。",
+        )
+    tool_call = {
+        "type": "tool_use",
+        "id": uuid.uuid4().hex,
+        "name": tool_name,
+        "input": {"task": task},
+    }
+    result = ""
+    tool_result = toolkit.call_tool_function(tool_call)
+    if inspect.isawaitable(tool_result):
+        tool_result = await tool_result
+    async for chunk in tool_result:
+        result = tool_response_text(chunk) or result
+    return result or "Page Agent 执行完成，但未返回文本结果。"
+
+
 # ── API 路由 ────────────────────────────────────────────────────
 
 
@@ -684,6 +726,14 @@ async def start_mcp_servers():
         "status": "ok",
         "message": "MCP 已启动或已处于可用状态。",
         "servers": [item.get("name") for item in load_mcp_server_configs()],
+    }
+
+
+@app.post("/api/page-agent/task")
+async def execute_page_agent_task(request: PageAgentTaskRequest):
+    return {
+        "status": "ok",
+        "result": await run_page_agent_task(request.task),
     }
 
 
