@@ -250,6 +250,13 @@ input:focus {
   border-bottom: 1px solid var(--line);
   background: var(--panel-warm);
 }
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .eyebrow {
   margin: 0 0 3px;
   font-size: 11px;
@@ -365,6 +372,45 @@ input:focus {
   padding: 16px;
   display: grid;
   gap: 10px;
+}
+.modal {
+  width: min(520px, calc(100vw - 32px));
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+}
+.modal::backdrop {
+  background: rgba(23, 33, 47, 0.42);
+  backdrop-filter: blur(4px);
+}
+.modal-card {
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.modal-card h3 {
+  margin: 0;
+}
+.modal-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+button.ghost {
+  min-height: 32px;
+  background: transparent;
 }
 .tool-card p {
   margin: -4px 0 2px;

@@ -39,7 +39,7 @@ SKILLS_ROOT = ROOT / "skills"
 
 from scripts.generate_plan import build_document
 
-load_dotenv(ROOT / ".env")
+load_dotenv(ROOT / ".env", override=True)
 
 # ── Skill 注册 ──────────────────────────────────────────────────
 _skill_registry: Optional[SkillRegistry] = None
@@ -269,8 +269,8 @@ _model: Optional[AnthropicChatModel | OpenAIChatModel] = None
 def get_model() -> AnthropicChatModel | OpenAIChatModel:
     global _model
     if _model is None:
-        provider = os.getenv("MODEL_PROVIDER", "anthropic").lower()
-        model_name = os.getenv("MODEL_NAME", "claude-sonnet-4-6")
+        provider = os.getenv("MODEL_PROVIDER", "deepseek").lower()
+        model_name = os.getenv("MODEL_NAME", "deepseek-v4-pro")
         client_kwargs = {}
 
         if provider == "anthropic":
@@ -319,7 +319,7 @@ def get_model() -> AnthropicChatModel | OpenAIChatModel:
 
 
 def get_formatter():
-    provider = os.getenv("MODEL_PROVIDER", "anthropic").lower()
+    provider = os.getenv("MODEL_PROVIDER", "deepseek").lower()
     if provider in {"openai", "deepseek"}:
         return OpenAIChatFormatter()
     return AnthropicChatFormatter()
@@ -693,8 +693,8 @@ async def health():
         "framework": "agentscope",
         "rag_enabled": _rag_enabled,
         "mcp_servers_configured": len(load_mcp_server_configs()),
-        "model_provider": os.getenv("MODEL_PROVIDER", "anthropic"),
-        "model_name": os.getenv("MODEL_NAME", "claude-sonnet-4-6"),
+        "model_provider": os.getenv("MODEL_PROVIDER", "deepseek"),
+        "model_name": os.getenv("MODEL_NAME", "deepseek-v4-pro"),
     }
 
 

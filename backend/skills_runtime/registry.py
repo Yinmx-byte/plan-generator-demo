@@ -90,6 +90,20 @@ class SkillRegistry:
             selected.append(common)
 
         route_rules = [
+            (
+                "ecs-lifecycle-maintenance",
+                ["ecs", "云服务器", "创建ecs", "创建 ecs", "回收ecs", "回收 ecs", "ecs升配", "ecs 升配", "ecs降配", "维护性重启"],
+            ),
+            (
+                "k8s-worker-maintenance",
+                ["k8s", "kubernetes", "worker", "edas", "oam", "集群", "节点"],
+            ),
+            ("mq-maintenance-plan", ["mq", "rocketmq", "groupid", "gid", "topic", "队列"]),
+            ("oss-maintenance-plan", ["oss", "bucket", "对象存储"]),
+            ("polardb-maintenance-plan", ["polardb", "只读实例", "读写分离"]),
+            ("rds-maintenance-plan", ["rds", "drds", "mysql", "参数调整"]),
+            ("redis-maintenance-plan", ["redis", "缓存"]),
+            ("slb-maintenance-plan", ["slb", "负载均衡", "监听", "后端服务器组", "ipv6"]),
             ("ecs-instance-provisioning", ["ecs", "云服务器", "创建实例", "实例创建"]),
             ("database-maintenance-plan", ["polardb", "mongodb", "mysql", "数据库", "白名单"]),
             ("component-scaling-plan", ["扩容", "缩容", "扩缩容", "规格", "变更配置"]),

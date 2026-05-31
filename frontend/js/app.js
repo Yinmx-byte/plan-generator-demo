@@ -219,11 +219,18 @@ function initPlanPage() {
 function initSkillsPage() {
   const uploadForm = document.getElementById('uploadForm');
   const uploadStatus = document.getElementById('uploadStatus');
+  const uploadDialog = document.getElementById('skillUploadDialog');
+  const openUploadBtn = document.getElementById('openSkillUploadBtn');
   const skillNameInput = document.getElementById('skillNameInput');
   const skillFileInput = document.getElementById('skillFileInput');
   loadSkills();
+  openUploadBtn.addEventListener('click', () => uploadDialog.showModal());
   uploadForm.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (event.submitter?.value === 'cancel') {
+      uploadDialog.close();
+      return;
+    }
     const file = skillFileInput.files[0];
     if (!file) {
       uploadStatus.textContent = '请选择 SKILL.md 或 zip 文件';
@@ -240,6 +247,7 @@ function initSkillsPage() {
       uploadStatus.textContent = '上传完成，Skill 已刷新';
       skillFileInput.value = '';
       skillNameInput.value = '';
+      uploadDialog.close();
       await loadSkills();
     } catch (err) {
       uploadStatus.textContent = '上传失败：' + err.message;
@@ -249,14 +257,21 @@ function initSkillsPage() {
 
 function initKnowledgePage() {
   const form = document.getElementById('knowledgeUploadForm');
+  const uploadDialog = document.getElementById('knowledgeUploadDialog');
+  const openUploadBtn = document.getElementById('openKnowledgeUploadBtn');
   const categoryInput = document.getElementById('knowledgeCategoryInput');
   const fileInput = document.getElementById('knowledgeFileInput');
   const statusEl = document.getElementById('knowledgeUploadStatus');
   const reindexBtn = document.getElementById('reindexBtn');
   loadKnowledge();
+  openUploadBtn.addEventListener('click', () => uploadDialog.showModal());
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (event.submitter?.value === 'cancel') {
+      uploadDialog.close();
+      return;
+    }
     const file = fileInput.files[0];
     if (!file) {
       statusEl.textContent = '请选择 md、txt 或 docx 文件';
@@ -272,6 +287,7 @@ function initKnowledgePage() {
       if (!resp.ok) throw new Error(data.detail || '导入失败');
       statusEl.textContent = '导入完成，下一次检索会重建索引';
       fileInput.value = '';
+      uploadDialog.close();
       await loadKnowledge();
     } catch (err) {
       statusEl.textContent = '导入失败：' + err.message;

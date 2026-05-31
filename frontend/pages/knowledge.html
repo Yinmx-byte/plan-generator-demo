@@ -5,17 +5,30 @@
         <p class="eyebrow">RAG Knowledge</p>
         <h3>知识文档</h3>
       </div>
-      <button id="reindexBtn" type="button">重建索引</button>
+      <div class="panel-actions">
+        <button id="openKnowledgeUploadBtn" type="button">上传文档</button>
+        <button id="reindexBtn" type="button">重建索引</button>
+      </div>
     </div>
     <div class="item-grid" id="knowledgeList"></div>
   </div>
 
-  <form class="tool-card" id="knowledgeUploadForm">
-    <h3>导入文档</h3>
+  <div class="tool-card">
+    <h3>内容放置建议</h3>
+    <p>历史方案、阿里云 API 文档、同类措辞和具体系统案例适合放入知识库；稳定步骤和硬性规则应放入 Skill。</p>
+    <div class="status-text" id="knowledgeUploadStatus"></div>
+  </div>
+</section>
+
+<dialog class="modal" id="knowledgeUploadDialog">
+  <form class="modal-card" id="knowledgeUploadForm">
+    <div class="modal-head">
+      <h3>导入知识文档</h3>
+      <button class="ghost" value="cancel" formmethod="dialog" type="submit">关闭</button>
+    </div>
     <p>支持 md、txt、docx。docx 会转换成 Markdown 后进入知识库。</p>
     <input id="knowledgeCategoryInput" name="category" type="text" placeholder="分类目录，例如 internal-templates">
     <input id="knowledgeFileInput" name="file" type="file" accept=".md,.txt,.docx">
-    <button class="primary" type="submit">上传知识文档</button>
-    <div class="status-text" id="knowledgeUploadStatus"></div>
+    <button class="primary" type="submit">确认上传</button>
   </form>
-</section>
+</dialog>

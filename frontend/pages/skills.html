@@ -5,17 +5,30 @@
         <p class="eyebrow">AgentScope Skill</p>
         <h3>Skill 管理</h3>
       </div>
-      <span class="pill" id="skillCount">0 个</span>
+      <div class="panel-actions">
+        <span class="pill" id="skillCount">0 个</span>
+        <button id="openSkillUploadBtn" type="button">上传 Skill</button>
+      </div>
     </div>
     <div class="item-grid" id="skillList"></div>
   </div>
 
-  <form class="tool-card" id="uploadForm">
-    <h3>上传 Skill</h3>
+  <div class="tool-card">
+    <h3>设计原则</h3>
+    <p>Skill 只放稳定规则、资源字段、步骤模板和风险约束；历史方案原文和同类措辞交给 RAG。</p>
+    <div class="status-text" id="uploadStatus"></div>
+  </div>
+</section>
+
+<dialog class="modal" id="skillUploadDialog">
+  <form class="modal-card" id="uploadForm">
+    <div class="modal-head">
+      <h3>上传 Skill</h3>
+      <button class="ghost" value="cancel" formmethod="dialog" type="submit">关闭</button>
+    </div>
     <p>支持单个 SKILL.md，或包含 SKILL.md 的 zip 包。</p>
     <input id="skillNameInput" name="skill_name" type="text" placeholder="Skill 目录名，可选">
     <input id="skillFileInput" name="file" type="file" accept=".md,.zip">
-    <button class="primary" type="submit">上传 Skill</button>
-    <div class="status-text" id="uploadStatus"></div>
+    <button class="primary" type="submit">确认上传</button>
   </form>
-</section>
+</dialog>
