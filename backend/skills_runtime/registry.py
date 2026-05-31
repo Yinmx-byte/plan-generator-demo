@@ -85,6 +85,10 @@ class SkillRegistry:
         query = f"{maintenance_type}\n{user_text}".lower()
         selected = []
 
+        workflow = self.get("maintenance-plan-workflow")
+        if workflow:
+            selected.append(workflow)
+
         common = self.get("maintenance-plan-composer")
         if common:
             selected.append(common)
