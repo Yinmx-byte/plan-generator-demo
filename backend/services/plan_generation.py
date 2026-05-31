@@ -497,6 +497,15 @@ personnel, risks, steps, rollback content, scripts, or other parts explicitly re
 
 你必须先根据系统中注册的 Agent Skills 判断需要哪些 Skill，然后使用 read_file 工具读取对应 SKILL.md。若涉及多个检修类型，应组合多个 Skill。
 
+输出结构硬性要求：
+- 顶层必须包含 document 对象。
+- document.sections 中每个章节必须包含 blocks 数组，正文、表格、复选框、步骤都必须写入 blocks。
+- 不要只输出 heading/title/content；只有标题没有 blocks 的章节会被判定为无效格式。
+- 表格必须使用 {"type": "table", "columns": [...], "rows": [...]}。
+- 段落必须使用 {"type": "paragraph", "text": "..."}；多段正文可使用 {"type": "paragraphs", "items": [...]}。
+- 步骤必须使用 {"type": "numbered_list", "items": [...]}。
+- 检修方案必须至少包含实施计划表或参数表，不允许全部正文都是普通段落。
+
 {orchestration_context}
 {edit_context}
 
@@ -576,6 +585,31 @@ def count_document_body_blocks(data: dict[str, Any]) -> int:
     return sum(count_blocks(section) for section in sections)
 
 
+def document_format_stats(data: dict[str, Any]) -> dict[str, int]:
+    """Count canonical render blocks before accepting a model document spec."""
+    spec = data.get("document")
+    stats = {"typed_blocks": 0, "tables": 0, "sections": 0}
+    if not isinstance(spec, dict):
+        return stats
+
+    def visit_section(section: Any) -> None:
+        if not isinstance(section, dict):
+            return
+        stats["sections"] += 1
+        for block in section.get("blocks") or []:
+            if not isinstance(block, dict) or "type" not in block:
+                continue
+            stats["typed_blocks"] += 1
+            if block.get("type") == "table":
+                stats["tables"] += 1
+        for child in section.get("children") or section.get("subsections") or []:
+            visit_section(child)
+
+    for section in spec.get("sections") or spec.get("chapters") or []:
+        visit_section(section)
+    return stats
+
+
 def docx_to_markdown(raw: bytes) -> str:
     from docx import Document
 
@@ -631,15 +665,24 @@ async def generate_docx_from_state(
         write_model_output_debug(text)
         data = build_fallback_plan_data(state, orchestration, text)
     else:
+        format_stats = document_format_stats(data)
+        fallback_reason = ""
         if count_document_body_blocks(data) < 3:
+            fallback_reason = "model_document_had_too_few_body_blocks"
+        elif isinstance(data.get("document"), dict) and (
+            format_stats["typed_blocks"] < 8 or format_stats["tables"] < 1
+        ):
+            fallback_reason = "model_document_was_not_canonical_template_format"
+
+        if fallback_reason:
             debug_path = write_model_output_debug(
                 json.dumps(data, ensure_ascii=False, indent=2),
-                prefix="empty_plan_model_output",
+                prefix="invalid_plan_model_output",
             )
             data = build_fallback_plan_data(state, orchestration, text)
             data.setdefault("evidence", {})
             if isinstance(data["evidence"], dict):
-                data["evidence"]["fallback_reason"] = "model_document_had_too_few_body_blocks"
+                data["evidence"]["fallback_reason"] = fallback_reason
                 data["evidence"]["debug_path"] = str(debug_path)
 
     data.setdefault("department", "云运营中心平台运维处")
