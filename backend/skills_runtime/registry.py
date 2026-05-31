@@ -104,7 +104,6 @@ class SkillRegistry:
             ("rds-maintenance-plan", ["rds", "drds", "mysql", "参数调整"]),
             ("redis-maintenance-plan", ["redis", "缓存"]),
             ("slb-maintenance-plan", ["slb", "负载均衡", "监听", "后端服务器组", "ipv6"]),
-            ("ecs-instance-provisioning", ["ecs", "云服务器", "创建实例", "实例创建"]),
             ("database-maintenance-plan", ["polardb", "mongodb", "mysql", "数据库", "白名单"]),
             ("component-scaling-plan", ["扩容", "缩容", "扩缩容", "规格", "变更配置"]),
             ("restart-maintenance-plan", ["重启", "维护性重启", "k8s", "节点"]),

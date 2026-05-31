@@ -18,6 +18,9 @@ from docx.oxml.ns import nsdecls, qn
 from docx.shared import Cm, Pt
 
 
+DEFAULT_LOGO_PATH = Path(__file__).resolve().parents[1] / "assets" / "state_grid_logo.jpeg"
+
+
 ALIGNMENTS = {
     "left": WD_ALIGN_PARAGRAPH.LEFT,
     "center": WD_ALIGN_PARAGRAPH.CENTER,
@@ -188,25 +191,58 @@ def render_block(doc, block: dict[str, Any]):
 
 def render_document(doc, spec: dict[str, Any]):
     title = spec.get("title", "检修方案")
-    add_paragraph(
-        doc,
-        title,
-        bold=True,
-        font_size=int(spec.get("title_font_size", 18)),
-        alignment=WD_ALIGN_PARAGRAPH.CENTER,
-        space_after=12,
-    )
-
-    for line in spec.get("header", []):
-        if isinstance(line, str):
-            line = {"text": line}
+    cover = spec.get("cover", {})
+    if cover is not False:
+        logo_path = Path(cover.get("logo_path") or DEFAULT_LOGO_PATH)
+        if logo_path.exists():
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            run = p.add_run()
+            run.add_picture(str(logo_path), width=Cm(float(cover.get("logo_width_cm", 3.1))))
+        for _ in range(int(cover.get("top_spacers", 7))):
+            add_paragraph(doc, "", space_after=6)
         add_paragraph(
             doc,
-            line.get("text", ""),
-            font_size=int(line.get("font_size", 12)),
-            alignment=ALIGNMENTS.get(line.get("align", "center")),
-            space_after=int(line.get("space_after", 6)),
+            title,
+            bold=True,
+            font_size=int(spec.get("title_font_size", cover.get("title_font_size", 18))),
+            alignment=WD_ALIGN_PARAGRAPH.CENTER,
+            space_after=12,
         )
+        for _ in range(int(cover.get("middle_spacers", 8))):
+            add_paragraph(doc, "", space_after=6)
+        header = spec.get("header", [])
+        for line in header:
+            if isinstance(line, str):
+                line = {"text": line}
+            add_paragraph(
+                doc,
+                line.get("text", ""),
+                font_size=int(line.get("font_size", 12)),
+                alignment=ALIGNMENTS.get(line.get("align", "center")),
+                space_after=int(line.get("space_after", 6)),
+            )
+        doc.add_page_break()
+    else:
+        add_paragraph(
+            doc,
+            title,
+            bold=True,
+            font_size=int(spec.get("title_font_size", 18)),
+            alignment=WD_ALIGN_PARAGRAPH.CENTER,
+            space_after=12,
+        )
+
+        for line in spec.get("header", []):
+            if isinstance(line, str):
+                line = {"text": line}
+            add_paragraph(
+                doc,
+                line.get("text", ""),
+                font_size=int(line.get("font_size", 12)),
+                alignment=ALIGNMENTS.get(line.get("align", "center")),
+                space_after=int(line.get("space_after", 6)),
+            )
 
     for section in spec.get("sections", []):
         heading = section.get("heading")
