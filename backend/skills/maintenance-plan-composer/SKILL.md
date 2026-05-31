@@ -147,3 +147,235 @@ version: 0.4.0
 - RAG 只用于补充历史方案原文、真实系统名、组织、资源集、账号、产品参数、历史操作措辞。
 - Skill 与 RAG 冲突时，以 Skill 的硬性规则为准。
 
+## Word 渲染 JSON 格式契约
+
+生成方案时必须直接输出可被 `build_document` 渲染的 JSON。格式是方案的一部分，不允许自由发挥。
+
+### 顶层结构
+
+最终 JSON 必须包含：
+
+```json
+{
+  "title": "内网总部ESB组件创建ECS实例检修方案",
+  "department": "云运营中心平台运维处",
+  "date": "2026年05月31日",
+  "document": {
+    "title": "内网总部ESB组件创建ECS实例检修方案",
+    "cover": {
+      "logo_width_cm": 3.1,
+      "top_spacers": 7,
+      "middle_spacers": 8
+    },
+    "header": [
+      {"text": "云运营中心平台运维处", "font_size": 14, "align": "center"},
+      {"text": "2026年05月31日", "font_size": 12, "align": "center"}
+    ],
+    "sections": []
+  }
+}
+```
+
+### Section 规则
+
+`document.sections` 中每个章节必须使用：
+
+```json
+{
+  "heading": "背景",
+  "level": 1,
+  "blocks": []
+}
+```
+
+禁止只写：
+
+```json
+{"heading": "背景", "content": "..."}
+```
+
+禁止只输出标题没有 `blocks`。所有正文、表格、复选框、步骤都必须放进 `blocks`。
+
+### Block 类型
+
+只能使用下列 block 类型。
+
+#### 标题块
+
+用于 `4.1`、`5.1`、`6.1` 等小节：
+
+```json
+{"type": "heading", "level": 2, "text": "6.1备份"}
+```
+
+#### 普通段落
+
+```json
+{"type": "paragraph", "text": "内网总部ESB组件创建ECS实例不涉及备份。", "first_line_indent": 0.74}
+```
+
+#### 多段正文
+
+```json
+{
+  "type": "paragraphs",
+  "items": [
+    "授权不当危险点：授权过大，导致操作影响预定方案以外的生产环境实例。",
+    "验证不当危险点：ECS操作对象、组织、资源集、VPC、VSwitch、安全组、镜像、规格、IP地址余量未核实清楚，导致创建失败或业务不可达。"
+  ]
+}
+```
+
+#### 编号步骤
+
+用于实施步骤和回滚步骤：
+
+```json
+{
+  "type": "numbered_list",
+  "items": [
+    "使用ascm_demo账号，登录内网ASCM平台，产品选择“云服务器ECS”。",
+    "选择组织“数字化工作部”-资源集“总部ESB组件系统资源集”，进入云服务器ECS实例列表。"
+  ]
+}
+```
+
+#### 复选框组
+
+用于检修类型：
+
+```json
+{
+  "type": "checkbox_group",
+  "per_line": 2,
+  "items": [
+    {"label": "配置变更", "checked": true},
+    {"label": "组件升级", "checked": false},
+    {"label": "组件扩缩容", "checked": false},
+    {"label": "数据库变更", "checked": false},
+    {"label": "日常维护（原硬件设备）", "checked": false},
+    {"label": "其他", "checked": false, "extra": ""}
+  ]
+}
+```
+
+#### 表格
+
+所有实施计划、人员、产品参数表必须用 `table`，不得写成纯文本。
+
+```json
+{
+  "type": "table",
+  "columns": [
+    {"key": "year", "label": "年份"},
+    {"key": "start_time", "label": "开始时间"},
+    {"key": "end_time", "label": "结束时间"}
+  ],
+  "rows": [
+    {"year": "2026年", "start_time": "06月01日 10:00", "end_time": "06月01日 12:00"}
+  ]
+}
+```
+
+### 固定章节格式模板
+
+每份方案必须至少包含如下结构。产品 Skill 可以补充表格列和具体步骤，但不能移除这些章节。
+
+```json
+{
+  "document": {
+    "sections": [
+      {
+        "heading": "背景",
+        "level": 1,
+        "blocks": [
+          {"type": "paragraph", "text": "{具体事项背景}", "first_line_indent": 0.74},
+          {"type": "paragraph", "text": "以上事项项目组提报问题工单，需检修进行处理，实现问题工单闭环。", "first_line_indent": 0.74}
+        ]
+      },
+      {
+        "heading": "检修类型",
+        "level": 1,
+        "blocks": [
+          {"type": "checkbox_group", "per_line": 2, "items": []}
+        ]
+      },
+      {
+        "heading": "现场环境",
+        "level": 1,
+        "blocks": [
+          {"type": "key_values", "items": [
+            {"label": "（1）内网环境/外网环境", "value": "{network}"},
+            {"label": "（2）实施地点", "value": "{location}"},
+            {"label": "（3）专有云版本", "value": "v3.16"}
+          ]},
+          {"type": "paragraph", "text": "（4）涉及的组件实例信息："},
+          {"type": "table", "columns": [], "rows": []}
+        ]
+      },
+      {
+        "heading": "实施计划",
+        "level": 1,
+        "blocks": [
+          {"type": "heading", "level": 2, "text": "4.1 检修窗口"},
+          {"type": "table", "columns": [], "rows": []},
+          {"type": "heading", "level": 2, "text": "4.2 实施人员"},
+          {"type": "table", "columns": [], "rows": []}
+        ]
+      },
+      {
+        "heading": "风险评估",
+        "level": 1,
+        "blocks": [
+          {"type": "heading", "level": 2, "text": "5.1影响范围"},
+          {"type": "paragraphs", "items": []},
+          {"type": "heading", "level": 2, "text": "5.2危险点分析"},
+          {"type": "paragraphs", "items": []},
+          {"type": "heading", "level": 2, "text": "5.3安全措施"},
+          {"type": "heading", "level": 3, "text": "5.3.1授权"},
+          {"type": "paragraphs", "items": []},
+          {"type": "heading", "level": 3, "text": "5.3.2备份"},
+          {"type": "paragraphs", "items": []},
+          {"type": "heading", "level": 3, "text": "5.3.3验证"},
+          {"type": "paragraphs", "items": []},
+          {"type": "heading", "level": 3, "text": "5.3.4 双人复核"},
+          {"type": "paragraphs", "items": []}
+        ]
+      },
+      {
+        "heading": "实施步骤",
+        "level": 1,
+        "blocks": [
+          {"type": "heading", "level": 2, "text": "6.1备份"},
+          {"type": "numbered_list", "items": []},
+          {"type": "heading", "level": 2, "text": "6.2 检修前验证"},
+          {"type": "numbered_list", "items": []},
+          {"type": "heading", "level": 2, "text": "6.3 检修操作"},
+          {"type": "heading", "level": 3, "text": "6.3.1 {事项名}"},
+          {"type": "numbered_list", "items": []},
+          {"type": "heading", "level": 2, "text": "6.4 检修后验证"},
+          {"type": "numbered_list", "items": []}
+        ]
+      },
+      {
+        "heading": "回滚步骤",
+        "level": 1,
+        "blocks": [
+          {"type": "heading", "level": 2, "text": "7.1 回滚操作"},
+          {"type": "numbered_list", "items": []},
+          {"type": "heading", "level": 2, "text": "7.2 回滚后验证"},
+          {"type": "numbered_list", "items": []}
+        ]
+      }
+    ]
+  }
+}
+```
+
+格式验收标准：
+
+- `document.sections` 至少 7 个章节。
+- 全文至少 8 个带 `type` 的 block。
+- 至少包含 1 个 `table`，实际方案通常至少包含检修窗口表、实施人员表、产品参数表。
+- 禁止把表格写成纯段落。
+- 禁止把实施步骤压缩成一两句概述。

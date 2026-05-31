@@ -498,12 +498,10 @@ personnel, risks, steps, rollback content, scripts, or other parts explicitly re
 你必须先根据系统中注册的 Agent Skills 判断需要哪些 Skill，然后使用 read_file 工具读取对应 SKILL.md。若涉及多个检修类型，应组合多个 Skill。
 
 输出结构硬性要求：
-- 顶层必须包含 document 对象。
-- document.sections 中每个章节必须包含 blocks 数组，正文、表格、复选框、步骤都必须写入 blocks。
+- 必须读取并遵守 `maintenance-plan-composer` Skill 中的“Word 渲染 JSON 格式契约”。
+- 顶层必须包含 document 对象；每个章节必须包含 blocks 数组。
+- 表格、标题、正文、复选框、编号步骤必须按该 Skill 规定的 block 类型输出。
 - 不要只输出 heading/title/content；只有标题没有 blocks 的章节会被判定为无效格式。
-- 表格必须使用 {"type": "table", "columns": [...], "rows": [...]}。
-- 段落必须使用 {"type": "paragraph", "text": "..."}；多段正文可使用 {"type": "paragraphs", "items": [...]}。
-- 步骤必须使用 {"type": "numbered_list", "items": [...]}。
 - 检修方案必须至少包含实施计划表或参数表，不允许全部正文都是普通段落。
 
 {orchestration_context}
