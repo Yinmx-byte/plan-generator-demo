@@ -1,5 +1,6 @@
 """Maintenance plan generation service."""
 
+import json
 import os
 import tempfile
 import uuid
