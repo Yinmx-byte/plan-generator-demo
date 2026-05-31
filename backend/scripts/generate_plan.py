@@ -189,6 +189,69 @@ def render_block(doc, block: dict[str, Any]):
         add_paragraph(doc, "")
 
 
+def normalize_text_items(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [line.strip() for line in value.splitlines() if line.strip()]
+    if isinstance(value, list):
+        items = []
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                items.append(item.strip())
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content") or item.get("description")
+                if text:
+                    items.extend(normalize_text_items(text))
+        return items
+    return [str(value).strip()] if str(value).strip() else []
+
+
+def normalize_block(block: Any) -> list[dict[str, Any]]:
+    if isinstance(block, str):
+        return [{"type": "paragraph", "text": block}]
+    if not isinstance(block, dict):
+        return []
+    if "type" in block:
+        return [block]
+    if "columns" in block and "rows" in block:
+        return [{"type": "table", **block}]
+    if "items" in block:
+        return [{"type": "paragraphs", "items": normalize_text_items(block.get("items"))}]
+    text = block.get("text") or block.get("content") or block.get("description")
+    if text:
+        return [{"type": "paragraph", "text": text}]
+    return []
+
+
+def normalize_section_blocks(section: dict[str, Any]) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    for block in section.get("blocks") or []:
+        blocks.extend(normalize_block(block))
+
+    if not blocks:
+        for key in ("content", "body", "text", "description"):
+            for text in normalize_text_items(section.get(key)):
+                blocks.append({"type": "paragraph", "text": text})
+        for key in ("items", "points", "steps"):
+            items = normalize_text_items(section.get(key))
+            if items:
+                blocks.append({"type": "numbered_list" if key == "steps" else "paragraphs", "items": items})
+
+    children = section.get("children") or section.get("subsections") or []
+    for child in children:
+        if isinstance(child, str):
+            blocks.append({"type": "paragraph", "text": child})
+            continue
+        if not isinstance(child, dict):
+            continue
+        child_title = child.get("heading") or child.get("title")
+        if child_title:
+            blocks.append({"type": "heading", "text": child_title, "level": int(child.get("level", 2))})
+        blocks.extend(normalize_section_blocks(child))
+    return blocks
+
+
 def render_document(doc, spec: dict[str, Any]):
     title = spec.get("title", "检修方案")
     cover = spec.get("cover", {})
@@ -244,11 +307,15 @@ def render_document(doc, spec: dict[str, Any]):
                 space_after=int(line.get("space_after", 6)),
             )
 
-    for section in spec.get("sections", []):
-        heading = section.get("heading")
+    for section in spec.get("sections") or spec.get("chapters") or []:
+        if isinstance(section, str):
+            section = {"blocks": [{"type": "paragraph", "text": section}]}
+        if not isinstance(section, dict):
+            continue
+        heading = section.get("heading") or section.get("title")
         if heading:
             add_heading_text(doc, heading, level=int(section.get("level", 1)))
-        for block in section.get("blocks", []):
+        for block in normalize_section_blocks(section):
             render_block(doc, block)
 
 

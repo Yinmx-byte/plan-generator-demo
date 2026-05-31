@@ -535,6 +535,47 @@ ASCM账号：{ascm_account}
 """
 
 
+def count_document_body_blocks(data: dict[str, Any]) -> int:
+    spec = data.get("document")
+    if not isinstance(spec, dict):
+        return 1
+
+    def count_blocks(section: Any) -> int:
+        if isinstance(section, str):
+            return 1 if section.strip() else 0
+        if not isinstance(section, dict):
+            return 0
+        total = 0
+        blocks = section.get("blocks")
+        if isinstance(blocks, list):
+            for block in blocks:
+                if isinstance(block, str) and block.strip():
+                    total += 1
+                elif isinstance(block, dict):
+                    if block.get("text") or block.get("content") or block.get("description"):
+                        total += 1
+                    if block.get("items"):
+                        total += len(block.get("items") or [])
+                    if block.get("rows"):
+                        total += len(block.get("rows") or [])
+        for key in ("content", "body", "text", "description"):
+            value = section.get(key)
+            if isinstance(value, str) and value.strip():
+                total += 1
+            elif isinstance(value, list):
+                total += len([item for item in value if str(item).strip()])
+        for key in ("items", "points", "steps"):
+            value = section.get(key)
+            if isinstance(value, list):
+                total += len([item for item in value if str(item).strip()])
+        for child in section.get("children") or section.get("subsections") or []:
+            total += count_blocks(child)
+        return total
+
+    sections = spec.get("sections") or spec.get("chapters") or []
+    return sum(count_blocks(section) for section in sections)
+
+
 def docx_to_markdown(raw: bytes) -> str:
     from docx import Document
 
@@ -589,6 +630,17 @@ async def generate_docx_from_state(
     except HTTPException:
         write_model_output_debug(text)
         data = build_fallback_plan_data(state, orchestration, text)
+    else:
+        if count_document_body_blocks(data) < 3:
+            debug_path = write_model_output_debug(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                prefix="empty_plan_model_output",
+            )
+            data = build_fallback_plan_data(state, orchestration, text)
+            data.setdefault("evidence", {})
+            if isinstance(data["evidence"], dict):
+                data["evidence"]["fallback_reason"] = "model_document_had_too_few_body_blocks"
+                data["evidence"]["debug_path"] = str(debug_path)
 
     data.setdefault("department", "云运营中心平台运维处")
     data.setdefault("date", datetime.now().strftime("%Y年%m月%d日"))
