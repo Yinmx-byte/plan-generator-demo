@@ -444,8 +444,12 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
     }
 
 
-def extract_json(text: str) -> dict:
+def extract_json(text: Any) -> dict:
     """从 LLM 返回的文本中提取 JSON。"""
+    if isinstance(text, dict) and "document" in text:
+        return text
+    if not isinstance(text, str):
+        text = get_response_text(text)
     text = text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
@@ -515,6 +519,167 @@ async def repair_and_extract_json(text: str) -> dict:
                 status_code=502,
                 detail="模型返回的方案 JSON 无法解析，请重试或补充更明确的需求。",
             ) from exc
+
+
+def write_model_output_debug(text: str, prefix: str = "plan_model_output") -> Path:
+    output_dir = Path(tempfile.gettempdir()) / "plan-generator"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    path.write_text(text or "", encoding="utf-8")
+    return path
+
+
+def build_fallback_plan_data(
+    state: dict[str, str],
+    orchestration: dict[str, Any],
+    raw_text: str = "",
+) -> dict[str, Any]:
+    """Build a conservative document spec when model JSON cannot be parsed."""
+    maintenance_type = state.get("maintenance_type") or "检修方案"
+    title = f"{maintenance_type}检修方案"
+    checked_type = maintenance_type.strip()
+    type_names = ["配置变更", "组件升级", "组件扩缩容", "数据库变更", "日常维护（原硬件设备）", "其他"]
+    checkbox_items = [
+        {
+            "label": name,
+            "checked": name == checked_type or (name != "其他" and name in checked_type),
+            "extra": checked_type if name == "其他" and checked_type not in type_names else "",
+        }
+        for name in type_names
+    ]
+    if not any(item["checked"] for item in checkbox_items):
+        checkbox_items[-1]["checked"] = True
+        checkbox_items[-1]["extra"] = checked_type
+
+    schedule_text = " ".join(
+        value
+        for value in [
+            state.get("schedule_year", ""),
+            state.get("schedule_start", ""),
+            "至" if state.get("schedule_start") or state.get("schedule_end") else "",
+            state.get("schedule_end", ""),
+        ]
+        if value
+    )
+    ops_hint = state.get("ops_detail") or "按对应检修类型 Skill 进行前置检查、变更实施、结果验证和回滚准备。"
+    tech_hint = state.get("tech_params") or "无额外技术参数。"
+
+    return {
+        "title": title,
+        "department": "云运营中心平台运维处",
+        "date": datetime.now().strftime("%Y年%m月%d日"),
+        "evidence": {
+            "selected_skills": orchestration.get("selected_skill_names", []),
+            "rag_enabled": orchestration.get("rag_enabled", False),
+            "rag_chunks_count": orchestration.get("rag_chunks_count", 0),
+            "fallback_used": True,
+            "raw_output_saved": bool(raw_text),
+        },
+        "document": {
+            "title": title,
+            "header": [
+                {"text": "云运营中心平台运维处", "align": "center"},
+                {"text": datetime.now().strftime("%Y年%m月%d日"), "align": "center"},
+            ],
+            "sections": [
+                {
+                    "heading": "一、背景",
+                    "blocks": [
+                        {
+                            "type": "numbered_list",
+                            "items": [state.get("background") or "根据业务运维需求，需要制定并执行本次检修方案。"],
+                            "first_line_indent": 0.74,
+                        },
+                        {
+                            "type": "paragraph",
+                            "text": "以上事项由项目组提出检修需求，需通过规范化实施完成问题闭环。",
+                            "first_line_indent": 0.74,
+                        },
+                    ],
+                },
+                {
+                    "heading": "二、检修类型",
+                    "blocks": [{"type": "checkbox_group", "items": checkbox_items, "per_line": 2}],
+                },
+                {
+                    "heading": "三、现场环境",
+                    "blocks": [
+                        {
+                            "type": "key_values",
+                            "items": [
+                                {"label": "网络环境", "value": state.get("network", "")},
+                                {"label": "实施地点", "value": state.get("location", "")},
+                                {"label": "检修窗口", "value": schedule_text},
+                            ],
+                        },
+                        {"type": "paragraph", "text": "涉及实例信息：", "first_line_indent": 0.74},
+                        {"type": "paragraph", "text": state.get("instances") or "待实施前由执行人员再次确认。", "first_line_indent": 0.74},
+                    ],
+                },
+                {
+                    "heading": "四、实施计划",
+                    "blocks": [
+                        {
+                            "type": "table",
+                            "columns": [
+                                {"key": "role", "label": "角色"},
+                                {"key": "name", "label": "人员/账号"},
+                            ],
+                            "rows": [
+                                {"role": "方案提供人", "name": state.get("provider", "")},
+                                {"role": "检修执行人", "name": state.get("executor", "")},
+                                {"role": "检修复核人", "name": state.get("reviewer", "")},
+                                {"role": "安全责任人", "name": state.get("security_officer", "")},
+                                {"role": "ASCM授权账号", "name": state.get("ascm_account", "")},
+                                {"role": "堡垒机账号", "name": state.get("bastion_account", "")},
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "heading": "五、风险评估",
+                    "blocks": [
+                        {"type": "heading", "text": "5.1 危险点分析", "level": 2},
+                        {"type": "plain_list", "prefix": "（1）", "items": ["检修操作可能影响相关云资源或业务访问，需要在窗口期内执行并做好监控。"]},
+                        {"type": "heading", "text": "5.2 预控措施", "level": 2},
+                        {"type": "plain_list", "prefix": "（1）", "items": ["实施前完成资源状态、权限、备份/快照、监控告警和回滚条件确认。"]},
+                        {"type": "heading", "text": "5.3 应急处置", "level": 2},
+                        {"type": "plain_list", "prefix": "（1）", "items": ["若出现异常，立即停止后续操作，保留现场信息，按回滚步骤恢复并通知相关责任人。"]},
+                    ],
+                },
+                {
+                    "heading": "六、实施步骤",
+                    "blocks": [
+                        {
+                            "type": "numbered_list",
+                            "items": [
+                                "实施前确认检修对象、窗口期、授权账号和审批工单均已满足要求。",
+                                f"依据检修类型“{maintenance_type}”读取对应 Skill 的实施要求，并结合 RAG 参考资料校验操作边界。",
+                                f"按检修目标执行操作：{ops_hint}",
+                                f"核对关键技术参数：{tech_hint}",
+                                "实施完成后检查资源状态、业务连通性、监控告警和日志，确认无异常后关闭检修。",
+                            ],
+                            "first_line_indent": 0.74,
+                        }
+                    ],
+                },
+                {
+                    "heading": "七、回滚步骤",
+                    "blocks": [
+                        {
+                            "type": "numbered_list",
+                            "items": [
+                                "触发回滚条件时立即停止后续变更操作，通知复核人和安全责任人。",
+                                "根据实施前确认的备份、快照、原配置或资源状态执行恢复。",
+                                "回滚后重新验证业务访问、资源状态、监控告警和日志，形成处置记录。",
+                            ],
+                            "first_line_indent": 0.74,
+                        }
+                    ],
+                },
+            ],
+        },
+    }
 
 
 def build_user_prompt(
@@ -1200,27 +1365,70 @@ async def download_generated(file_id: str):
 
 def get_response_text(response) -> str:
     """Extract text from AgentScope 1.x ChatResponse."""
-    content = response
-    for attr in ("get_text_content", "text", "content"):
-        try:
-            value = getattr(response, attr)
-        except (AttributeError, KeyError):
-            continue
-        if callable(value):
-            return value()
+    def collect(value: Any, depth: int = 0) -> list[str]:
+        if value is None or depth > 8:
+            return []
         if isinstance(value, str):
-            return value
-        if value is not None:
-            content = value
-            break
+            return [value]
+        if isinstance(value, (int, float, bool)):
+            return []
+        if isinstance(value, dict):
+            fragments: list[str] = []
+            priority_keys = (
+                "text",
+                "content",
+                "arguments",
+                "input",
+                "output",
+                "message",
+                "value",
+                "tool_calls",
+                "choices",
+            )
+            for key in priority_keys:
+                if key in value:
+                    fragments.extend(collect(value[key], depth + 1))
+            for key, item in value.items():
+                if key not in priority_keys:
+                    fragments.extend(collect(item, depth + 1))
+            if "document" in value:
+                fragments.insert(0, json.dumps(value, ensure_ascii=False))
+            return fragments
+        if isinstance(value, (list, tuple)):
+            fragments = []
+            for item in value:
+                fragments.extend(collect(item, depth + 1))
+            return fragments
 
-    if isinstance(content, str):
-        return content
-    texts = []
-    for block in content or []:
-        if isinstance(block, dict) and block.get("type") == "text":
-            texts.append(block.get("text", ""))
-    return "\n".join(texts)
+        fragments = []
+        for method in ("get_text_content", "model_dump", "dict"):
+            try:
+                func = getattr(value, method)
+            except (AttributeError, KeyError):
+                continue
+            if callable(func):
+                try:
+                    result = func()
+                except TypeError:
+                    continue
+                fragments.extend(collect(result, depth + 1))
+
+        for attr in ("text", "content", "message", "output", "tool_calls", "metadata"):
+            try:
+                attr_value = getattr(value, attr)
+            except (AttributeError, KeyError):
+                continue
+            fragments.extend(collect(attr_value, depth + 1))
+        return fragments
+
+    seen = set()
+    ordered = []
+    for fragment in collect(response):
+        cleaned = fragment.strip()
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            ordered.append(cleaned)
+    return "\n".join(ordered)
 
 
 def default_form_state() -> dict[str, str]:
@@ -1426,7 +1634,11 @@ async def generate_docx_from_state(
     )
     response = await run_plan_agent(user_prompt)
     text = get_response_text(response)
-    data = await repair_and_extract_json(text)
+    try:
+        data = await repair_and_extract_json(text)
+    except HTTPException:
+        write_model_output_debug(text)
+        data = build_fallback_plan_data(state, orchestration, text)
 
     data.setdefault("department", "云运营中心平台运维处")
     data.setdefault("date", datetime.now().strftime("%Y年%m月%d日"))
@@ -1519,7 +1731,11 @@ async def generate_plan(
         response = await run_plan_agent(user_prompt)
 
         text = get_response_text(response)
-        data = await repair_and_extract_json(text)
+        try:
+            data = await repair_and_extract_json(text)
+        except HTTPException:
+            write_model_output_debug(text)
+            data = build_fallback_plan_data(state, orchestration, text)
 
         data.setdefault("department", "云运营中心平台运维处")
         data.setdefault("date", datetime.now().strftime("%Y年%m月%d日"))
