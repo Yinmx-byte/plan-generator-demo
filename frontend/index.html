@@ -6,140 +6,249 @@
 <title>检修方案生成助手</title>
 <style>
   :root {
-    --primary: #1a73e8;
-    --border: #dfe3ea;
-    --bg: #eef1f5;
-    --panel: #fff;
-    --text: #273142;
-    --muted: #6b7280;
-    --assistant: #f6f8fb;
-    --user: #e8f0fe;
-    --danger: #c5221f;
-    --success: #137333;
+    --ink: #17212f;
+    --ink-soft: #3e4a5b;
+    --muted: #6f7b8c;
+    --line: #d9e0e8;
+    --line-strong: #c5ced9;
+    --paper: #fbfcf7;
+    --panel: #ffffff;
+    --panel-warm: #f7f6ef;
+    --rail: #eef2f3;
+    --blue: #1f5f99;
+    --blue-dark: #17456f;
+    --green: #1f7a5c;
+    --green-soft: #e8f3ed;
+    --amber: #a76512;
+    --amber-soft: #fff4dd;
+    --red: #b42318;
+    --red-soft: #fff0ee;
+    --shadow: 0 18px 45px rgba(20, 31, 45, 0.12);
+    --shadow-soft: 0 8px 24px rgba(20, 31, 45, 0.08);
   }
   * { box-sizing: border-box; }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #c5ced9;
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
   body {
     margin: 0;
     height: 100vh;
-    background: var(--bg);
-    color: var(--text);
-    font-family: "Microsoft YaHei", Arial, sans-serif;
+    color: var(--ink);
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    background:
+      linear-gradient(90deg, rgba(23, 33, 47, 0.035) 1px, transparent 1px),
+      linear-gradient(rgba(23, 33, 47, 0.035) 1px, transparent 1px),
+      linear-gradient(135deg, #eef2f3 0%, #faf9f0 48%, #e9f0ee 100%);
+    background-size: 28px 28px, 28px 28px, auto;
   }
   .app {
-    width: min(1280px, 100%);
+    width: min(1440px, 100%);
     height: 100vh;
     margin: 0 auto;
-    padding: 16px;
+    padding: 18px;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
-    grid-template-rows: auto 1fr auto;
-    gap: 12px;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    gap: 14px;
   }
   header {
     grid-column: 1 / -1;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    gap: 18px;
+    min-height: 70px;
+    padding: 14px 16px;
+    background: rgba(255, 255, 255, 0.78);
+    border: 1px solid rgba(197, 206, 217, 0.82);
+    border-radius: 8px;
+    box-shadow: var(--shadow-soft);
+    backdrop-filter: blur(10px);
   }
-  h1 { margin: 0; color: var(--primary); font-size: 20px; }
-  h2 { margin: 0; font-size: 15px; }
-  .subtitle { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
-  .header-actions { display: flex; gap: 8px; }
+  header > div:first-child {
+    display: grid;
+    gap: 4px;
+  }
+  h1 {
+    margin: 0;
+    color: var(--ink);
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: 0;
+  }
+  h2 {
+    margin: 0;
+    font-size: 14px;
+    color: var(--ink);
+  }
+  .subtitle {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .status-strip {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .metric {
+    min-height: 54px;
+    padding: 10px 12px;
+    border: 1px solid rgba(197, 206, 217, 0.86);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.72);
+    box-shadow: var(--shadow-soft);
+  }
+  .metric strong {
+    display: block;
+    margin-bottom: 3px;
+    font-size: 13px;
+    color: var(--ink);
+  }
+  .metric span {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+  }
   button {
-    border: 1px solid var(--border);
-    background: #fff;
-    color: var(--text);
+    min-height: 36px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
     border-radius: 6px;
     padding: 8px 12px;
     cursor: pointer;
     font: inherit;
+    font-size: 13px;
+    transition: background 160ms ease, border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+  }
+  button:hover {
+    border-color: var(--line-strong);
+    box-shadow: 0 5px 16px rgba(20, 31, 45, 0.08);
+    transform: translateY(-1px);
   }
   button.primary {
     min-width: 108px;
-    border: none;
-    background: var(--primary);
+    border-color: var(--blue-dark);
+    background: var(--blue);
     color: #fff;
-    font-weight: 600;
+    font-weight: 700;
   }
-  button:disabled { opacity: 0.55; cursor: not-allowed; }
+  button.primary:hover {
+    background: var(--blue-dark);
+  }
+  button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
   .chat {
     grid-column: 1;
-    grid-row: 2;
+    grid-row: 3;
     min-height: 0;
-    background: var(--panel);
-    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.84);
+    border: 1px solid rgba(197, 206, 217, 0.92);
     border-radius: 8px;
     overflow: hidden;
     display: grid;
     grid-template-rows: 1fr;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(8px);
   }
   .messages {
-    padding: 18px;
+    padding: 22px;
     overflow-y: auto;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.7), rgba(251,252,247,0.86)),
+      radial-gradient(circle at 18px 18px, rgba(31,95,153,0.08) 1px, transparent 1px);
+    background-size: auto, 26px 26px;
   }
   .msg {
-    max-width: 78%;
-    margin-bottom: 12px;
-    padding: 11px 13px;
+    max-width: min(760px, 82%);
+    margin-bottom: 14px;
+    padding: 12px 14px;
     border-radius: 8px;
     white-space: pre-wrap;
     line-height: 1.6;
     font-size: 14px;
+    box-shadow: 0 5px 18px rgba(20, 31, 45, 0.06);
   }
   .msg.assistant {
-    background: var(--assistant);
-    border: 1px solid var(--border);
+    background: #ffffff;
+    border: 1px solid var(--line);
   }
   .msg.user {
-    background: var(--user);
+    background: #eaf2f8;
+    border: 1px solid #c9dcea;
     margin-left: auto;
   }
   .msg.status {
     max-width: 560px;
-    background: #fff8e1;
-    border: 1px solid #f6d57a;
-    color: #6f4c00;
+    background: var(--amber-soft);
+    border: 1px solid #e6c57f;
+    color: #70460a;
   }
   .msg.error {
-    background: #fce8e6;
-    color: var(--danger);
-    border: 1px solid #f4b6b1;
+    background: var(--red-soft);
+    color: var(--red);
+    border: 1px solid #efb9b3;
   }
   .download {
     display: inline-block;
     margin-top: 8px;
     padding: 8px 12px;
     border-radius: 6px;
-    background: var(--success);
+    background: var(--green);
     color: #fff;
     text-decoration: none;
+    font-weight: 700;
   }
   .composer {
     grid-column: 1;
-    grid-row: 3;
-    background: var(--panel);
-    border: 1px solid var(--border);
+    grid-row: 4;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(197, 206, 217, 0.92);
     border-radius: 8px;
-    padding: 12px;
+    padding: 14px;
     display: grid;
-    gap: 10px;
+    gap: 12px;
+    box-shadow: var(--shadow-soft);
   }
   textarea {
     width: 100%;
     min-height: 112px;
     resize: vertical;
-    border: 1px solid var(--border);
+    border: 1px solid var(--line);
     border-radius: 6px;
-    padding: 11px 12px;
+    padding: 12px 13px;
     font: inherit;
+    font-size: 14px;
     line-height: 1.5;
+    color: var(--ink);
+    background: #fff;
   }
   textarea:focus,
   input:focus {
     outline: none;
-    border-color: var(--primary);
-    box-shadow: 0 0 0 2px rgba(26,115,232,0.12);
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px rgba(31, 95, 153, 0.12);
   }
   .actions {
     display: flex;
@@ -157,7 +266,7 @@
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    color: var(--text);
+    color: var(--ink-soft);
     font-size: 13px;
     user-select: none;
   }
@@ -169,36 +278,47 @@
   .hint { color: var(--muted); font-size: 12px; }
   aside {
     grid-column: 2;
-    grid-row: 2 / 4;
+    grid-row: 3 / 5;
     min-height: 0;
-    background: var(--panel);
-    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(197, 206, 217, 0.92);
     border-radius: 8px;
     display: grid;
     grid-template-rows: auto 1fr auto auto auto auto;
     overflow: hidden;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(8px);
   }
   .skills-head {
-    padding: 14px;
-    border-bottom: 1px solid var(--border);
+    padding: 14px 14px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel-warm);
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
   }
+  .section-kicker {
+    display: block;
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 400;
+  }
   .skill-list {
     padding: 10px;
     overflow-y: auto;
+    background: #fff;
   }
   .skill-item {
-    padding: 10px;
-    border: 1px solid var(--border);
+    padding: 10px 11px;
+    border: 1px solid var(--line);
     border-radius: 8px;
     margin-bottom: 8px;
-    background: #fbfcff;
+    background: linear-gradient(180deg, #ffffff 0%, #f8faf8 100%);
   }
   .skill-name {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 700;
     word-break: break-word;
   }
@@ -209,30 +329,39 @@
     line-height: 1.45;
   }
   .upload {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
     padding: 12px;
     display: grid;
     gap: 9px;
+    background: #fbfcfa;
   }
   .upload input[type="text"],
   .upload input[type="file"] {
     width: 100%;
-    border: 1px solid var(--border);
+    border: 1px solid var(--line);
     border-radius: 6px;
     padding: 8px;
     font: inherit;
     font-size: 13px;
+    background: #fff;
+    color: var(--ink);
   }
   .upload-status {
     min-height: 18px;
     color: var(--muted);
     font-size: 12px;
+    line-height: 1.45;
   }
   .side-actions {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
     padding: 12px;
     display: grid;
     gap: 8px;
+    background: #f4f7f6;
+  }
+  .side-actions .side-section-title {
+    padding: 0;
+    background: transparent;
   }
   .side-actions textarea {
     min-height: 76px;
@@ -247,28 +376,35 @@
     padding: 12px 14px 0;
     font-weight: 700;
     font-size: 14px;
+    background: #fbfcfa;
+  }
+  .side-section-title .section-kicker {
+    margin-bottom: 2px;
   }
   .knowledge-list {
     max-height: 150px;
     overflow-y: auto;
     padding: 8px 10px 0;
+    background: #fbfcfa;
   }
   .knowledge-item {
     padding: 8px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--line);
     border-radius: 8px;
     margin-bottom: 8px;
     background: #fff;
     font-size: 12px;
     word-break: break-word;
+    color: var(--ink-soft);
   }
   @media (max-width: 900px) {
     .app {
       height: auto;
       min-height: 100vh;
       grid-template-columns: 1fr;
-      grid-template-rows: auto minmax(420px, 1fr) auto auto;
+      grid-template-rows: auto auto minmax(420px, 1fr) auto auto;
     }
+    .status-strip { grid-template-columns: 1fr; }
     aside { grid-row: auto; }
     .chat,
     .composer,
@@ -291,7 +427,7 @@
   <header>
     <div>
       <h1>国网云平台检修方案生成助手</h1>
-      <p class="subtitle">粘贴需求描述或需求文档，助手会流式整理信息、追问缺失项并生成 Word 方案</p>
+      <p class="subtitle">需求抽取、Skill 编排、RAG 参考与 Page Agent 验证集中在同一个工作流</p>
     </div>
     <div class="header-actions">
       <button id="refreshSkillsBtn">刷新 Skill</button>
@@ -299,13 +435,28 @@
     </div>
   </header>
 
+  <section class="status-strip" aria-label="流程状态">
+    <div class="metric">
+      <strong>输入方式</strong>
+      <span>粘贴需求描述或需求文档</span>
+    </div>
+    <div class="metric">
+      <strong>生成依据</strong>
+      <span>Skill 规则优先，RAG 资料补充</span>
+    </div>
+    <div class="metric">
+      <strong>验证方式</strong>
+      <span>Page Agent 只读浏览器验证</span>
+    </div>
+  </section>
+
   <main class="chat">
     <div class="messages" id="messages"></div>
   </main>
 
   <aside>
     <div class="skills-head">
-      <h2>当前 Skill</h2>
+      <h2>当前 Skill<span class="section-kicker">决定方案类型、章节结构与操作规则</span></h2>
       <span class="hint" id="skillCount">0 个</span>
     </div>
     <div class="skill-list" id="skillList"></div>
@@ -315,7 +466,7 @@
       <button class="primary" type="submit">上传 Skill</button>
       <div class="upload-status" id="uploadStatus"></div>
     </form>
-    <div class="side-section-title">知识文档</div>
+    <div class="side-section-title">知识文档<span class="section-kicker">内部模板、历史方案、云产品说明</span></div>
     <div class="knowledge-list" id="knowledgeList"></div>
     <form class="upload" id="knowledgeUploadForm">
       <input id="knowledgeCategoryInput" name="category" type="text" placeholder="分类目录，例如 internal-templates">
@@ -324,6 +475,7 @@
       <div class="upload-status" id="knowledgeUploadStatus"></div>
     </form>
     <div class="side-actions">
+      <div class="side-section-title">Page Agent<span class="section-kicker">浏览器自动化与下载链路验证</span></div>
       <textarea id="pageAgentTaskInput" placeholder="例如：打开 https://www.baidu.com 并告诉我页面标题"></textarea>
       <div class="button-row">
         <button id="startMcpBtn" type="button">启动 Page Agent</button>
