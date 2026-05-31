@@ -1034,10 +1034,25 @@ async def run_page_agent_task(task: str) -> str:
 def detect_chat_intent(message: str, session: dict[str, Any]) -> str:
     if not session.get("generated"):
         return "generate"
+    regenerate_keywords = (
+        "重新生成",
+        "重新出",
+        "再生成",
+        "重做",
+        "重新来",
+        "重新写",
+        "生成一遍",
+        "再来一版",
+        "按原需求",
+        "根据需求重新",
+        "不是修订",
+        "不是修改",
+    )
+    if any(keyword in message for keyword in regenerate_keywords):
+        return "regenerate"
     edit_keywords = (
         "修改",
         "更改",
-        "变更",
         "调整",
         "替换",
         "修订",
@@ -1052,6 +1067,32 @@ def detect_chat_intent(message: str, session: dict[str, Any]) -> str:
         "参考",
     )
     return "edit" if any(keyword in message for keyword in edit_keywords) else "generate"
+
+
+def should_extract_for_intent(message: str, intent: str) -> bool:
+    """Regeneration-only commands should not overwrite collected requirements."""
+    if intent != "regenerate":
+        return True
+    if "\n" in message:
+        return True
+    if any(mark in message for mark in ("：", ":", "；", ";")) and len(message) > 30:
+        return True
+    field_words = (
+        "检修背景",
+        "检修类型",
+        "网络环境",
+        "实施地点",
+        "涉及实例",
+        "检修窗口",
+        "方案提供人",
+        "检修执行人",
+        "检修复核人",
+        "安全责任人",
+        "ASCM",
+        "堡垒机",
+        "技术参数",
+    )
+    return any(word in message for word in field_words)
 
 
 def get_generated_path(session: dict[str, Any]) -> Optional[Path]:
@@ -1400,11 +1441,14 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=400, detail="请输入需求描述或补充信息")
 
     session["history"].append({"role": "user", "content": message})
-    extracted = await extract_chat_updates(session["state"], message)
-    merge_updates(session["state"], extracted.get("updates", {}))
+    intent = detect_chat_intent(message, session)
+    extracted = {}
+    if should_extract_for_intent(message, intent):
+        extracted = await extract_chat_updates(session["state"], message)
+        merge_updates(session["state"], extracted.get("updates", {}))
     missing = find_missing_fields(session["state"])
 
-    if missing:
+    if missing and intent != "edit":
         assistant_message = extracted.get("assistant_note") or "已收到，我先整理这些信息。"
         assistant_message = f"{assistant_message}\n\n{build_missing_question(missing)}"
         session["history"].append({"role": "assistant", "content": assistant_message})
@@ -1417,12 +1461,21 @@ async def chat(request: ChatRequest):
         }
 
     orchestration = await build_generation_orchestration_context(session["state"])
+    previous_document_text = ""
+    if intent == "edit":
+        generated_path = get_generated_path(session)
+        if generated_path:
+            previous_document_text = docx_path_to_markdown(generated_path)
     file_id, _path, filename = await generate_docx_from_state(
         session["state"],
         orchestration=orchestration,
+        edit_instruction=message if intent == "edit" else "",
+        previous_document_text=previous_document_text,
     )
     download_url = f"/api/download/{file_id}"
     assistant_message = "关键信息已收集完整，检修方案已生成。"
+    if intent == "edit":
+        assistant_message = "已基于上一版文档生成修订版。"
     session["generated"] = {
         "file_id": file_id,
         "filename": filename,
@@ -1488,8 +1541,15 @@ async def chat_stream(request: ChatRequest):
                     "status",
                     {"session_id": session_id, "message": "识别到这是对上一版文档的修订请求，正在读取已生成文档..."},
                 )
-            extracted = await extract_chat_updates(session["state"], message)
-            merge_updates(session["state"], extracted.get("updates", {}))
+            elif intent == "regenerate":
+                yield sse_event(
+                    "status",
+                    {"session_id": session_id, "message": "识别到这是重新生成请求，将复用当前已收集需求，不读取上一版文档。"},
+                )
+            extracted = {}
+            if should_extract_for_intent(message, intent):
+                extracted = await extract_chat_updates(session["state"], message)
+                merge_updates(session["state"], extracted.get("updates", {}))
 
             yield sse_event(
                 "collected",
