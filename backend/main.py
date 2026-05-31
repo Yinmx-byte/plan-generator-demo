@@ -35,6 +35,12 @@ from pydantic import BaseModel
 
 from rag import get_knowledge_base, reset_knowledge_base
 from skills_runtime import SkillRegistry
+from agents.plan_agent import PlanAgentRuntime, run_plan_agent
+from agents.workflow_agent import (
+    WorkflowAgentRuntime,
+    classify_chat_intent,
+    run_normal_chat,
+)
 ROOT = Path(__file__).parent
 SKILLS_ROOT = ROOT / "skills"
 
@@ -343,6 +349,28 @@ async def get_agent_knowledge():
     if knowledge_base is None:
         return None
     return await knowledge_base.get_knowledge()
+
+
+def get_workflow_agent_runtime() -> WorkflowAgentRuntime:
+    """Wire runtime dependencies for the workflow/controller agent."""
+    return WorkflowAgentRuntime(
+        get_model=get_model,
+        get_skill_registry=get_skill_registry,
+        extract_json=extract_json,
+        get_response_text=get_response_text,
+    )
+
+
+def get_plan_agent_runtime() -> PlanAgentRuntime:
+    """Wire runtime dependencies for the maintenance plan generation agent."""
+    return PlanAgentRuntime(
+        build_system_prompt=build_system_prompt,
+        get_model=get_model,
+        get_formatter=get_formatter,
+        get_toolkit=get_toolkit,
+        get_agent_knowledge=get_agent_knowledge,
+        get_response_text=get_response_text,
+    )
 
 
 def build_state_text(state: dict[str, str]) -> str:
@@ -889,71 +917,6 @@ ASCM账号：{ascm_account}
 """
 
 
-async def create_plan_agent() -> ReActAgent:
-    """Create the native AgentScope ReActAgent for plan generation."""
-    agent = ReActAgent(
-        name="MaintenancePlanGenerator",
-        sys_prompt=build_system_prompt(),
-        model=get_model(),
-        formatter=get_formatter(),
-        toolkit=await get_toolkit(),
-        memory=InMemoryMemory(),
-        knowledge=await get_agent_knowledge(),
-        enable_rewrite_query=True,
-        max_iters=int(os.getenv("AGENT_MAX_ITERS", "8")),
-    )
-    agent.set_console_output_enabled(False)
-    return agent
-
-
-def format_agent_trace(msg: Msg, last: bool = True) -> list[str]:
-    traces: list[str] = []
-    try:
-        blocks = msg.get_content_blocks()
-    except Exception:
-        return traces
-    for block in blocks:
-        if not isinstance(block, dict):
-            continue
-        block_type = block.get("type")
-        if block_type == "tool_use":
-            tool_input = json.dumps(block.get("input", {}), ensure_ascii=False)
-            traces.append(f"调用工具：{block.get('name', 'unknown')}\n参数：{tool_input[:600]}")
-        elif block_type == "tool_result":
-            output = get_response_text(block.get("output", ""))
-            traces.append(f"工具返回：{block.get('name', 'unknown')}\n{output[:800]}")
-        elif block_type == "thinking":
-            traces.append(f"模型思考：{str(block.get('thinking', ''))[:800]}")
-        elif block_type == "text":
-            text = str(block.get("text", "")).strip()
-            if text:
-                label = "模型输出完成" if last else "模型输出中"
-                traces.append(f"{label}：{text[:800]}")
-    return traces
-
-
-async def run_plan_agent(user_prompt: str, trace_callback=None):
-    """Run the native AgentScope ReActAgent for plan generation."""
-    agent = await create_plan_agent()
-    if not trace_callback:
-        return await agent(Msg("user", user_prompt, "user"))
-
-    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-    agent.set_msg_queue_enabled(True, queue)
-    task = asyncio.create_task(agent(Msg("user", user_prompt, "user")))
-
-    while True:
-        if task.done() and queue.empty():
-            break
-        try:
-            msg, last, _speech = await asyncio.wait_for(queue.get(), timeout=0.2)
-        except asyncio.TimeoutError:
-            continue
-        for trace in format_agent_trace(msg, last):
-            await trace_callback(trace)
-    return await task
-
-
 async def run_plan_validation_agent(
     state: dict[str, str],
     filename: str,
@@ -1029,204 +992,6 @@ async def run_page_agent_task(task: str) -> str:
 
 
 # ── API 路由 ────────────────────────────────────────────────────
-
-
-def detect_chat_intent(message: str, session: dict[str, Any]) -> str:
-    plan_keywords = (
-        "检修方案",
-        "生成方案",
-        "生成一个",
-        "出一份",
-        "写一份",
-        "创建ECS",
-        "创建 ECS",
-        "ecs",
-        "ECS",
-        "rds",
-        "RDS",
-        "redis",
-        "Redis",
-        "slb",
-        "SLB",
-        "oss",
-        "OSS",
-        "k8s",
-        "K8S",
-        "polardb",
-        "PolarDB",
-    )
-    if not session.get("generated"):
-        return "generate" if any(keyword in message for keyword in plan_keywords) else "chat"
-    regenerate_keywords = (
-        "重新生成",
-        "重新出",
-        "再生成",
-        "重做",
-        "重新来",
-        "重新写",
-        "生成一遍",
-        "再来一版",
-        "按原需求",
-        "根据需求重新",
-        "不是修订",
-        "不是修改",
-    )
-    if any(keyword in message for keyword in regenerate_keywords):
-        return "regenerate"
-    edit_keywords = (
-        "修改",
-        "更改",
-        "调整",
-        "替换",
-        "修订",
-        "重新评估",
-        "风险点",
-        "人员名单",
-        "检修人员",
-        "执行人",
-        "复核人",
-        "安全责任人",
-        "按照",
-        "参考",
-    )
-    if any(keyword in message for keyword in edit_keywords):
-        return "edit"
-    return "generate" if any(keyword in message for keyword in plan_keywords) else "chat"
-
-
-def get_workflow_skill_body() -> str:
-    skill = get_skill_registry().get("maintenance-plan-workflow")
-    return skill.body if skill else ""
-
-
-def should_extract_for_intent(message: str, intent: str) -> bool:
-    """Regeneration-only commands should not overwrite collected requirements."""
-    if intent != "regenerate":
-        return True
-    if "\n" in message:
-        return True
-    if any(mark in message for mark in ("：", ":", "；", ";")) and len(message) > 30:
-        return True
-    field_words = (
-        "检修背景",
-        "检修类型",
-        "网络环境",
-        "实施地点",
-        "涉及实例",
-        "检修窗口",
-        "方案提供人",
-        "检修执行人",
-        "检修复核人",
-        "安全责任人",
-        "ASCM",
-        "堡垒机",
-        "技术参数",
-    )
-    return any(word in message for word in field_words)
-
-
-async def classify_chat_intent(message: str, session: dict[str, Any]) -> dict[str, Any]:
-    """Classify the latest user message before entering the plan workflow."""
-    fallback_intent = detect_chat_intent(message, session)
-    fallback = {
-        "intent": fallback_intent,
-        "should_extract": False if fallback_intent == "chat" else should_extract_for_intent(message, fallback_intent),
-        "reason": "fallback",
-    }
-    state_preview = {
-        key: value
-        for key, value in session.get("state", {}).items()
-        if isinstance(value, str) and value.strip()
-    }
-    workflow_skill = get_workflow_skill_body()
-    prompt = f"""你是检修方案生成系统的意图识别器。请判断用户最新消息应该走哪个流程。
-
-请严格遵守下面的总控工作流 Skill：
-{workflow_skill[:6000]}
-
-只能返回 JSON，不要输出 markdown，不要解释。
-
-可选 intent：
-- chat：普通交流、询问系统能力、询问原理、打招呼、咨询配置/流程/如何使用；不生成或修改文档。
-- generate：用户提供检修需求，或明确要求生成新的检修方案。
-- regenerate：会话中已经有生成结果，用户要求“重新生成/再生成/重做/按原需求生成一遍”，且不是要求修改上一版内容。
-- edit：会话中已经有生成结果，用户要求修改上一版文档，例如变更人员、替换内容、重新评估风险点、按某文档调整已有方案。
-
-判断规则：
-- 没有已生成文档时，不要返回 edit 或 regenerate。
-- “重新生成一遍/根据需求重新生成”优先是 regenerate，不是 edit。
-- “修改/调整/替换/重新评估风险点/变更检修人员名单/按照某文档修订”才是 edit。
-- 普通聊天不要抽取需求字段。
-- regenerate 如果只是短指令，不要抽取需求字段；如果用户同时贴了新的完整需求，可以抽取。
-
-返回格式：
-{{
-  "intent": "chat|generate|regenerate|edit",
-  "should_extract": true,
-  "reason": "一句话说明"
-}}
-
-会话是否已有生成文档：{bool(session.get("generated"))}
-当前已收集字段：{json.dumps(state_preview, ensure_ascii=False)}
-用户最新消息：{message}
-"""
-    try:
-        response = await get_model()(
-            [
-                {"role": "system", "content": "你只输出严格 JSON。"},
-                {"role": "user", "content": prompt},
-            ],
-        )
-        data = extract_json(get_response_text(response))
-    except Exception:
-        return fallback
-
-    intent = str(data.get("intent", "")).strip().lower()
-    if intent not in {"chat", "generate", "regenerate", "edit"}:
-        return fallback
-    if not session.get("generated") and intent in {"edit", "regenerate"}:
-        intent = "generate" if intent == "regenerate" else "chat"
-    should_extract = data.get("should_extract")
-    if not isinstance(should_extract, bool):
-        should_extract = should_extract_for_intent(message, intent)
-    if intent == "chat":
-        should_extract = False
-    return {
-        "intent": intent,
-        "should_extract": should_extract,
-        "reason": str(data.get("reason", ""))[:200],
-    }
-
-
-async def run_normal_chat(session: dict[str, Any], message: str) -> str:
-    """Answer normal user messages without entering the plan generation chain."""
-    state_preview = {
-        key: value
-        for key, value in session.get("state", {}).items()
-        if isinstance(value, str) and value.strip()
-    }
-    history = session.get("history", [])[-8:]
-    history_text = "\n".join(
-        f"{item.get('role', 'user')}: {item.get('content', '')}"
-        for item in history
-    )
-    prompt = f"""你是检修方案生成系统的助手，可以正常交流，也可以说明系统如何生成、修订和验证检修方案。
-
-当前已收集的方案字段（如有）：{json.dumps(state_preview, ensure_ascii=False)}
-最近对话：
-{history_text}
-
-请直接回答用户最新问题。若用户是在询问如何生成方案，可以简要说明需要提供哪些信息；不要在普通聊天中生成 DOCX。
-
-用户最新问题：{message}
-"""
-    response = await get_model()(
-        [
-            {"role": "system", "content": "你是检修方案生成系统的中文助手，回答要简洁准确。"},
-            {"role": "user", "content": prompt},
-        ],
-    )
-    return get_response_text(response).strip() or "我在。你可以直接描述检修需求，也可以问我这个系统怎么工作。"
 
 
 def get_generated_path(session: dict[str, Any]) -> Optional[Path]:
@@ -1575,10 +1340,10 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=400, detail="请输入需求描述或补充信息")
 
     session["history"].append({"role": "user", "content": message})
-    classification = await classify_chat_intent(message, session)
+    classification = await classify_chat_intent(message, session, get_workflow_agent_runtime())
     intent = classification["intent"]
     if intent == "chat":
-        assistant_message = await run_normal_chat(session, message)
+        assistant_message = await run_normal_chat(session, message, get_workflow_agent_runtime())
         session["history"].append({"role": "assistant", "content": assistant_message})
         return {
             "session_id": session_id,
@@ -1680,7 +1445,7 @@ async def chat_stream(request: ChatRequest):
                 {"session_id": session_id, "message": "正在识别用户意图..."},
             )
             session["history"].append({"role": "user", "content": message})
-            classification = await classify_chat_intent(message, session)
+            classification = await classify_chat_intent(message, session, get_workflow_agent_runtime())
             intent = classification["intent"]
             yield sse_event(
                 "intent",
@@ -1691,7 +1456,7 @@ async def chat_stream(request: ChatRequest):
                 },
             )
             if intent == "chat":
-                assistant_message = await run_normal_chat(session, message)
+                assistant_message = await run_normal_chat(session, message, get_workflow_agent_runtime())
                 session["history"].append({"role": "assistant", "content": assistant_message})
                 yield sse_event(
                     "done",
@@ -2147,7 +1912,7 @@ async def generate_docx_from_state(
         edit_instruction=edit_instruction,
         previous_document_text=previous_document_text,
     )
-    response = await run_plan_agent(user_prompt, trace_callback=trace_callback)
+    response = await run_plan_agent(user_prompt, get_plan_agent_runtime(), trace_callback=trace_callback)
     text = get_response_text(response)
     try:
         data = await repair_and_extract_json(text)
@@ -2243,7 +2008,7 @@ async def generate_plan(
             orchestration_context=orchestration["prompt_context"],
         )
 
-        response = await run_plan_agent(user_prompt)
+        response = await run_plan_agent(user_prompt, get_plan_agent_runtime())
 
         text = get_response_text(response)
         try:
