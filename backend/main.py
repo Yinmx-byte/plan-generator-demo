@@ -13,6 +13,7 @@ import tempfile
 import uuid
 import zipfile
 import inspect
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -688,13 +689,31 @@ def build_user_prompt(
     provider: str, executor: str, reviewer: str, security_officer: str,
     ascm_account: str, bastion_account: str, ops_detail: str, tech_params: str,
     orchestration_context: str = "",
+    edit_instruction: str = "",
+    previous_document_text: str = "",
 ) -> str:
     """Convert form fields into the user task for the Agent."""
+    edit_context = ""
+    if edit_instruction:
+        previous_text = previous_document_text[:8000] if previous_document_text else "No previous document text was available."
+        edit_context = f"""
+## Document revision task
+This is a revision of the previously generated maintenance plan, not a brand-new plan.
+Keep the existing structure and unchanged content as much as possible. Only update the
+personnel, risks, steps, rollback content, scripts, or other parts explicitly requested.
+
+## Revision request
+{edit_instruction}
+
+## Previous document text for reference
+{previous_text}
+"""
     return f"""请根据以下检修需求生成标准化检修方案 JSON。
 
 你必须先根据系统中注册的 Agent Skills 判断需要哪些 Skill，然后使用 read_file 工具读取对应 SKILL.md。若涉及多个检修类型，应组合多个 Skill。
 
 {orchestration_context}
+{edit_context}
 
 ## 背景与检修事项
 {background}
@@ -731,8 +750,8 @@ ASCM账号：{ascm_account}
 """
 
 
-async def run_plan_agent(user_prompt: str):
-    """Run the native AgentScope ReActAgent for plan generation."""
+async def create_plan_agent() -> ReActAgent:
+    """Create the native AgentScope ReActAgent for plan generation."""
     agent = ReActAgent(
         name="MaintenancePlanGenerator",
         sys_prompt=build_system_prompt(),
@@ -745,7 +764,55 @@ async def run_plan_agent(user_prompt: str):
         max_iters=int(os.getenv("AGENT_MAX_ITERS", "8")),
     )
     agent.set_console_output_enabled(False)
-    return await agent(Msg("user", user_prompt, "user"))
+    return agent
+
+
+def format_agent_trace(msg: Msg, last: bool = True) -> list[str]:
+    traces: list[str] = []
+    try:
+        blocks = msg.get_content_blocks()
+    except Exception:
+        return traces
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type == "tool_use":
+            tool_input = json.dumps(block.get("input", {}), ensure_ascii=False)
+            traces.append(f"调用工具：{block.get('name', 'unknown')}\n参数：{tool_input[:600]}")
+        elif block_type == "tool_result":
+            output = get_response_text(block.get("output", ""))
+            traces.append(f"工具返回：{block.get('name', 'unknown')}\n{output[:800]}")
+        elif block_type == "thinking":
+            traces.append(f"模型思考：{str(block.get('thinking', ''))[:800]}")
+        elif block_type == "text":
+            text = str(block.get("text", "")).strip()
+            if text:
+                label = "模型输出完成" if last else "模型输出中"
+                traces.append(f"{label}：{text[:800]}")
+    return traces
+
+
+async def run_plan_agent(user_prompt: str, trace_callback=None):
+    """Run the native AgentScope ReActAgent for plan generation."""
+    agent = await create_plan_agent()
+    if not trace_callback:
+        return await agent(Msg("user", user_prompt, "user"))
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    agent.set_msg_queue_enabled(True, queue)
+    task = asyncio.create_task(agent(Msg("user", user_prompt, "user")))
+
+    while True:
+        if task.done() and queue.empty():
+            break
+        try:
+            msg, last, _speech = await asyncio.wait_for(queue.get(), timeout=0.2)
+        except asyncio.TimeoutError:
+            continue
+        for trace in format_agent_trace(msg, last):
+            await trace_callback(trace)
+    return await task
 
 
 async def run_plan_validation_agent(
@@ -823,6 +890,38 @@ async def run_page_agent_task(task: str) -> str:
 
 
 # ── API 路由 ────────────────────────────────────────────────────
+
+
+def detect_chat_intent(message: str, session: dict[str, Any]) -> str:
+    if not session.get("generated"):
+        return "generate"
+    edit_keywords = (
+        "修改",
+        "更改",
+        "变更",
+        "调整",
+        "替换",
+        "修订",
+        "重新评估",
+        "风险点",
+        "人员名单",
+        "检修人员",
+        "执行人",
+        "复核人",
+        "安全责任人",
+        "按照",
+        "参考",
+    )
+    return "edit" if any(keyword in message for keyword in edit_keywords) else "generate"
+
+
+def get_generated_path(session: dict[str, Any]) -> Optional[Path]:
+    generated = session.get("generated") or {}
+    file_id = generated.get("file_id")
+    path = _generated_files.get(file_id)
+    if path and path.exists():
+        return path
+    return None
 
 
 @asynccontextmanager
@@ -974,6 +1073,10 @@ def docx_to_markdown(raw: bytes) -> str:
         return "\n".join(lines).strip() + "\n"
     finally:
         tmp_path.unlink(missing_ok=True)
+
+
+def docx_path_to_markdown(path: Path) -> str:
+    return docx_to_markdown(path.read_bytes())
 
 
 def list_knowledge_documents() -> list[dict[str, Any]]:
@@ -1240,6 +1343,12 @@ async def chat_stream(request: ChatRequest):
                 {"session_id": session_id, "message": "正在抽取需求中的关键信息..."},
             )
             session["history"].append({"role": "user", "content": message})
+            intent = detect_chat_intent(message, session)
+            if intent == "edit":
+                yield sse_event(
+                    "status",
+                    {"session_id": session_id, "message": "识别到这是对上一版文档的修订请求，正在读取已生成文档..."},
+                )
             extracted = await extract_chat_updates(session["state"], message)
             merge_updates(session["state"], extracted.get("updates", {}))
 
@@ -1253,7 +1362,7 @@ async def chat_stream(request: ChatRequest):
             )
             missing = find_missing_fields(session["state"])
 
-            if missing:
+            if missing and intent != "edit":
                 assistant_message = extracted.get("assistant_note") or "已收到，我先整理这些信息。"
                 assistant_message = f"{assistant_message}\n\n{build_missing_question(missing)}"
                 session["history"].append({"role": "assistant", "content": assistant_message})
@@ -1284,12 +1393,41 @@ async def chat_stream(request: ChatRequest):
                     "rag_chunks_count": orchestration["rag_chunks_count"],
                 },
             )
-            file_id, _path, filename = await generate_docx_from_state(
-                session["state"],
-                orchestration=orchestration,
+            previous_document_text = ""
+            if intent == "edit":
+                generated_path = get_generated_path(session)
+                if generated_path:
+                    previous_document_text = docx_path_to_markdown(generated_path)
+
+            trace_queue: asyncio.Queue = asyncio.Queue()
+
+            async def trace_callback(trace_message: str) -> None:
+                await trace_queue.put({"session_id": session_id, "message": trace_message})
+
+            generation_task = asyncio.create_task(
+                generate_docx_from_state(
+                    session["state"],
+                    orchestration=orchestration,
+                    trace_callback=trace_callback,
+                    edit_instruction=message if intent == "edit" else "",
+                    previous_document_text=previous_document_text,
+                )
             )
+            while True:
+                if generation_task.done() and trace_queue.empty():
+                    break
+                try:
+                    trace_data = await asyncio.wait_for(trace_queue.get(), timeout=0.2)
+                except asyncio.TimeoutError:
+                    continue
+                yield sse_event("trace", trace_data)
+
+            file_id, _path, filename = await generation_task
             download_url = f"/api/download/{file_id}"
+            assistant_message_override = "已基于上一版文档生成修订版。" if intent == "edit" else None
             assistant_message = "关键信息已收集完整，检修方案已生成。"
+            if assistant_message_override:
+                assistant_message = assistant_message_override
             session["generated"] = {
                 "file_id": file_id,
                 "filename": filename,
@@ -1625,14 +1763,19 @@ async def extract_chat_updates(state: dict[str, str], user_message: str) -> dict
 async def generate_docx_from_state(
     state: dict[str, str],
     orchestration: Optional[dict[str, Any]] = None,
+    trace_callback=None,
+    edit_instruction: str = "",
+    previous_document_text: str = "",
 ) -> tuple[str, Path, str]:
     if orchestration is None:
         orchestration = await build_generation_orchestration_context(state)
     user_prompt = build_user_prompt(
         **state,
         orchestration_context=orchestration["prompt_context"],
+        edit_instruction=edit_instruction,
+        previous_document_text=previous_document_text,
     )
-    response = await run_plan_agent(user_prompt)
+    response = await run_plan_agent(user_prompt, trace_callback=trace_callback)
     text = get_response_text(response)
     try:
         data = await repair_and_extract_json(text)

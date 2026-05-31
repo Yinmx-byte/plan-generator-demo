@@ -182,6 +182,10 @@ function initPlanPage() {
       addMessage(messagesEl, 'status', data.message || '处理中...');
       return;
     }
+    if (event === 'trace') {
+      addMessage(messagesEl, 'trace', data.message || 'Agent 执行中...');
+      return;
+    }
     if (event === 'evidence') {
       const skills = (data.selected_skills || []).join('、') || '未命中明确 Skill';
       const ragText = data.rag_enabled

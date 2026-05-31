@@ -297,6 +297,28 @@ input:focus {
   border: 1px solid #c9dcea;
 }
 .msg.status { background: var(--amber-soft); border: 1px solid #e6c57f; color: #70460a; }
+.msg.trace {
+  max-width: min(900px, 92%);
+  margin-left: 18px;
+  background: #f4f7fa;
+  border: 1px dashed #aeb9c7;
+  color: #2d3b4d;
+  font-family: "Cascadia Mono", "Consolas", "Microsoft YaHei UI", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  box-shadow: none;
+}
+.msg.trace::before {
+  content: "Agent";
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e2eaf2;
+  color: #244866;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  font-weight: 700;
+}
 .msg.error { background: var(--red-soft); border: 1px solid #efb9b3; color: var(--red); }
 .download {
   display: inline-block;
