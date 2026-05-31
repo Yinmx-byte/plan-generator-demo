@@ -53,7 +53,7 @@ def add_table_borders(table):
                 )
 
 
-def set_run_font(run, font_name="宋体", font_size=12, bold=False):
+def set_run_font(run, font_name="仿宋_GB2312", font_size=16, bold=False):
     run.font.name = font_name
     run.font.size = Pt(font_size)
     run.bold = bold
@@ -64,8 +64,8 @@ def add_paragraph(
     doc,
     text="",
     bold=False,
-    font_size=12,
-    font_name="宋体",
+    font_size=16,
+    font_name="仿宋_GB2312",
     alignment=None,
     space_after=6,
     first_line_indent=None,
@@ -82,21 +82,38 @@ def add_paragraph(
 
 
 def add_heading_text(doc, text, level=1):
-    sizes = {0: 16, 1: 14, 2: 12, 3: 12}
-    p = doc.add_paragraph()
+    sizes = {0: 22, 1: 16, 2: 16, 3: 16}
+    fonts = {0: "方正小标宋_GBK", 1: "黑体", 2: "楷体_GB2312", 3: "仿宋_GB2312"}
+    style_name = f"Heading {level}" if level in {1, 2, 3} else None
+    p = doc.add_paragraph(style=style_name)
     p.paragraph_format.space_before = Pt(12 if level <= 2 else 6)
     p.paragraph_format.space_after = Pt(6)
     run = p.add_run(str(text))
-    set_run_font(run, font_size=sizes.get(level, 12), bold=True)
+    set_run_font(
+        run,
+        font_name=fonts.get(level, "仿宋_GB2312"),
+        font_size=sizes.get(level, 16),
+        bold=True if level <= 2 else False,
+    )
     return p
 
 
 def apply_document_defaults(doc):
     style = doc.styles["Normal"]
     font = style.font
-    font.name = "宋体"
-    font.size = Pt(12)
-    style.element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+    font.name = "仿宋_GB2312"
+    font.size = Pt(16)
+    style.element.rPr.rFonts.set(qn("w:eastAsia"), "仿宋_GB2312")
+
+    for style_name, font_name in [
+        ("Heading 1", "黑体"),
+        ("Heading 2", "楷体_GB2312"),
+        ("Heading 3", "仿宋_GB2312"),
+    ]:
+        heading_style = doc.styles[style_name]
+        heading_style.font.name = font_name
+        heading_style.font.size = Pt(16)
+        heading_style.element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
 
     for section in doc.sections:
         section.top_margin = Cm(2.54)
@@ -160,7 +177,7 @@ def render_block(doc, block: dict[str, Any]):
             doc,
             block.get("text", ""),
             bold=bool(block.get("bold", False)),
-            font_size=int(block.get("font_size", 12)),
+            font_size=int(block.get("font_size", 16)),
             alignment=ALIGNMENTS.get(block.get("align")),
             first_line_indent=block.get("first_line_indent"),
         )
@@ -252,6 +269,20 @@ def normalize_section_blocks(section: dict[str, Any]) -> list[dict[str, Any]]:
     return blocks
 
 
+SECTION_NUMERALS = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
+
+
+def numbered_section_heading(text: Any, index: int) -> str:
+    heading = str(text or "").strip()
+    if not heading:
+        return heading
+    if "、" in heading[:3]:
+        return heading
+    if index < len(SECTION_NUMERALS):
+        return f"{SECTION_NUMERALS[index]}、{heading}"
+    return heading
+
+
 def render_document(doc, spec: dict[str, Any]):
     title = spec.get("title", "检修方案")
     cover = spec.get("cover", {})
@@ -268,7 +299,8 @@ def render_document(doc, spec: dict[str, Any]):
             doc,
             title,
             bold=True,
-            font_size=int(spec.get("title_font_size", cover.get("title_font_size", 18))),
+            font_size=int(spec.get("title_font_size", cover.get("title_font_size", 22))),
+            font_name=cover.get("title_font_name", "方正小标宋_GBK"),
             alignment=WD_ALIGN_PARAGRAPH.CENTER,
             space_after=12,
         )
@@ -281,7 +313,8 @@ def render_document(doc, spec: dict[str, Any]):
             add_paragraph(
                 doc,
                 line.get("text", ""),
-                font_size=int(line.get("font_size", 12)),
+                font_size=int(line.get("font_size", 16)),
+                font_name=line.get("font_name", "仿宋_GB2312"),
                 alignment=ALIGNMENTS.get(line.get("align", "center")),
                 space_after=int(line.get("space_after", 6)),
             )
@@ -291,7 +324,8 @@ def render_document(doc, spec: dict[str, Any]):
             doc,
             title,
             bold=True,
-            font_size=int(spec.get("title_font_size", 18)),
+            font_size=int(spec.get("title_font_size", 22)),
+            font_name=spec.get("title_font_name", "方正小标宋_GBK"),
             alignment=WD_ALIGN_PARAGRAPH.CENTER,
             space_after=12,
         )
@@ -302,19 +336,23 @@ def render_document(doc, spec: dict[str, Any]):
             add_paragraph(
                 doc,
                 line.get("text", ""),
-                font_size=int(line.get("font_size", 12)),
+                font_size=int(line.get("font_size", 16)),
+                font_name=line.get("font_name", "仿宋_GB2312"),
                 alignment=ALIGNMENTS.get(line.get("align", "center")),
                 space_after=int(line.get("space_after", 6)),
             )
 
-    for section in spec.get("sections") or spec.get("chapters") or []:
+    for section_index, section in enumerate(spec.get("sections") or spec.get("chapters") or []):
         if isinstance(section, str):
             section = {"blocks": [{"type": "paragraph", "text": section}]}
         if not isinstance(section, dict):
             continue
         heading = section.get("heading") or section.get("title")
         if heading:
-            add_heading_text(doc, heading, level=int(section.get("level", 1)))
+            level = int(section.get("level", 1))
+            if level == 1:
+                heading = numbered_section_heading(heading, section_index)
+            add_heading_text(doc, heading, level=level)
         for block in normalize_section_blocks(section):
             render_block(doc, block)
 

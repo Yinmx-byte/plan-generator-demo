@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import tempfile
 import uuid
 from datetime import datetime
@@ -26,6 +27,49 @@ from services.json_utils import extract_json, get_response_text
 from services.requirements import FORM_FIELDS
 
 _generated_files: dict[str, Path] = {}
+
+
+def compact_text(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip())
+
+
+def derive_plan_title(state: dict[str, str], data: dict[str, Any]) -> str:
+    """Keep the document title as a short plan name, not the raw demand."""
+    model_title = compact_text(data.get("title") or data.get("document", {}).get("title", ""))
+    demand_markers = ("需求", "需要", "项目组", "问题工单", "通过本次", "完成资源", "。", "，", ",")
+    if model_title and len(model_title) <= 28 and not any(marker in model_title for marker in demand_markers):
+        return model_title if model_title.endswith("检修方案") else f"{model_title}检修方案"
+
+    source = compact_text(state.get("background") or state.get("instances") or model_title)
+    subject = re.split(r"因|由于|为|需要|项目组|已提报|，|。|,", source, maxsplit=1)[0]
+    subject = re.sub(r"(创建|新增|新建|申请).*$", "", subject)
+    if not subject:
+        subject = compact_text(state.get("instances") or state.get("maintenance_type") or "云平台")
+
+    network = compact_text(state.get("network"))
+    if network and network not in subject and network in {"内网", "外网", "内外网", "内、外网"}:
+        subject = f"{network}{subject}"
+
+    source_lower = source.lower()
+    if "ecs" in source_lower or "云服务器" in source:
+        if any(word in source for word in ("创建", "新增", "新建", "申请")):
+            action = "创建ECS实例"
+        elif any(word in source for word in ("回收", "释放", "删除")):
+            action = "回收ECS实例"
+        elif "升配" in source:
+            action = "ECS升配"
+        elif "降配" in source:
+            action = "ECS降配"
+        elif "重启" in source:
+            action = "ECS实例重启"
+        else:
+            action = "ECS实例变更"
+    else:
+        action = compact_text(state.get("maintenance_type") or "检修")
+
+    title = f"{subject}{action}检修方案"
+    title = re.sub(r"(检修方案)+$", "检修方案", title)
+    return title[:40]
 
 
 def get_plan_agent_runtime() -> PlanAgentRuntime:
@@ -696,6 +740,12 @@ async def generate_docx_from_state(
             "rag_chunks_count",
             orchestration["rag_chunks_count"],
         )
+
+    normalized_title = derive_plan_title(state, data)
+    data["title"] = normalized_title
+    document_spec = data.setdefault("document", {})
+    if isinstance(document_spec, dict):
+        document_spec["title"] = normalized_title
 
     doc = build_document(data)
     output_dir = Path(tempfile.gettempdir()) / "plan-generator"
