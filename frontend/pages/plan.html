@@ -1,0 +1,23 @@
+<section class="plan-layout">
+  <div class="conversation-panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Plan Generator</p>
+        <h3>检修方案对话</h3>
+      </div>
+      <span class="pill">流式状态</span>
+    </div>
+    <div class="messages" id="messages"></div>
+  </div>
+
+  <section class="composer">
+    <textarea id="messageInput" placeholder="粘贴需求描述或需求文档。可以一次性包含检修窗口、人员、账号、实例、技术参数。"></textarea>
+    <div class="composer-actions">
+      <label class="check-option">
+        <input id="executeValidationInput" type="checkbox">
+        <span>生成后执行浏览器验证</span>
+      </label>
+      <button class="primary" id="sendBtn" type="button">发送</button>
+    </div>
+  </section>
+</section>

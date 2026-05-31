@@ -1,0 +1,24 @@
+<section class="agent-layout">
+  <div class="tool-card agent-command">
+    <p class="eyebrow">MCP Browser Automation</p>
+    <h3>Page Agent 测试</h3>
+    <p>这里的输出和主方案生成对话分开，方便单独验证浏览器自动化效果。</p>
+    <textarea id="pageAgentTaskInput" placeholder="例如：打开 https://www.baidu.com 并告诉我页面标题"></textarea>
+    <div class="button-row">
+      <button id="startMcpBtn" type="button">启动 Page Agent</button>
+      <button class="primary" id="runPageAgentBtn" type="button">执行测试</button>
+    </div>
+    <div class="status-text" id="mcpStatus">先启动 Page Agent，并在 Chrome 中确认扩展 Hub 已连接。</div>
+  </div>
+
+  <div class="conversation-panel agent-output">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Output</p>
+        <h3>Page Agent 输出</h3>
+      </div>
+      <span class="pill">独立日志</span>
+    </div>
+    <div class="messages" id="pageAgentMessages"></div>
+  </div>
+</section>
