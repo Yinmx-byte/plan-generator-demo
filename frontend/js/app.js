@@ -90,13 +90,47 @@ async function loadSkills() {
       const item = document.createElement('div');
       item.className = 'item-card';
       item.innerHTML = `
-        <div class="item-title">${escapeHtml(skill.name)}</div>
+        <div class="item-card-head">
+          <div class="item-title">${escapeHtml(skill.name)}</div>
+          <button class="icon-action" type="button" title="编辑 SKILL.md" aria-label="编辑 ${escapeHtml(skill.name)}">编辑</button>
+        </div>
         <div class="item-meta">${escapeHtml(skill.description || '未填写描述')}</div>
       `;
+      item.querySelector('.icon-action').addEventListener('click', () => openSkillEditor(skill.name));
       return item;
     });
   } catch (err) {
     listEl.innerHTML = `<div class="msg error">Skill 加载失败：${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function openSkillEditor(skillName) {
+  const dialog = document.getElementById('skillEditDialog');
+  const title = document.getElementById('skillEditTitle');
+  const meta = document.getElementById('skillEditMeta');
+  const editor = document.getElementById('skillEditor');
+  const status = document.getElementById('skillEditStatus');
+  const saveBtn = document.getElementById('saveSkillBtn');
+  if (!dialog || !editor) return;
+
+  title.textContent = `编辑 ${skillName}`;
+  meta.textContent = '正在读取 SKILL.md...';
+  status.textContent = '';
+  editor.value = '';
+  saveBtn.disabled = true;
+  dialog.dataset.skillName = skillName;
+  dialog.showModal();
+
+  try {
+    const resp = await fetch(`/api/skills/${encodeURIComponent(skillName)}`);
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '读取失败');
+    editor.value = data.content || '';
+    meta.textContent = data.path || '';
+    saveBtn.disabled = false;
+    editor.focus();
+  } catch (err) {
+    status.textContent = '读取失败：' + err.message;
   }
 }
 
@@ -222,11 +256,16 @@ function initPlanPage() {
 
 function initSkillsPage() {
   const uploadForm = document.getElementById('uploadForm');
+  const editForm = document.getElementById('skillEditForm');
   const uploadStatus = document.getElementById('uploadStatus');
   const uploadDialog = document.getElementById('skillUploadDialog');
+  const editDialog = document.getElementById('skillEditDialog');
   const openUploadBtn = document.getElementById('openSkillUploadBtn');
   const skillNameInput = document.getElementById('skillNameInput');
   const skillFileInput = document.getElementById('skillFileInput');
+  const skillEditor = document.getElementById('skillEditor');
+  const skillEditStatus = document.getElementById('skillEditStatus');
+  const saveSkillBtn = document.getElementById('saveSkillBtn');
   loadSkills();
   openUploadBtn.addEventListener('click', () => uploadDialog.showModal());
   uploadForm.addEventListener('submit', async (event) => {
@@ -255,6 +294,39 @@ function initSkillsPage() {
       await loadSkills();
     } catch (err) {
       uploadStatus.textContent = '上传失败：' + err.message;
+    }
+  });
+
+  editForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (event.submitter?.value === 'cancel') {
+      editDialog.close();
+      return;
+    }
+    const skillName = editDialog.dataset.skillName;
+    if (!skillName) return;
+    const content = skillEditor.value.trim();
+    if (!content) {
+      skillEditStatus.textContent = 'Skill 内容不能为空';
+      return;
+    }
+    saveSkillBtn.disabled = true;
+    skillEditStatus.textContent = '正在保存...';
+    try {
+      const resp = await fetch(`/api/skills/${encodeURIComponent(skillName)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '保存失败');
+      skillEditStatus.textContent = '保存完成，AgentScope Skill 已刷新';
+      editDialog.close();
+      await loadSkills();
+    } catch (err) {
+      skillEditStatus.textContent = '保存失败：' + err.message;
+    } finally {
+      saveSkillBtn.disabled = false;
     }
   });
 }

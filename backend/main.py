@@ -10,8 +10,11 @@ import json
 import os
 import uuid
 import asyncio
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, Form, HTTPException
@@ -24,15 +27,16 @@ from rag import get_knowledge_base
 from api.admin_routes import router as admin_router
 from agents.workflow_agent import (
     WorkflowAgentRuntime,
-    classify_chat_intent,
-    run_normal_chat,
+    run_workflow_turn,
 )
 from runtime import (
     ROOT,
     SKILLS_ROOT,
     close_mcp_clients,
+    get_formatter,
     get_model,
     get_skill_registry,
+    get_skill_toolkit,
     get_toolkit,
     load_mcp_server_configs,
 )
@@ -70,11 +74,21 @@ class PageAgentTaskRequest(BaseModel):
     task: str
 
 
+class PlanTestRequest(BaseModel):
+    message: str = ""
+    state: Optional[dict[str, Any]] = None
+    allow_partial: bool = False
+    evaluate: bool = False
+    evaluate_generated_docx: bool = False
+    reference_dir: Optional[str] = None
+
+
 def get_workflow_agent_runtime() -> WorkflowAgentRuntime:
     """Wire runtime dependencies for the workflow/controller agent."""
     return WorkflowAgentRuntime(
         get_model=get_model,
-        get_skill_registry=get_skill_registry,
+        get_formatter=get_formatter,
+        get_toolkit=get_skill_toolkit,
         extract_json=extract_json,
         get_response_text=get_response_text,
     )
@@ -160,6 +174,121 @@ async def execute_page_agent_task(request: PageAgentTaskRequest):
 app.include_router(admin_router)
 
 
+def run_iterator_evaluation(
+    reference_dir: str,
+    candidate_docx: Path,
+    source_skill: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Evaluate the generated DOCX and derive source Skill improvement hints."""
+    script = Path.home() / ".codex" / "skills" / "maintenance-skill-iterator" / "scripts" / "evaluate_plan_quality.py"
+    if not script.exists():
+        raise HTTPException(status_code=500, detail=f"未找到自迭代评估脚本：{script}")
+    reference_path = Path(reference_dir)
+    if not reference_path.exists():
+        raise HTTPException(status_code=400, detail=f"参考文档目录不存在：{reference_dir}")
+    command = [
+        sys.executable,
+        str(script),
+        "--reference-dir",
+        str(reference_path),
+        "--candidate-docx",
+        str(candidate_docx),
+    ]
+    if source_skill is not None:
+        command.extend(["--source-skill", str(source_skill)])
+    process = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=int(os.getenv("SKILL_ITERATOR_TIMEOUT", "120")),
+    )
+    if process.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "自迭代评估脚本执行失败",
+                "stderr": process.stderr,
+                "stdout": process.stdout,
+            },
+        )
+    try:
+        return json.loads(process.stdout)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "自迭代评估脚本输出不是合法 JSON",
+                "stdout": process.stdout,
+            },
+        ) from exc
+
+
+@app.post("/api/dev/plan-test")
+async def dev_plan_test(request: PlanTestRequest):
+    """Development-only quick path: requirement text/state -> DOCX -> optional quality evaluation."""
+    state = default_form_state()
+    if request.state:
+        merge_updates(state, request.state)
+
+    if request.message.strip():
+        extracted = await extract_chat_updates(state, request.message)
+        merge_updates(state, extracted.get("updates", {}))
+    else:
+        extracted = {"updates": {}, "assistant_note": ""}
+
+    missing = find_missing_fields(state)
+    if missing and not request.allow_partial:
+        return {
+            "status": "need_more",
+            "message": build_missing_question(missing),
+            "missing_fields": missing,
+            "collected": state,
+            "extracted": extracted.get("updates", {}),
+        }
+
+    orchestration = await build_generation_orchestration_context(state)
+    file_id, output_path, filename = await generate_docx_from_state(
+        state,
+        orchestration=orchestration,
+    )
+    generated_docx_evaluation = None
+    should_evaluate_generated_docx = request.evaluate or request.evaluate_generated_docx
+    if should_evaluate_generated_docx:
+        if not request.reference_dir:
+            raise HTTPException(status_code=400, detail="评估生成结果时必须提供 reference_dir")
+        selected_skill_paths = {
+            skill.name: skill.path for skill in get_skill_registry().skills
+        }
+        source_skill = None
+        for skill_name in orchestration["selected_skill_names"]:
+            if skill_name in selected_skill_paths and skill_name != "maintenance-plan-composer":
+                source_skill = selected_skill_paths[skill_name] / "SKILL.md"
+                break
+        generated_docx_evaluation = await asyncio.to_thread(
+            run_iterator_evaluation,
+            request.reference_dir,
+            output_path,
+            source_skill,
+        )
+    return {
+        "status": "generated",
+        "file_id": file_id,
+        "filename": filename,
+        "download_url": f"/api/download/{file_id}",
+        "output_path": str(output_path),
+        "collected": state,
+        "extracted": extracted.get("updates", {}),
+        "evidence": {
+            "selected_skills": orchestration["selected_skill_names"],
+            "rag_enabled": orchestration["rag_enabled"],
+            "rag_chunks_count": orchestration["rag_chunks_count"],
+        },
+        "generated_docx_evaluation": generated_docx_evaluation,
+    }
+
+
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
     session_id = request.session_id or uuid.uuid4().hex
@@ -176,10 +305,10 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=400, detail="请输入需求描述或补充信息")
 
     session["history"].append({"role": "user", "content": message})
-    classification = await classify_chat_intent(message, session, get_workflow_agent_runtime())
+    classification = await run_workflow_turn(message, session, get_workflow_agent_runtime())
     intent = classification["intent"]
     if intent == "chat":
-        assistant_message = await run_normal_chat(session, message, get_workflow_agent_runtime())
+        assistant_message = classification.get("assistant_message") or "我在。"
         session["history"].append({"role": "assistant", "content": assistant_message})
         return {
             "session_id": session_id,
@@ -281,7 +410,7 @@ async def chat_stream(request: ChatRequest):
                 {"session_id": session_id, "message": "正在识别用户意图..."},
             )
             session["history"].append({"role": "user", "content": message})
-            classification = await classify_chat_intent(message, session, get_workflow_agent_runtime())
+            classification = await run_workflow_turn(message, session, get_workflow_agent_runtime())
             intent = classification["intent"]
             yield sse_event(
                 "intent",
@@ -292,7 +421,7 @@ async def chat_stream(request: ChatRequest):
                 },
             )
             if intent == "chat":
-                assistant_message = await run_normal_chat(session, message, get_workflow_agent_runtime())
+                assistant_message = classification.get("assistant_message") or "我在。"
                 session["history"].append({"role": "assistant", "content": assistant_message})
                 yield sse_event(
                     "done",

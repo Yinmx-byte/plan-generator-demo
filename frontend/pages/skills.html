@@ -32,3 +32,20 @@
     <button class="primary" type="submit">确认上传</button>
   </form>
 </dialog>
+
+<dialog class="modal modal-wide" id="skillEditDialog">
+  <form class="modal-card skill-editor-card" id="skillEditForm">
+    <div class="modal-head">
+      <div>
+        <h3 id="skillEditTitle">编辑 Skill</h3>
+        <p id="skillEditMeta">仅编辑 SKILL.md，scripts 暂不开放。</p>
+      </div>
+      <button class="ghost" value="cancel" formmethod="dialog" type="submit">关闭</button>
+    </div>
+    <textarea id="skillEditor" spellcheck="false" placeholder="SKILL.md 内容"></textarea>
+    <div class="modal-actions">
+      <span class="status-text" id="skillEditStatus"></span>
+      <button class="primary" id="saveSkillBtn" type="submit">保存 Skill</button>
+    </div>
+  </form>
+</dialog>

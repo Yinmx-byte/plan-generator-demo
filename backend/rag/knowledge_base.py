@@ -78,10 +78,6 @@ class MaintenanceKnowledgeBase:
             split_by=os.getenv("RAG_SPLIT_BY", "paragraph"),
         )
         documents = []
-        for path in sorted(self.data_dir.glob("*/SKILL.md")):
-            documents.extend(await reader(str(path)))
-        for path in sorted(self.data_dir.glob("*/references/*.md")):
-            documents.extend(await reader(str(path)))
         knowledge_dir = self.data_dir.parent / "knowledge"
         if knowledge_dir.exists():
             for pattern in ("**/*.md", "**/*.txt"):
@@ -126,7 +122,7 @@ def get_knowledge_base(data_dir: Path) -> Optional[MaintenanceKnowledgeBase]:
 
     knowledge_base = MaintenanceKnowledgeBase(
         data_dir=data_dir,
-        collection_name=os.getenv("RAG_COLLECTION_NAME", "maintenance_plan_knowledge"),
+        collection_name=os.getenv("RAG_COLLECTION_NAME", "maintenance_plan_knowledge_v2"),
         similarity_top_k=int(os.getenv("RAG_TOP_K", "5")),
     )
     if not knowledge_base.enabled:
@@ -137,6 +133,6 @@ def get_knowledge_base(data_dir: Path) -> Optional[MaintenanceKnowledgeBase]:
 
 
 def reset_knowledge_base() -> None:
-    """Clear cached knowledge so new skill/reference files are re-indexed."""
+    """Clear cached knowledge so new knowledge files are re-indexed."""
     global _knowledge_base
     _knowledge_base = None

@@ -1,7 +1,10 @@
 """Shared AgentScope runtime wiring for the backend."""
 
+import asyncio
 import json
 import os
+import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -13,6 +16,7 @@ from agentscope.tool import Toolkit, ToolResponse
 from dotenv import load_dotenv
 
 from rag import get_knowledge_base, reset_knowledge_base
+from scripts.generate_plan import build_document
 from skills_runtime import SkillRegistry
 
 ROOT = Path(__file__).parent
@@ -21,6 +25,7 @@ SKILLS_ROOT = ROOT / "skills"
 load_dotenv(ROOT / ".env", override=True)
 
 _skill_registry: Optional[SkillRegistry] = None
+_skill_toolkit: Optional[Toolkit] = None
 _toolkit: Optional[Toolkit] = None
 _mcp_clients: list[Any] = []
 _model: Optional[AnthropicChatModel | OpenAIChatModel] = None
@@ -35,11 +40,20 @@ def get_skill_registry() -> SkillRegistry:
 
 async def reset_skill_runtime() -> None:
     """Reload skill metadata/toolkit after skill files change."""
-    global _skill_registry, _toolkit
-    await close_mcp_clients()
+    global _skill_registry, _skill_toolkit, _toolkit
+    has_mcp_clients = bool(_mcp_clients)
     _skill_registry = None
+    _skill_toolkit = None
     _toolkit = None
     reset_knowledge_base()
+    if has_mcp_clients:
+        try:
+            await asyncio.wait_for(
+                close_mcp_clients(),
+                timeout=float(os.getenv("MCP_CLOSE_TIMEOUT", "2")),
+            )
+        except asyncio.TimeoutError:
+            _mcp_clients.clear()
 
 
 async def read_file(file_path: str) -> ToolResponse:
@@ -59,6 +73,63 @@ async def read_file(file_path: str) -> ToolResponse:
         raise FileNotFoundError(str(resolved))
     content = resolved.read_text(encoding="utf-8")
     return ToolResponse(content=[TextBlock(type="text", text=content)])
+
+
+async def build_maintenance_document(document_json: Any) -> ToolResponse:
+    """校验并试渲染检修方案 JSON。
+
+    Args:
+        document_json: 方案 JSON 对象或 JSON 字符串，必须包含 document.sections。
+    """
+    if isinstance(document_json, str):
+        data = json.loads(document_json)
+    elif isinstance(document_json, dict):
+        data = document_json
+    else:
+        raise ValueError("document_json 必须是 JSON 字符串或对象。")
+
+    document = data.get("document")
+    if not isinstance(document, dict):
+        raise ValueError("缺少 document 对象。")
+    sections = document.get("sections")
+    if not isinstance(sections, list) or not sections:
+        raise ValueError("document.sections 必须是非空数组。")
+    required_sections = ["背景", "检修类型", "现场环境", "实施计划", "风险评估", "实施步骤", "回滚步骤"]
+    actual_sections = {
+        str(section.get("heading", "")).replace(" ", "")
+        for section in sections
+        if isinstance(section, dict)
+    }
+    missing_sections = [
+        name for name in required_sections if not any(name in actual for actual in actual_sections)
+    ]
+    if missing_sections:
+        raise ValueError(f"缺少固定章节：{', '.join(missing_sections)}。")
+    for index, section in enumerate(sections, start=1):
+        if not isinstance(section, dict):
+            raise ValueError(f"第 {index} 个 section 必须是对象。")
+        if not section.get("heading"):
+            raise ValueError(f"第 {index} 个 section 缺少 heading。")
+        if not isinstance(section.get("blocks"), list) or not section.get("blocks"):
+            raise ValueError(f"第 {index} 个 section 必须包含非空 blocks。")
+
+    doc = build_document(data)
+    output_dir = Path(tempfile.gettempdir()) / "plan-generator" / "agent-preview"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    preview_path = output_dir / f"preview_{uuid.uuid4().hex[:8]}.docx"
+    doc.save(str(preview_path))
+    return ToolResponse(
+        content=[
+            TextBlock(
+                type="text",
+                text=(
+                    "DOCX 渲染检查通过。"
+                    f" sections={len(sections)} preview={preview_path}"
+                    " 最终回答仍需输出完整 JSON 对象。"
+                ),
+            )
+        ]
+    )
 
 
 def load_mcp_server_configs() -> list[dict[str, Any]]:
@@ -181,11 +252,31 @@ async def get_toolkit() -> Toolkit:
 
     toolkit = Toolkit()
     toolkit.register_tool_function(read_file)
+    toolkit.register_tool_function(build_maintenance_document)
     for skill in get_skill_registry().skills:
         toolkit.register_agent_skill(str(skill.path))
     await register_mcp_servers(toolkit)
     _toolkit = toolkit
     return _toolkit
+
+
+async def get_skill_toolkit() -> Toolkit:
+    """Create a lightweight Toolkit for workflow routing and normal chat.
+
+    This intentionally excludes MCP clients so intention recognition never
+    starts browser/page-agent tools as a side effect.
+    """
+    global _skill_toolkit
+    if _skill_toolkit is not None:
+        return _skill_toolkit
+
+    toolkit = Toolkit()
+    toolkit.register_tool_function(read_file)
+    toolkit.register_tool_function(build_maintenance_document)
+    for skill in get_skill_registry().skills:
+        toolkit.register_agent_skill(str(skill.path))
+    _skill_toolkit = toolkit
+    return _skill_toolkit
 
 
 # ── LLM 客户端 (AgentScope AnthropicChatModel) ─────────────────

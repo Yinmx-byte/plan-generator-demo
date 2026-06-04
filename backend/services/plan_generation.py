@@ -1,4 +1,4 @@
-"""Maintenance plan generation service."""
+﻿"""Maintenance plan generation service."""
 
 import json
 import os
@@ -20,7 +20,7 @@ from runtime import (
     get_formatter,
     get_model,
     get_skill_registry,
-    get_toolkit,
+    get_skill_toolkit,
 )
 from scripts.generate_plan import build_document
 from services.json_utils import extract_json, get_response_text
@@ -40,33 +40,21 @@ def derive_plan_title(state: dict[str, str], data: dict[str, Any]) -> str:
     if model_title and len(model_title) <= 28 and not any(marker in model_title for marker in demand_markers):
         return model_title if model_title.endswith("检修方案") else f"{model_title}检修方案"
 
-    source = compact_text(state.get("background") or state.get("instances") or model_title)
-    subject = re.split(r"因|由于|为|需要|项目组|已提报|，|。|,", source, maxsplit=1)[0]
-    subject = re.sub(r"(创建|新增|新建|申请).*$", "", subject)
-    if not subject:
-        subject = compact_text(state.get("instances") or state.get("maintenance_type") or "云平台")
-
     network = compact_text(state.get("network"))
+    source = compact_text(
+        state.get("background")
+        or state.get("instances")
+        or state.get("maintenance_type")
+        or model_title
+        or "云平台"
+    )
+    subject = re.split(r"因|由于|为|需要|项目组|已提报|，|。|,", source, maxsplit=1)[0]
+    subject = re.sub(r"(创建|新增|新建|申请|回收|释放|删除|调整|变更|重启|扩容|缩容|升配|降配).*$", "", subject)
+    subject = subject or compact_text(state.get("instances") or state.get("maintenance_type") or "云平台")
     if network and network not in subject and network in {"内网", "外网", "内外网", "内、外网"}:
         subject = f"{network}{subject}"
 
-    source_lower = source.lower()
-    if "ecs" in source_lower or "云服务器" in source:
-        if any(word in source for word in ("创建", "新增", "新建", "申请")):
-            action = "创建ECS实例"
-        elif any(word in source for word in ("回收", "释放", "删除")):
-            action = "回收ECS实例"
-        elif "升配" in source:
-            action = "ECS升配"
-        elif "降配" in source:
-            action = "ECS降配"
-        elif "重启" in source:
-            action = "ECS实例重启"
-        else:
-            action = "ECS实例变更"
-    else:
-        action = compact_text(state.get("maintenance_type") or "检修")
-
+    action = compact_text(state.get("maintenance_type") or "检修")
     title = f"{subject}{action}检修方案"
     title = re.sub(r"(检修方案)+$", "检修方案", title)
     return title[:40]
@@ -78,7 +66,7 @@ def get_plan_agent_runtime() -> PlanAgentRuntime:
         build_system_prompt=build_system_prompt,
         get_model=get_model,
         get_formatter=get_formatter,
-        get_toolkit=get_toolkit,
+        get_toolkit=get_skill_toolkit,
         get_agent_knowledge=get_agent_knowledge,
         get_response_text=get_response_text,
     )
@@ -225,9 +213,9 @@ def build_fallback_plan_data(
     orchestration: dict[str, Any],
     raw_text: str = "",
 ) -> dict[str, Any]:
-    """Build a conservative document spec when model JSON cannot be parsed."""
-    maintenance_type = state.get("maintenance_type") or "检修方案"
-    title = f"{maintenance_type}检修方案"
+    """Build a renderer-safe generic document when model JSON cannot be parsed."""
+    maintenance_type = state.get("maintenance_type") or "检修"
+    title = derive_plan_title(state, {"title": f"{maintenance_type}检修方案"})
     checked_type = maintenance_type.strip()
     type_names = ["配置变更", "组件升级", "组件扩缩容", "数据库变更", "日常维护（原硬件设备）", "其他"]
     checkbox_items = [
@@ -240,159 +228,7 @@ def build_fallback_plan_data(
     ]
     if not any(item["checked"] for item in checkbox_items):
         checkbox_items[-1]["checked"] = True
-        checkbox_items[-1]["extra"] = checked_type
-
-    schedule_text = " ".join(
-        value
-        for value in [
-            state.get("schedule_year", ""),
-            state.get("schedule_start", ""),
-            "至" if state.get("schedule_start") or state.get("schedule_end") else "",
-            state.get("schedule_end", ""),
-        ]
-        if value
-    )
-    ops_hint = state.get("ops_detail") or "按对应检修类型 Skill 进行前置检查、变更实施、结果验证和回滚准备。"
-    tech_hint = state.get("tech_params") or "无额外技术参数。"
-    text_blob = "\n".join(
-        [
-            state.get("background", ""),
-            state.get("maintenance_type", ""),
-            state.get("instances", ""),
-            state.get("tech_params", ""),
-            state.get("ops_detail", ""),
-        ]
-    ).lower()
-    if "ecs" in text_blob and any(word in text_blob for word in ["创建", "新建", "申请"]):
-        item_name = state.get("background") or state.get("instances") or "创建ecs实例"
-        organization = "待实施前确认"
-        resource_set = "待实施前确认"
-        return {
-            "title": f"{item_name}检修方案",
-            "department": "云运营中心平台运维处",
-            "date": datetime.now().strftime("%Y年%m月%d日"),
-            "evidence": {
-                "selected_skills": orchestration.get("selected_skill_names", []),
-                "rag_enabled": orchestration.get("rag_enabled", False),
-                "rag_chunks_count": orchestration.get("rag_chunks_count", 0),
-                "fallback_used": True,
-                "raw_output_saved": bool(raw_text),
-            },
-            "document": {
-                "title": f"{item_name}检修方案",
-                "cover": {"logo_width_cm": 3.1, "top_spacers": 7, "middle_spacers": 8},
-                "header": [
-                    {"text": "云运营中心平台运维处", "font_size": 14, "align": "center"},
-                    {"text": datetime.now().strftime("%Y年%m月%d日"), "font_size": 12, "align": "center"},
-                ],
-                "sections": [
-                    {
-                        "heading": "背景",
-                        "blocks": [
-                            {"type": "paragraph", "text": item_name},
-                            {"type": "paragraph", "text": "该事项项目组提报问题工单，需检修进行处理，实现问题工单闭环。"},
-                        ],
-                    },
-                    {"heading": "检修类型", "blocks": [{"type": "checkbox_group", "items": checkbox_items, "per_line": 3}]},
-                    {
-                        "heading": "现场环境",
-                        "blocks": [
-                            {"type": "paragraph", "text": f"（1）内网环境/外网环境：{state.get('network', '')}"},
-                            {"type": "paragraph", "text": f"（2）实施地点：{state.get('location', '')}"},
-                            {"type": "paragraph", "text": "（3）专有云版本：v3.16"},
-                            {"type": "paragraph", "text": "（4）涉及的组件实例信息："},
-                            {"type": "paragraph", "text": f"1、{item_name}"},
-                            {"type": "paragraph", "text": f"组织：{organization}"},
-                            {"type": "paragraph", "text": f"资源集：{resource_set}"},
-                            {
-                                "type": "table",
-                                "columns": [
-                                    {"key": "cloud_env", "label": "云环境"},
-                                    {"key": "instance_name", "label": "实例名称"},
-                                    {"key": "disk", "label": "磁盘"},
-                                    {"key": "image", "label": "自定义镜像"},
-                                    {"key": "password", "label": "密码"},
-                                    {"key": "vpc", "label": "VPC ID或名称"},
-                                    {"key": "vswitch", "label": "Vswitch ID或名称"},
-                                    {"key": "security_group", "label": "安全组"},
-                                    {"key": "spec", "label": "实例规格"},
-                                    {"key": "count", "label": "数量"},
-                                ],
-                                "rows": [
-                                    {
-                                        "cloud_env": state.get("network", ""),
-                                        "instance_name": state.get("instances", "") or "待实施前确认",
-                                        "disk": "待实施前确认",
-                                        "image": "待实施前确认",
-                                        "password": "按 ASCM 平台规范生成，方案不明文展示",
-                                        "vpc": "待实施前确认",
-                                        "vswitch": "待实施前确认",
-                                        "security_group": "待实施前确认",
-                                        "spec": "待实施前确认",
-                                        "count": "待实施前确认",
-                                    }
-                                ],
-                            },
-                        ],
-                    },
-                    {
-                        "heading": "实施计划",
-                        "blocks": [
-                            {"type": "heading", "text": "4.1 检修窗口", "level": 2},
-                            {"type": "table", "columns": [{"key": "year", "label": "年份"}, {"key": "start_time", "label": "开始时间"}, {"key": "end_time", "label": "结束时间"}], "rows": [{"year": state.get("schedule_year", ""), "start_time": state.get("schedule_start", ""), "end_time": state.get("schedule_end", "")}]},
-                            {"type": "heading", "text": "4.2 实施人员", "level": 2},
-                            {"type": "table", "columns": [{"key": "provider", "label": "方案提供人"}, {"key": "executor", "label": "检修执行人"}, {"key": "reviewer", "label": "检修复核人"}, {"key": "business_participant", "label": "业务系统参与人"}, {"key": "security_officer", "label": "安全责任人"}], "rows": [{"provider": state.get("provider", ""), "executor": state.get("executor", ""), "reviewer": state.get("reviewer", ""), "business_participant": "不涉及", "security_officer": state.get("security_officer", "")}]},
-                        ],
-                    },
-                    {
-                        "heading": "风险评估",
-                        "blocks": [
-                            {"type": "heading", "text": "5.1影响范围", "level": 2},
-                            {"type": "paragraph", "text": f"{item_name}对业务无影响；"},
-                            {"type": "heading", "text": "5.2危险点分析", "level": 2},
-                            {"type": "paragraphs", "items": [
-                                "（1）授权不当危险点：授权过大，导致操作影响预定方案以外的生产环境实例。",
-                                "（2）备份不当危险点：本次创建新实例不涉及业务数据备份，但需保留创建参数用于回滚删除核对。",
-                                "（3）验证不当危险点：ECS操作对象，以及组织、资源集、VPC、VSwitch、安全组、镜像、规格、IP地址余量未核实清楚，导致创建失败或业务不可达。",
-                                "（4）双人复核不当危险点：双人复核不仔细，导致操作错误执行而出现业务影响。",
-                            ]},
-                            {"type": "heading", "text": "5.3安全措施", "level": 2},
-                            {"type": "heading", "text": "5.3.1授权", "level": 3},
-                            {"type": "paragraphs", "items": [f"ASCM：国网总部直属单位权限     授权账号：{state.get('ascm_account', '')}", f"堡垒机账号：{state.get('bastion_account', '')}"]},
-                            {"type": "heading", "text": "5.3.2备份", "level": 3},
-                            {"type": "paragraph", "text": f"(1){item_name}不涉及备份"},
-                            {"type": "heading", "text": "5.3.3验证", "level": 3},
-                            {"type": "paragraph", "text": f"(1){item_name}检查资源集IP充足，确认VPC、VSwitch、安全组、镜像、规格、磁盘、数量与需求一致。"},
-                            {"type": "heading", "text": "5.3.4 双人复核", "level": 3},
-                            {"type": "paragraphs", "items": ["(1)确认在正确的组织和资源集下做操作，检查实例操作对象是否正确；", "(2)严格按照文档复核关键步骤及关键点。"]},
-                        ],
-                    },
-                    {
-                        "heading": "实施步骤",
-                        "blocks": [
-                            {"type": "heading", "text": "6.1备份", "level": 2},
-                            {"type": "numbered_list", "items": [f"{item_name}不涉及备份"]},
-                            {"type": "heading", "text": "6.2 检修前验证", "level": 2},
-                            {"type": "numbered_list", "items": [f"{item_name}检查资源集IP充足", f"确认组织“{organization}”、资源集“{resource_set}”、云环境“{state.get('network', '')}”与工单需求一致。", "确认VPC、VSwitch、安全组、镜像、实例规格、磁盘、数量已由双人复核。"]},
-                            {"type": "heading", "text": "6.3 检修操作", "level": 2},
-                            {"type": "heading", "text": f"6.3.1 {item_name}", "level": 3},
-                            {"type": "paragraphs", "items": [f"使用{state.get('ascm_account', '')}账号，登录{state.get('network', '')}ASCM平台，产品选择“云服务器ECS”。", f"选择组织“{organization}”-资源集“{resource_set}”，进入云服务器ECS实例列表。", "点击“创建”或“创建ECS实例”。", "按参数表填写云环境、实例名称、磁盘、自定义镜像、VPC、VSwitch、安全组、实例规格、数量等内容。", "确认填写内容无误后，由检修复核人进行关键参数复核。", "复核通过后点击提交，等待创建任务完成。", "创建完成后进入实例列表，确认新建ECS实例状态为运行中或正常，记录实例ID、IP地址和所属资源集。"]},
-                            {"type": "heading", "text": "6.4 检修后验证", "level": 2},
-                            {"type": "numbered_list", "items": [f"验证{item_name}实例状态正常；", "核对实例名称、规格、磁盘、镜像、VPC、VSwitch、安全组、IP、资源集与参数表一致；", "联系项目组验证业务正常；", "保留ASCM创建结果截图、实例列表截图和项目组验证记录。"]},
-                        ],
-                    },
-                    {
-                        "heading": "回滚步骤",
-                        "blocks": [
-                            {"type": "heading", "text": "7.1 回滚操作", "level": 2},
-                            {"type": "numbered_list", "items": [f"{item_name}回退", "删除新建ecs实例", "确认实例列表中已不存在本次新建实例，或实例处于已释放状态。"]},
-                            {"type": "heading", "text": "7.2 回滚后验证", "level": 2},
-                            {"type": "numbered_list", "items": [f"{item_name}回退验证", "验证回退正常；联系项目组验证业务正常。"]},
-                        ],
-                    },
-                ],
-            },
-        }
+        checkbox_items[-1]["extra"] = checked_type or "待实施前确认"
 
     return {
         "title": title,
@@ -407,110 +243,89 @@ def build_fallback_plan_data(
         },
         "document": {
             "title": title,
+            "cover": {"logo_width_cm": 3.1, "top_spacers": 7, "middle_spacers": 8},
             "header": [
-                {"text": "云运营中心平台运维处", "align": "center"},
-                {"text": datetime.now().strftime("%Y年%m月%d日"), "align": "center"},
+                {"text": "云运营中心平台运维处", "font_size": 14, "align": "center"},
+                {"text": datetime.now().strftime("%Y年%m月%d日"), "font_size": 12, "align": "center"},
             ],
             "sections": [
                 {
-                    "heading": "一、背景",
+                    "heading": "背景",
+                    "level": 1,
                     "blocks": [
-                        {
-                            "type": "numbered_list",
-                            "items": [state.get("background") or "根据业务运维需求，需要制定并执行本次检修方案。"],
-                            "first_line_indent": 0.74,
-                        },
-                        {
-                            "type": "paragraph",
-                            "text": "以上事项由项目组提出检修需求，需通过规范化实施完成问题闭环。",
-                            "first_line_indent": 0.74,
-                        },
+                        {"type": "paragraph", "text": state.get("background") or "根据业务运维需求，需要制定并执行本次检修方案。", "first_line_indent": 0.74},
+                        {"type": "paragraph", "text": "该事项项目组提报问题工单，需检修进行处理，实现问题工单闭环。", "first_line_indent": 0.74},
+                    ],
+                },
+                {"heading": "检修类型", "level": 1, "blocks": [{"type": "checkbox_group", "items": checkbox_items, "per_line": 3}]},
+                {
+                    "heading": "现场环境",
+                    "level": 1,
+                    "blocks": [
+                        {"type": "paragraph", "text": f"（1）内网环境/外网环境：{state.get('network') or '待实施前确认'}"},
+                        {"type": "paragraph", "text": f"（2）实施地点：{state.get('location') or '待实施前确认'}"},
+                        {"type": "paragraph", "text": "（3）专有云版本：v3.16"},
+                        {"type": "paragraph", "text": "（4）涉及的组件实例信息："},
+                        {"type": "paragraph", "text": state.get("instances") or "待实施前确认", "first_line_indent": 0.74},
                     ],
                 },
                 {
-                    "heading": "二、检修类型",
-                    "blocks": [{"type": "checkbox_group", "items": checkbox_items, "per_line": 2}],
-                },
-                {
-                    "heading": "三、现场环境",
+                    "heading": "实施计划",
+                    "level": 1,
                     "blocks": [
-                        {
-                            "type": "key_values",
-                            "items": [
-                                {"label": "网络环境", "value": state.get("network", "")},
-                                {"label": "实施地点", "value": state.get("location", "")},
-                                {"label": "检修窗口", "value": schedule_text},
-                            ],
-                        },
-                        {"type": "paragraph", "text": "涉及实例信息：", "first_line_indent": 0.74},
-                        {"type": "paragraph", "text": state.get("instances") or "待实施前由执行人员再次确认。", "first_line_indent": 0.74},
+                        {"type": "heading", "text": "4.1 检修窗口", "level": 2},
+                        {"type": "table", "columns": [{"key": "year", "label": "年份"}, {"key": "start_time", "label": "开始时间"}, {"key": "end_time", "label": "结束时间"}], "rows": [{"year": state.get("schedule_year", ""), "start_time": state.get("schedule_start", ""), "end_time": state.get("schedule_end", "")}]},
+                        {"type": "heading", "text": "4.2 实施人员", "level": 2},
+                        {"type": "table", "columns": [{"key": "provider", "label": "方案提供人"}, {"key": "executor", "label": "检修执行人"}, {"key": "reviewer", "label": "检修复核人"}, {"key": "business_participant", "label": "业务系统参与人"}, {"key": "security_officer", "label": "安全责任人"}], "rows": [{"provider": state.get("provider", ""), "executor": state.get("executor", ""), "reviewer": state.get("reviewer", ""), "business_participant": "待实施前确认", "security_officer": state.get("security_officer", "")}]},
                     ],
                 },
                 {
-                    "heading": "四、实施计划",
+                    "heading": "风险评估",
+                    "level": 1,
                     "blocks": [
-                        {
-                            "type": "table",
-                            "columns": [
-                                {"key": "role", "label": "角色"},
-                                {"key": "name", "label": "人员/账号"},
-                            ],
-                            "rows": [
-                                {"role": "方案提供人", "name": state.get("provider", "")},
-                                {"role": "检修执行人", "name": state.get("executor", "")},
-                                {"role": "检修复核人", "name": state.get("reviewer", "")},
-                                {"role": "安全责任人", "name": state.get("security_officer", "")},
-                                {"role": "ASCM授权账号", "name": state.get("ascm_account", "")},
-                                {"role": "堡垒机账号", "name": state.get("bastion_account", "")},
-                            ],
-                        }
+                        {"type": "heading", "text": "5.1影响范围", "level": 2},
+                        {"type": "paragraph", "text": "模型输出无法解析，本章节保留通用占位。请重新生成以读取产品 Skill 并补齐具体影响范围。", "first_line_indent": 0.74},
+                        {"type": "heading", "text": "5.2危险点分析", "level": 2},
+                        {"type": "paragraphs", "items": ["（1）授权不当危险点：授权过大，导致操作影响预定方案以外的生产环境实例。", "（2）备份不当危险点：检修前备份、快照、原配置或业务确认记录不完整，导致异常后无法准确恢复。", "（3）验证不当危险点：检修对象、业务访问状态、监控指标或项目组确认结果未核实清楚，导致操作后出现业务影响。", "（4）双人复核不当危险点：双人复核不仔细，导致操作错误执行而出现业务影响。"]},
+                        {"type": "heading", "text": "5.3安全措施", "level": 2},
+                        {"type": "heading", "text": "5.3.1授权", "level": 3},
+                        {"type": "paragraphs", "items": [f"ASCM：国网总部直属单位权限     授权账号：{state.get('ascm_account') or '待实施前确认'}", f"堡垒机账号：{state.get('bastion_account') or '待实施前确认'}"]},
+                        {"type": "heading", "text": "5.3.2备份", "level": 3},
+                        {"type": "paragraph", "text": "按对应产品 Skill 和实际检修动作确认备份、快照、原配置导出或业务确认记录。", "first_line_indent": 0.74},
+                        {"type": "heading", "text": "5.3.3验证", "level": 3},
+                        {"type": "paragraph", "text": "按对应产品 Skill 验证检修前后资源状态、业务访问、监控告警和日志。", "first_line_indent": 0.74},
+                        {"type": "heading", "text": "5.3.4 双人复核", "level": 3},
+                        {"type": "paragraphs", "items": ["（1）确认在正确的组织和资源集下做操作，检查操作对象是否正确；", "（2）严格按照文档复核关键步骤及关键点。"]},
                     ],
                 },
                 {
-                    "heading": "五、风险评估",
+                    "heading": "实施步骤",
+                    "level": 1,
                     "blocks": [
-                        {"type": "heading", "text": "5.1 危险点分析", "level": 2},
-                        {"type": "plain_list", "prefix": "（1）", "items": ["检修操作可能影响相关云资源或业务访问，需要在窗口期内执行并做好监控。"]},
-                        {"type": "heading", "text": "5.2 预控措施", "level": 2},
-                        {"type": "plain_list", "prefix": "（1）", "items": ["实施前完成资源状态、权限、备份/快照、监控告警和回滚条件确认。"]},
-                        {"type": "heading", "text": "5.3 应急处置", "level": 2},
-                        {"type": "plain_list", "prefix": "（1）", "items": ["若出现异常，立即停止后续操作，保留现场信息，按回滚步骤恢复并通知相关责任人。"]},
+                        {"type": "heading", "text": "6.1备份", "level": 2},
+                        {"type": "numbered_list", "items": ["按产品 Skill 要求确认备份、快照、配置导出或业务确认记录。"]},
+                        {"type": "heading", "text": "6.2 检修前验证", "level": 2},
+                        {"type": "numbered_list", "items": ["确认检修对象、窗口期、授权账号、审批工单、资源状态和监控均满足实施条件。"]},
+                        {"type": "heading", "text": "6.3 检修操作", "level": 2},
+                        {"type": "heading", "text": f"6.3.1 {state.get('instances') or maintenance_type}", "level": 3},
+                        {"type": "numbered_list", "items": ["模型输出无法解析，未能可靠生成产品级操作步骤。请重新生成或补充更明确需求。"]},
+                        {"type": "heading", "text": "6.4 检修后验证", "level": 2},
+                        {"type": "numbered_list", "items": ["验证资源状态、业务访问、监控告警和日志，确认无异常后关闭检修。"]},
                     ],
                 },
                 {
-                    "heading": "六、实施步骤",
+                    "heading": "回滚步骤",
+                    "level": 1,
                     "blocks": [
-                        {
-                            "type": "numbered_list",
-                            "items": [
-                                "实施前确认检修对象、窗口期、授权账号和审批工单均已满足要求。",
-                                f"依据检修类型“{maintenance_type}”读取对应 Skill 的实施要求，并结合 RAG 参考资料校验操作边界。",
-                                f"按检修目标执行操作：{ops_hint}",
-                                f"核对关键技术参数：{tech_hint}",
-                                "实施完成后检查资源状态、业务连通性、监控告警和日志，确认无异常后关闭检修。",
-                            ],
-                            "first_line_indent": 0.74,
-                        }
-                    ],
-                },
-                {
-                    "heading": "七、回滚步骤",
-                    "blocks": [
-                        {
-                            "type": "numbered_list",
-                            "items": [
-                                "触发回滚条件时立即停止后续变更操作，通知复核人和安全责任人。",
-                                "根据实施前确认的备份、快照、原配置或资源状态执行恢复。",
-                                "回滚后重新验证业务访问、资源状态、监控告警和日志，形成处置记录。",
-                            ],
-                            "first_line_indent": 0.74,
-                        }
+                        {"type": "heading", "text": "7.1 回滚操作", "level": 2},
+                        {"type": "numbered_list", "items": ["触发回滚条件时立即停止后续操作，并按产品 Skill、备份或原配置执行恢复。"]},
+                        {"type": "heading", "text": "7.2 回滚后验证", "level": 2},
+                        {"type": "numbered_list", "items": ["回滚后重新验证业务访问、资源状态、监控告警和日志，并保留记录。"]},
                     ],
                 },
             ],
         },
     }
-
 
 def build_user_prompt(
     background: str, maintenance_type: str, network: str, location: str,
@@ -543,10 +358,13 @@ personnel, risks, steps, rollback content, scripts, or other parts explicitly re
 
 输出结构硬性要求：
 - 必须读取并遵守 `maintenance-plan-composer` Skill 中的“Word 渲染 JSON 格式契约”。
+- 必须读取并遵守具体产品检修 Skill；产品 Skill 决定风险项、操作步骤、回滚步骤和参数表。
+- 生成最终答案前，调用 `build_maintenance_document` 工具对完整 JSON 做一次渲染检查；工具通过后仍然只输出完整 JSON。
 - 顶层必须包含 document 对象；每个章节必须包含 blocks 数组。
 - 表格、标题、正文、复选框、编号步骤必须按该 Skill 规定的 block 类型输出。
 - 不要只输出 heading/title/content；只有标题没有 blocks 的章节会被判定为无效格式。
 - 检修方案必须至少包含实施计划表或参数表，不允许全部正文都是普通段落。
+- 后端不会再为 ECS、SLB、RDS 等产品补写专用步骤；如果你没有按产品 Skill 生成可执行步骤，最终文档会缺失关键内容。
 
 {orchestration_context}
 {edit_context}
@@ -652,6 +470,110 @@ def document_format_stats(data: dict[str, Any]) -> dict[str, int]:
     return stats
 
 
+REQUIRED_SECTION_NAMES = ["背景", "检修类型", "现场环境", "实施计划", "风险评估", "实施步骤", "回滚步骤"]
+
+
+def normalize_heading(value: Any) -> str:
+    text = re.sub(r"\s+", "", str(value or ""))
+    text = re.sub(r"^[一二三四五六七八九十]+、", "", text)
+    return text.lower()
+
+
+def default_section(name: str, state: dict[str, str]) -> dict[str, Any]:
+    if name == "背景":
+        return {
+            "heading": name,
+            "level": 1,
+            "blocks": [
+                {"type": "paragraph", "text": state.get("background") or "待根据需求和对应 Skill 补充。", "first_line_indent": 0.74}
+            ],
+        }
+    if name == "检修类型":
+        maintenance_type = state.get("maintenance_type") or "其他"
+        items = [
+            {"label": item, "checked": item in maintenance_type, "extra": ""}
+            for item in ["配置变更", "组件升级", "组件扩缩容", "数据库变更", "日常维护（原硬件设备）", "其他"]
+        ]
+        if not any(item["checked"] for item in items):
+            items[-1]["checked"] = True
+            items[-1]["extra"] = maintenance_type
+        return {"heading": name, "level": 1, "blocks": [{"type": "checkbox_group", "items": items, "per_line": 3}]}
+    if name == "现场环境":
+        return {
+            "heading": name,
+            "level": 1,
+            "blocks": [
+                {"type": "paragraph", "text": f"（1）内网环境/外网环境：{state.get('network') or '待实施前确认'}"},
+                {"type": "paragraph", "text": f"（2）实施地点：{state.get('location') or '待实施前确认'}"},
+                {"type": "paragraph", "text": "（3）专有云版本：v3.16"},
+                {"type": "paragraph", "text": "（4）涉及的组件实例信息："},
+                {"type": "paragraph", "text": state.get("instances") or "待实施前确认", "first_line_indent": 0.74},
+            ],
+        }
+    if name == "实施计划":
+        return {
+            "heading": name,
+            "level": 1,
+            "blocks": [
+                {"type": "heading", "text": "4.1 检修窗口", "level": 2},
+                {"type": "table", "columns": [{"key": "year", "label": "年份"}, {"key": "start_time", "label": "开始时间"}, {"key": "end_time", "label": "结束时间"}], "rows": [{"year": state.get("schedule_year", ""), "start_time": state.get("schedule_start", ""), "end_time": state.get("schedule_end", "")}]},
+                {"type": "heading", "text": "4.2 实施人员", "level": 2},
+                {"type": "table", "columns": [{"key": "provider", "label": "方案提供人"}, {"key": "executor", "label": "检修执行人"}, {"key": "reviewer", "label": "检修复核人"}, {"key": "business_participant", "label": "业务系统参与人"}, {"key": "security_officer", "label": "安全责任人"}], "rows": [{"provider": state.get("provider", ""), "executor": state.get("executor", ""), "reviewer": state.get("reviewer", ""), "business_participant": "待实施前确认", "security_officer": state.get("security_officer", "")}]},
+            ],
+        }
+    return {
+        "heading": name,
+        "level": 1,
+        "blocks": [
+            {
+                "type": "paragraph",
+                "text": "模型未输出本章节内容，请重新生成或补充更明确需求。",
+                "first_line_indent": 0.74,
+            }
+        ],
+    }
+
+
+def ensure_renderer_ready_document(
+    data: dict[str, Any],
+    state: dict[str, str],
+    orchestration: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply generic renderer guards without encoding product-specific logic."""
+    spec = data.setdefault("document", {})
+    if not isinstance(spec, dict):
+        data["document"] = spec = {}
+
+    sections = spec.get("sections")
+    if not isinstance(sections, list):
+        sections = []
+
+    normalized_sections: list[dict[str, Any]] = []
+    existing_by_name: dict[str, dict[str, Any]] = {}
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        heading = str(section.get("heading") or section.get("title") or "").strip()
+        if not heading:
+            continue
+        section["heading"] = heading
+        section.setdefault("level", 1)
+        blocks = section.get("blocks")
+        section["blocks"] = blocks if isinstance(blocks, list) and blocks else []
+        normalized_sections.append(section)
+        existing_by_name.setdefault(normalize_heading(heading), section)
+
+    for required_name in REQUIRED_SECTION_NAMES:
+        if normalize_heading(required_name) not in existing_by_name:
+            normalized_sections.append(default_section(required_name, state))
+
+    spec["sections"] = normalized_sections
+    data.setdefault("evidence", {})
+    if isinstance(data["evidence"], dict):
+        data["evidence"]["renderer_schema_guard"] = True
+        data["evidence"].setdefault("selected_skills", orchestration.get("selected_skill_names", []))
+    return data
+
 def docx_to_markdown(raw: bytes) -> str:
     from docx import Document
 
@@ -711,9 +633,7 @@ async def generate_docx_from_state(
         fallback_reason = ""
         if count_document_body_blocks(data) < 3:
             fallback_reason = "model_document_had_too_few_body_blocks"
-        elif isinstance(data.get("document"), dict) and (
-            format_stats["typed_blocks"] < 8 or format_stats["tables"] < 1
-        ):
+        elif isinstance(data.get("document"), dict) and format_stats["typed_blocks"] < 8:
             fallback_reason = "model_document_was_not_canonical_template_format"
 
         if fallback_reason:
@@ -741,6 +661,7 @@ async def generate_docx_from_state(
             orchestration["rag_chunks_count"],
         )
 
+    data = ensure_renderer_ready_document(data, state, orchestration)
     normalized_title = derive_plan_title(state, data)
     data["title"] = normalized_title
     document_spec = data.setdefault("document", {})
@@ -768,5 +689,7 @@ async def generate_docx_from_state(
 
     filename = data.get("title") or data.get("document", {}).get("title", "检修方案")
     return file_id, output_path, filename + ".docx"
+
+
 
 

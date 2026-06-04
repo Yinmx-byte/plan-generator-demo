@@ -16,6 +16,7 @@ version: 0.4.0
 3. 用户未提供细节时，必须由产品 Skill 推导可执行步骤；缺少具体实例参数时用“待实施前确认”占位，不得省略步骤。
 4. `document.sections` 是 Word 文档唯一结构来源，必须输出完整章节，不输出片段。
 5. 最终只输出 JSON 对象，不要 Markdown，不要解释。
+6. 最终输出前调用 `build_maintenance_document` 工具，用完整 JSON 做渲染检查；工具通过后再输出同一份完整 JSON。
 
 ## 首页格式
 

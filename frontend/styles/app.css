@@ -377,6 +377,12 @@ input:focus {
   border-radius: 8px;
   background: linear-gradient(180deg, #ffffff 0%, #f8faf8 100%);
 }
+.item-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
 .item-title {
   margin-bottom: 6px;
   font-size: 14px;
@@ -388,6 +394,16 @@ input:focus {
   font-size: 12px;
   line-height: 1.45;
   word-break: break-word;
+}
+button.icon-action {
+  min-height: 28px;
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-color: #c9dcea;
+  background: #f4f8fb;
+  color: var(--blue-dark);
+  font-size: 12px;
+  font-weight: 700;
 }
 .tool-card {
   align-self: start;
@@ -401,6 +417,9 @@ input:focus {
   border: none;
   border-radius: 8px;
   background: transparent;
+}
+.modal.modal-wide {
+  width: min(980px, calc(100vw - 32px));
 }
 .modal::backdrop {
   background: rgba(23, 33, 47, 0.42);
@@ -429,6 +448,26 @@ input:focus {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+.modal-actions {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.skill-editor-card {
+  height: min(760px, calc(100vh - 48px));
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.skill-editor-card textarea {
+  min-height: 420px;
+  height: 100%;
+  resize: none;
+  font-family: "Cascadia Mono", "Consolas", "Microsoft YaHei UI", monospace;
+  font-size: 13px;
+  line-height: 1.58;
+  tab-size: 2;
 }
 button.ghost {
   min-height: 32px;

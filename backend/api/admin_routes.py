@@ -9,12 +9,17 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from pydantic import BaseModel
 
 from rag import get_knowledge_base, reset_knowledge_base
 from runtime import ROOT, SKILLS_ROOT, get_skill_registry, reset_skill_runtime
 from services.plan_generation import docx_to_markdown
 
 router = APIRouter()
+
+
+class SkillUpdateRequest(BaseModel):
+    content: str
 
 @router.get("/api/skills")
 async def list_skills():
@@ -36,6 +41,15 @@ def safe_skill_dir_name(name: str) -> str:
     if not value:
         raise HTTPException(status_code=400, detail="Skill 名称不能为空")
     return value
+
+
+def get_skill_or_404(skill_name: str):
+    registry = get_skill_registry()
+    skill = registry.get(skill_name)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="未找到指定 Skill")
+    ensure_within_directory(SKILLS_ROOT, skill.path)
+    return skill
 
 
 def safe_relative_dir(name: str) -> str:
@@ -142,6 +156,44 @@ async def upload_skill(
             }
             for skill in get_skill_registry().skills
         ],
+    }
+
+
+@router.get("/api/skills/{skill_name}")
+async def get_skill_detail(skill_name: str):
+    skill = get_skill_or_404(skill_name)
+    skill_file = skill.path / "SKILL.md"
+    ensure_within_directory(SKILLS_ROOT, skill_file)
+    if not skill_file.exists():
+        raise HTTPException(status_code=404, detail="未找到 SKILL.md")
+    return {
+        "name": skill.name,
+        "description": skill.description,
+        "path": str(skill.path),
+        "content": skill_file.read_text(encoding="utf-8"),
+    }
+
+
+@router.put("/api/skills/{skill_name}")
+async def update_skill_detail(skill_name: str, request: SkillUpdateRequest):
+    skill = get_skill_or_404(skill_name)
+    content = request.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Skill 内容不能为空")
+    if len(content) > 200_000:
+        raise HTTPException(status_code=400, detail="Skill 内容过大")
+    if "name:" not in content and "# " not in content:
+        raise HTTPException(status_code=400, detail="请保存有效的 SKILL.md 内容")
+    skill_file = skill.path / "SKILL.md"
+    ensure_within_directory(SKILLS_ROOT, skill_file)
+    skill_file.write_text(content + "\n", encoding="utf-8")
+    await reset_skill_runtime()
+    updated = get_skill_or_404(skill_name)
+    return {
+        "status": "ok",
+        "name": updated.name,
+        "description": updated.description,
+        "path": str(updated.path),
     }
 
 
