@@ -10,8 +10,6 @@ import json
 import os
 import uuid
 import asyncio
-import subprocess
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -78,9 +76,6 @@ class PlanTestRequest(BaseModel):
     message: str = ""
     state: Optional[dict[str, Any]] = None
     allow_partial: bool = False
-    evaluate: bool = False
-    evaluate_generated_docx: bool = False
-    reference_dir: Optional[str] = None
 
 
 def get_workflow_agent_runtime() -> WorkflowAgentRuntime:
@@ -174,60 +169,9 @@ async def execute_page_agent_task(request: PageAgentTaskRequest):
 app.include_router(admin_router)
 
 
-def run_iterator_evaluation(
-    reference_dir: str,
-    candidate_docx: Path,
-    source_skill: Optional[Path] = None,
-) -> dict[str, Any]:
-    """Evaluate the generated DOCX and derive source Skill improvement hints."""
-    script = Path.home() / ".codex" / "skills" / "maintenance-skill-iterator" / "scripts" / "evaluate_plan_quality.py"
-    if not script.exists():
-        raise HTTPException(status_code=500, detail=f"未找到自迭代评估脚本：{script}")
-    reference_path = Path(reference_dir)
-    if not reference_path.exists():
-        raise HTTPException(status_code=400, detail=f"参考文档目录不存在：{reference_dir}")
-    command = [
-        sys.executable,
-        str(script),
-        "--reference-dir",
-        str(reference_path),
-        "--candidate-docx",
-        str(candidate_docx),
-    ]
-    if source_skill is not None:
-        command.extend(["--source-skill", str(source_skill)])
-    process = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=int(os.getenv("SKILL_ITERATOR_TIMEOUT", "120")),
-    )
-    if process.returncode != 0:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": "自迭代评估脚本执行失败",
-                "stderr": process.stderr,
-                "stdout": process.stdout,
-            },
-        )
-    try:
-        return json.loads(process.stdout)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": "自迭代评估脚本输出不是合法 JSON",
-                "stdout": process.stdout,
-            },
-        ) from exc
-
-
 @app.post("/api/dev/plan-test")
 async def dev_plan_test(request: PlanTestRequest):
-    """Development-only quick path: requirement text/state -> DOCX -> optional quality evaluation."""
+    """Development-only quick path: requirement text/state -> DOCX."""
     state = default_form_state()
     if request.state:
         merge_updates(state, request.state)
@@ -253,25 +197,6 @@ async def dev_plan_test(request: PlanTestRequest):
         state,
         orchestration=orchestration,
     )
-    generated_docx_evaluation = None
-    should_evaluate_generated_docx = request.evaluate or request.evaluate_generated_docx
-    if should_evaluate_generated_docx:
-        if not request.reference_dir:
-            raise HTTPException(status_code=400, detail="评估生成结果时必须提供 reference_dir")
-        selected_skill_paths = {
-            skill.name: skill.path for skill in get_skill_registry().skills
-        }
-        source_skill = None
-        for skill_name in orchestration["selected_skill_names"]:
-            if skill_name in selected_skill_paths and skill_name != "maintenance-plan-composer":
-                source_skill = selected_skill_paths[skill_name] / "SKILL.md"
-                break
-        generated_docx_evaluation = await asyncio.to_thread(
-            run_iterator_evaluation,
-            request.reference_dir,
-            output_path,
-            source_skill,
-        )
     return {
         "status": "generated",
         "file_id": file_id,
@@ -285,7 +210,6 @@ async def dev_plan_test(request: PlanTestRequest):
             "rag_enabled": orchestration["rag_enabled"],
             "rag_chunks_count": orchestration["rag_chunks_count"],
         },
-        "generated_docx_evaluation": generated_docx_evaluation,
     }
 
 
