@@ -1,129 +1,109 @@
-"""AgentScope 1.x RAG integration for maintenance-plan knowledge."""
+"""RAG integration for maintenance-plan knowledge.
+
+The production path uses Alibaba Cloud Model Studio (Bailian) knowledge-base
+Retrieve API. The legacy AgentScope/Qdrant implementation is intentionally not
+kept here: project business code should depend on one small ``retrieve`` API.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Optional
 
-from agentscope.embedding import FileEmbeddingCache, OpenAITextEmbedding
-from agentscope.rag import QdrantStore, SimpleKnowledge, TextReader
+from alibabacloud_bailian20231229.client import Client as BailianClient
+from alibabacloud_bailian20231229.models import RetrieveRequest
+from alibabacloud_tea_openapi.models import Config
 
 
 class MaintenanceKnowledgeBase:
-    """Small wrapper around AgentScope 1.x ``SimpleKnowledge``."""
+    """Small wrapper around Bailian knowledge-base retrieval."""
 
-    def __init__(
-        self,
-        data_dir: Path,
-        collection_name: str = "maintenance_plan_knowledge",
-        similarity_top_k: int = 5,
-    ) -> None:
-        self.data_dir = data_dir
-        self.collection_name = collection_name
+    def __init__(self, similarity_top_k: int = 5) -> None:
         self.similarity_top_k = similarity_top_k
-        self._knowledge: Optional[SimpleKnowledge] = None
-        self._indexed = False
+        self.workspace_id = os.getenv("BAILIAN_WORKSPACE_ID", "").strip()
+        self.index_id = os.getenv("BAILIAN_INDEX_ID", "").strip()
+        self.enable_rerank = os.getenv("BAILIAN_RAG_ENABLE_RERANK", "true").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        self.rerank_min_score = os.getenv("BAILIAN_RAG_RERANK_MIN_SCORE")
+        self._client: Optional[BailianClient] = None
 
     @property
     def enabled(self) -> bool:
-        return bool(os.getenv("OPENAI_API_KEY") or os.getenv("EMBEDDING_API_KEY"))
-
-    def _build_knowledge(self) -> SimpleKnowledge:
-        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("EMBEDDING_API_KEY")
-        if not api_key:
-            raise RuntimeError("RAG 未启用：请配置 OPENAI_API_KEY 或 EMBEDDING_API_KEY。")
-
-        dimensions = int(os.getenv("EMBEDDING_DIMENSIONS", "1024"))
-        store_location = os.getenv(
-            "RAG_STORE_LOCATION",
-            str(self.data_dir.parent / ".agentscope_rag" / "qdrant"),
-        )
-        cache_dir = os.getenv(
-            "RAG_EMBEDDING_CACHE_DIR",
-            str(self.data_dir.parent / ".agentscope_rag" / "embedding-cache"),
+        return bool(
+            self.workspace_id
+            and self.index_id
+            and os.getenv("ALIBABA_CLOUD_ACCESS_KEY_ID")
+            and os.getenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET")
         )
 
-        embedding_kwargs = {}
-        base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("EMBEDDING_BASE_URL")
-        if base_url:
-            embedding_kwargs["base_url"] = base_url
+    def _get_client(self) -> BailianClient:
+        if self._client is None:
+            self._client = BailianClient(
+                Config(
+                    access_key_id=os.getenv("ALIBABA_CLOUD_ACCESS_KEY_ID"),
+                    access_key_secret=os.getenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET"),
+                    endpoint=os.getenv("BAILIAN_ENDPOINT", "bailian.cn-beijing.aliyuncs.com"),
+                    region_id=os.getenv("BAILIAN_REGION_ID", "cn-beijing"),
+                    connect_timeout=int(os.getenv("BAILIAN_CONNECT_TIMEOUT", "10000")),
+                    read_timeout=int(os.getenv("BAILIAN_READ_TIMEOUT", "60000")),
+                )
+            )
+        return self._client
 
-        embedding_model = OpenAITextEmbedding(
-            api_key=api_key,
-            model_name=os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-3-small"),
-            dimensions=dimensions,
-            embedding_cache=FileEmbeddingCache(cache_dir=cache_dir),
-            **embedding_kwargs,
-        )
-        embedding_store = QdrantStore(
-            location=store_location,
-            collection_name=self.collection_name,
-            dimensions=dimensions,
-        )
-        return SimpleKnowledge(
-            embedding_store=embedding_store,
-            embedding_model=embedding_model,
-        )
-
-    async def _ensure_indexed(self) -> None:
-        if self._knowledge is None:
-            self._knowledge = self._build_knowledge()
-
-        if self._indexed:
-            return
-
-        reader = TextReader(
-            chunk_size=int(os.getenv("RAG_CHUNK_SIZE", "800")),
-            split_by=os.getenv("RAG_SPLIT_BY", "paragraph"),
-        )
-        documents = []
-        knowledge_dir = self.data_dir.parent / "knowledge"
-        if knowledge_dir.exists():
-            for pattern in ("**/*.md", "**/*.txt"):
-                for path in sorted(knowledge_dir.glob(pattern)):
-                    documents.extend(await reader(str(path)))
-
-        if documents:
-            batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "10"))
-            for idx in range(0, len(documents), batch_size):
-                await self._knowledge.add_documents(documents[idx : idx + batch_size])
-        self._indexed = True
-
-    async def get_knowledge(self) -> SimpleKnowledge:
-        """Return an indexed AgentScope knowledge object."""
-        await self._ensure_indexed()
-        assert self._knowledge is not None
-        return self._knowledge
+    async def get_knowledge(self) -> "MaintenanceKnowledgeBase":
+        """Compatibility shim for existing admin endpoints."""
+        if not self.enabled:
+            raise RuntimeError("RAG 未启用：请配置百炼 AK、业务空间 ID 和知识库索引 ID。")
+        return self
 
     async def retrieve(self, query: str, top_k: Optional[int] = None) -> list[str]:
         """Retrieve relevant chunks as plain strings."""
-        if not query.strip():
+        if not query.strip() or not self.enabled:
             return []
-        knowledge = await self.get_knowledge()
-        score_threshold = os.getenv("RAG_SCORE_THRESHOLD")
-        docs = await knowledge.retrieve(
+
+        limit = top_k or self.similarity_top_k
+        request = RetrieveRequest(
+            index_id=self.index_id,
             query=query,
-            limit=top_k or self.similarity_top_k,
-            score_threshold=float(score_threshold) if score_threshold else None,
+            dense_similarity_top_k=limit,
+            sparse_similarity_top_k=limit,
+            enable_reranking=self.enable_rerank,
+            rerank_top_n=limit,
+            rerank_min_score=float(self.rerank_min_score)
+            if self.rerank_min_score
+            else None,
         )
-        return [str(doc.metadata.content.get("text", "")) for doc in docs]
+
+        def _call() -> list[str]:
+            response = self._get_client().retrieve(self.workspace_id, request)
+            nodes = getattr(getattr(response.body, "data", None), "nodes", None) or []
+            chunks = []
+            for node in nodes:
+                text = str(getattr(node, "text", "") or "").strip()
+                if text:
+                    chunks.append(text)
+            return chunks
+
+        return await asyncio.to_thread(_call)
 
 
 _knowledge_base: Optional[MaintenanceKnowledgeBase] = None
 
 
-def get_knowledge_base(data_dir: Path) -> Optional[MaintenanceKnowledgeBase]:
-    """Create the project knowledge base when embedding config is available."""
+def get_knowledge_base(_data_dir: Path) -> Optional[MaintenanceKnowledgeBase]:
+    """Create the project knowledge base when Bailian config is available."""
     global _knowledge_base
 
     if _knowledge_base is not None:
         return _knowledge_base
 
     knowledge_base = MaintenanceKnowledgeBase(
-        data_dir=data_dir,
-        collection_name=os.getenv("RAG_COLLECTION_NAME", "maintenance_plan_knowledge_v2"),
-        similarity_top_k=int(os.getenv("RAG_TOP_K", "5")),
+        similarity_top_k=int(os.getenv("RAG_TOP_K", os.getenv("BAILIAN_RAG_TOP_K", "5"))),
     )
     if not knowledge_base.enabled:
         return None
@@ -133,6 +113,6 @@ def get_knowledge_base(data_dir: Path) -> Optional[MaintenanceKnowledgeBase]:
 
 
 def reset_knowledge_base() -> None:
-    """Clear cached knowledge so new knowledge files are re-indexed."""
+    """Clear cached client/config so env changes take effect."""
     global _knowledge_base
     _knowledge_base = None

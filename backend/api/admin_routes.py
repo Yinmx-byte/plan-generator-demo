@@ -4,22 +4,26 @@ import os
 import re
 import tempfile
 import zipfile
-from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from rag import get_knowledge_base, reset_knowledge_base
-from runtime import ROOT, SKILLS_ROOT, get_skill_registry, reset_skill_runtime
-from services.plan_generation import docx_to_markdown
+from rag import bailian_admin
+from runtime import SKILLS_ROOT, get_skill_registry, reset_skill_runtime
 
 router = APIRouter()
 
 
 class SkillUpdateRequest(BaseModel):
     content: str
+
+
+class BailianIndexCreateRequest(BaseModel):
+    category_name: str = ""
+    index_name: str = ""
+
 
 @router.get("/api/skills")
 async def list_skills():
@@ -52,43 +56,11 @@ def get_skill_or_404(skill_name: str):
     return skill
 
 
-def safe_relative_dir(name: str) -> str:
-    value = name.strip().replace("\\", "/").strip("/")
-    if not value:
-        return ""
-    parts = [safe_skill_dir_name(part) for part in value.split("/") if part.strip()]
-    return "/".join(parts)
-
-
-def safe_file_stem(name: str) -> str:
-    value = re.sub(r"[^A-Za-z0-9_.\-\u4e00-\u9fff]+", "-", name.strip()).strip(".-")
-    return value or "knowledge"
-
-
 def ensure_within_directory(base: Path, target: Path) -> None:
     base_resolved = base.resolve()
     target_resolved = target.resolve()
     if not str(target_resolved).startswith(str(base_resolved)):
         raise HTTPException(status_code=400, detail="非法文件路径")
-
-
-def list_knowledge_documents() -> list[dict[str, Any]]:
-    knowledge_root = ROOT / "knowledge"
-    if not knowledge_root.exists():
-        return []
-    docs = []
-    for path in sorted([*knowledge_root.glob("**/*.md"), *knowledge_root.glob("**/*.txt")]):
-        if path.name == ".gitkeep":
-            continue
-        docs.append(
-            {
-                "name": path.name,
-                "path": str(path.relative_to(knowledge_root)),
-                "size": path.stat().st_size,
-                "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
-            }
-        )
-    return docs
 
 
 @router.post("/api/skills/upload")
@@ -197,52 +169,118 @@ async def update_skill_detail(skill_name: str, request: SkillUpdateRequest):
     }
 
 
-@router.get("/api/knowledge")
-async def list_knowledge():
+@router.get("/api/bailian/knowledge/status")
+async def bailian_knowledge_status():
     return {
-        "documents": list_knowledge_documents(),
-        "supported_extensions": [".md", ".txt", ".docx"],
         "rag_enabled": get_knowledge_base(SKILLS_ROOT) is not None,
-        "chunk_size": int(os.getenv("RAG_CHUNK_SIZE", "800")),
-        "split_by": os.getenv("RAG_SPLIT_BY", "paragraph"),
+        "provider": os.getenv("RAG_PROVIDER", "bailian"),
+        "workspace_id": os.getenv("BAILIAN_WORKSPACE_ID"),
+        "index_id": os.getenv("BAILIAN_INDEX_ID"),
+        "last_index_job_id": os.getenv("BAILIAN_LAST_INDEX_JOB_ID"),
+        "category_name": os.getenv("BAILIAN_CATEGORY_NAME", "plan-generator-ecs"),
+        "index_name": os.getenv("BAILIAN_INDEX_NAME", "pg-ecs-v4"),
+        "chunk_size": int(os.getenv("BAILIAN_CHUNK_SIZE", "800")),
+        "overlap_size": int(os.getenv("BAILIAN_OVERLAP_SIZE", "100")),
         "top_k": int(os.getenv("RAG_TOP_K", "5")),
-        "score_threshold": os.getenv("RAG_SCORE_THRESHOLD"),
+        "rerank_enabled": os.getenv("BAILIAN_RAG_ENABLE_RERANK", "true"),
+        "rerank_min_score": os.getenv("BAILIAN_RAG_RERANK_MIN_SCORE"),
+        "embedding_model": os.getenv("BAILIAN_EMBEDDING_MODEL_NAME", "text-embedding-v4"),
+        "rerank_model": os.getenv("BAILIAN_RERANK_MODEL_NAME", "qwen3-rerank-hybrid"),
     }
 
 
-@router.post("/api/knowledge/upload")
-async def upload_knowledge(
+@router.get("/api/bailian/files")
+async def list_bailian_files(category_name: str = Query(default="")):
+    try:
+        files = await run_blocking(bailian_admin.list_files, category_name or None)
+        return {"files": files, "count": len(files)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/api/bailian/files/upload")
+async def upload_bailian_file(
     file: UploadFile = File(...),
-    category: str = Form(default="uploaded"),
+    category_name: str = Form(default=""),
 ):
     filename = file.filename or ""
     suffix = Path(filename).suffix.lower()
-    if suffix not in {".md", ".txt", ".docx"}:
-        raise HTTPException(status_code=400, detail="仅支持 .md、.txt、.docx 知识文档")
+    if suffix not in {".md", ".txt", ".docx", ".pdf"}:
+        raise HTTPException(status_code=400, detail="仅支持 .md、.txt、.docx、.pdf 知识文档")
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="上传文件为空")
-
-    knowledge_root = ROOT / "knowledge"
-    target_dir = knowledge_root / safe_relative_dir(category or "uploaded")
-    target_dir.mkdir(parents=True, exist_ok=True)
-    ensure_within_directory(knowledge_root, target_dir)
-
-    if suffix == ".docx":
-        content = docx_to_markdown(raw)
-        target_path = target_dir / f"{safe_file_stem(Path(filename).stem)}.md"
-    else:
-        content = raw.decode("utf-8")
-        target_path = target_dir / f"{safe_file_stem(Path(filename).stem)}{suffix}"
-    ensure_within_directory(knowledge_root, target_path)
-    target_path.write_text(content, encoding="utf-8")
-
-    reset_knowledge_base()
+    try:
+        result = await run_blocking(
+            bailian_admin.upload_file,
+            raw,
+            filename,
+            category_name or None,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {
         "status": "ok",
-        "path": str(target_path.relative_to(knowledge_root)),
-        "documents": list_knowledge_documents(),
+        "file": result,
     }
+
+
+@router.delete("/api/bailian/files/{file_id}")
+async def delete_bailian_file(file_id: str):
+    try:
+        return await run_blocking(bailian_admin.delete_file, file_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/api/bailian/index/create")
+async def create_bailian_index(request: BailianIndexCreateRequest):
+    try:
+        result = await run_blocking(
+            bailian_admin.create_index,
+            request.category_name or None,
+            request.index_name or None,
+        )
+        reset_knowledge_base()
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/api/bailian/index/job")
+async def get_bailian_index_job(
+    job_id: str = Query(default=""),
+    index_id: str = Query(default=""),
+):
+    try:
+        return await run_blocking(
+            bailian_admin.get_index_job,
+            job_id or None,
+            index_id or None,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/api/bailian/retrieve")
+async def retrieve_bailian(query: str = Query(default="", description="检索问题")):
+    if not query.strip():
+        return {"nodes": [], "count": 0}
+    try:
+        nodes = await run_blocking(
+            bailian_admin.retrieve,
+            query,
+            int(os.getenv("RAG_TOP_K", "5")),
+        )
+        return {"nodes": nodes, "count": len(nodes)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/api/knowledge")
+async def list_knowledge():
+    """Compatibility endpoint used by older clients."""
+    return await bailian_knowledge_status()
 
 
 @router.post("/api/rag/reindex")
@@ -252,12 +290,11 @@ async def reindex_rag():
     if knowledge_base is None:
         return {
             "status": "disabled",
-            "message": "RAG 未启用：请配置 OPENAI_API_KEY 或 EMBEDDING_API_KEY。",
+            "message": "RAG 未启用：请配置百炼 AK、业务空间 ID 和知识库索引 ID。",
         }
     await knowledge_base.get_knowledge()
     return {
         "status": "ok",
-        "documents": list_knowledge_documents(),
     }
 
 
@@ -268,11 +305,17 @@ async def retrieve_rag(query: str = Query(default="", description="检索问题"
         return {
             "enabled": False,
             "chunks": [],
-            "message": "RAG 未启用：请配置 OPENAI_API_KEY 或 EMBEDDING_API_KEY。",
+            "message": "RAG 未启用：请配置百炼 AK、业务空间 ID 和知识库索引 ID。",
         }
     return {
         "enabled": True,
         "chunks": await knowledge_base.retrieve(query),
     }
+
+
+async def run_blocking(func, *args):
+    import asyncio
+
+    return await asyncio.to_thread(func, *args)
 
 

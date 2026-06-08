@@ -138,20 +138,90 @@ async function loadKnowledge() {
   const listEl = document.getElementById('knowledgeList');
   if (!listEl) return;
   try {
-    const resp = await fetch('/api/knowledge');
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.detail || '加载失败');
-    renderItemGrid(listEl, data.documents || [], '暂无知识文档', (doc) => {
-      const item = document.createElement('div');
-      item.className = 'item-card';
-      item.innerHTML = `
-        <div class="item-title">${escapeHtml(doc.name)}</div>
-        <div class="item-meta">${escapeHtml(doc.path)}<br>${Math.ceil(doc.size / 1024)} KB</div>
-      `;
-      return item;
-    });
+    const [statusResp, filesResp] = await Promise.all([
+      fetch('/api/bailian/knowledge/status'),
+      fetch('/api/bailian/files'),
+    ]);
+    const status = await statusResp.json();
+    const filesData = await filesResp.json();
+    if (!statusResp.ok) throw new Error(status.detail || '状态加载失败');
+    if (!filesResp.ok) throw new Error(filesData.detail || '文件加载失败');
+    renderKnowledgeStatus(status, filesData.files || []);
+    renderRemoteFiles(listEl, filesData.files || []);
   } catch (err) {
-    listEl.innerHTML = `<div class="msg error">知识文档加载失败：${escapeHtml(err.message)}</div>`;
+    listEl.innerHTML = `<div class="msg error">远程知识库加载失败：${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderKnowledgeStatus(status, files) {
+  const workspaceEl = document.getElementById('bailianWorkspace');
+  const indexEl = document.getElementById('bailianIndex');
+  const countEl = document.getElementById('bailianFileCount');
+  const ragEl = document.getElementById('bailianRagStatus');
+  const categoryEl = document.getElementById('bailianCategory');
+  const categoryInput = document.getElementById('indexCategoryInput');
+  const indexNameInput = document.getElementById('indexNameInput');
+  const uploadCategoryInput = document.getElementById('knowledgeCategoryInput');
+  if (workspaceEl) workspaceEl.textContent = status.workspace_id || '-';
+  if (indexEl) indexEl.textContent = status.index_id || '-';
+  if (countEl) countEl.textContent = `${files.length} 个`;
+  if (ragEl) ragEl.textContent = status.rag_enabled ? '已启用' : '未启用';
+  if (categoryEl) categoryEl.textContent = status.category_name || 'plan-generator-ecs';
+  if (categoryInput && !categoryInput.value) categoryInput.value = status.category_name || '';
+  if (indexNameInput && !indexNameInput.value) indexNameInput.value = nextIndexName(status.index_name || 'pg-ecs-v4');
+  if (uploadCategoryInput && !uploadCategoryInput.value) uploadCategoryInput.value = status.category_name || '';
+}
+
+function nextIndexName(current) {
+  const match = String(current || '').match(/^(.*?)(\d+)$/);
+  if (!match) return 'pg-ecs-v5';
+  const prefix = match[1];
+  const next = String(Number(match[2]) + 1);
+  return `${prefix}${next}`.slice(0, 20);
+}
+
+function renderRemoteFiles(container, files) {
+  container.innerHTML = '';
+  if (!files.length) {
+    container.innerHTML = '<div class="item-card"><div class="item-title">远程类目中暂无文件</div></div>';
+    return;
+  }
+  files.forEach((file) => {
+    const item = document.createElement('div');
+    item.className = 'remote-file-row';
+    item.innerHTML = `
+      <div>
+        <div class="item-title">${escapeHtml(file.file_name || file.file_id)}</div>
+        <div class="item-meta">
+          ${escapeHtml(file.status || '-')}&nbsp;&nbsp;${escapeHtml(file.file_type || '-')}&nbsp;&nbsp;${formatKb(file.size_in_bytes)}
+        </div>
+      </div>
+      <button class="danger ghost" type="button" data-file-id="${escapeHtml(file.file_id)}">删除</button>
+    `;
+    item.querySelector('button').addEventListener('click', () => deleteRemoteFile(file.file_id));
+    container.appendChild(item);
+  });
+}
+
+function formatKb(size) {
+  const value = Number(size || 0);
+  if (!value) return '-';
+  return `${Math.ceil(value / 1024)} KB`;
+}
+
+async function deleteRemoteFile(fileId) {
+  if (!fileId) return;
+  const statusEl = document.getElementById('knowledgeUploadStatus');
+  if (!confirm('确认删除该百炼远程文件？删除后需要重新创建索引才会影响新知识库。')) return;
+  statusEl.textContent = '正在删除远程文件...';
+  try {
+    const resp = await fetch(`/api/bailian/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '删除失败');
+    statusEl.textContent = '远程文件已删除';
+    await loadKnowledge();
+  } catch (err) {
+    statusEl.textContent = '删除失败：' + err.message;
   }
 }
 
@@ -338,9 +408,18 @@ function initKnowledgePage() {
   const categoryInput = document.getElementById('knowledgeCategoryInput');
   const fileInput = document.getElementById('knowledgeFileInput');
   const statusEl = document.getElementById('knowledgeUploadStatus');
-  const reindexBtn = document.getElementById('reindexBtn');
+  const refreshBtn = document.getElementById('refreshKnowledgeBtn');
+  const createIndexBtn = document.getElementById('createIndexBtn');
+  const checkIndexJobBtn = document.getElementById('checkIndexJobBtn');
+  const indexCategoryInput = document.getElementById('indexCategoryInput');
+  const indexNameInput = document.getElementById('indexNameInput');
+  const indexJobStatus = document.getElementById('indexJobStatus');
+  const retrieveQueryInput = document.getElementById('retrieveQueryInput');
+  const runRetrieveBtn = document.getElementById('runRetrieveBtn');
+  const retrieveResults = document.getElementById('retrieveResults');
   loadKnowledge();
   openUploadBtn.addEventListener('click', () => uploadDialog.showModal());
+  refreshBtn.addEventListener('click', loadKnowledge);
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -350,39 +429,99 @@ function initKnowledgePage() {
     }
     const file = fileInput.files[0];
     if (!file) {
-      statusEl.textContent = '请选择 md、txt 或 docx 文件';
+      statusEl.textContent = '请选择 md、txt、docx 或 pdf 文件';
       return;
     }
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('category', categoryInput.value.trim() || 'uploaded');
-    statusEl.textContent = '正在导入...';
+    formData.append('category_name', categoryInput.value.trim() || 'plan-generator-ecs');
+    statusEl.textContent = '正在上传到百炼...';
     try {
-      const resp = await fetch('/api/knowledge/upload', { method: 'POST', body: formData });
+      const resp = await fetch('/api/bailian/files/upload', { method: 'POST', body: formData });
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || '导入失败');
-      statusEl.textContent = '导入完成，下一次检索会重建索引';
+      if (!resp.ok) throw new Error(data.detail || '上传失败');
+      statusEl.textContent = '上传完成。请创建新索引后用于方案生成。';
       fileInput.value = '';
       uploadDialog.close();
       await loadKnowledge();
     } catch (err) {
-      statusEl.textContent = '导入失败：' + err.message;
+      statusEl.textContent = '上传失败：' + err.message;
     }
   });
 
-  reindexBtn.addEventListener('click', async () => {
-    reindexBtn.disabled = true;
-    statusEl.textContent = '正在重建索引...';
+  createIndexBtn.addEventListener('click', async () => {
+    createIndexBtn.disabled = true;
+    indexJobStatus.textContent = '正在创建百炼远程索引...';
     try {
-      const resp = await fetch('/api/rag/reindex', { method: 'POST' });
+      const resp = await fetch('/api/bailian/index/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category_name: indexCategoryInput.value.trim(),
+          index_name: indexNameInput.value.trim(),
+        }),
+      });
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || '重建失败');
-      statusEl.textContent = data.status === 'ok' ? '索引重建完成' : data.message || 'RAG 未启用';
+      if (!resp.ok) throw new Error(data.detail || '创建失败');
+      indexJobStatus.textContent = `索引已创建：${data.index_id}，任务：${data.job_id || '-'}`;
+      await loadKnowledge();
     } catch (err) {
-      statusEl.textContent = '索引重建失败：' + err.message;
+      indexJobStatus.textContent = '创建索引失败：' + err.message;
     } finally {
-      reindexBtn.disabled = false;
+      createIndexBtn.disabled = false;
     }
+  });
+
+  checkIndexJobBtn.addEventListener('click', async () => {
+    indexJobStatus.textContent = '正在查询索引任务...';
+    try {
+      const resp = await fetch('/api/bailian/index/job');
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '查询失败');
+      indexJobStatus.textContent = `任务 ${data.job_id || '-'}：${data.status || '-'}`;
+    } catch (err) {
+      indexJobStatus.textContent = '查询失败：' + err.message;
+    }
+  });
+
+  runRetrieveBtn.addEventListener('click', async () => {
+    const query = retrieveQueryInput.value.trim();
+    if (!query) {
+      retrieveResults.innerHTML = '<div class="msg error">请输入检索问题</div>';
+      return;
+    }
+    runRetrieveBtn.disabled = true;
+    retrieveResults.innerHTML = '<div class="item-card"><div class="item-title">正在检索百炼知识库...</div></div>';
+    try {
+      const resp = await fetch(`/api/bailian/retrieve?query=${encodeURIComponent(query)}`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '检索失败');
+      renderRetrieveResults(retrieveResults, data.nodes || []);
+    } catch (err) {
+      retrieveResults.innerHTML = `<div class="msg error">检索失败：${escapeHtml(err.message)}</div>`;
+    } finally {
+      runRetrieveBtn.disabled = false;
+    }
+  });
+}
+
+function renderRetrieveResults(container, nodes) {
+  container.innerHTML = '';
+  if (!nodes.length) {
+    container.innerHTML = '<div class="item-card"><div class="item-title">没有命中结果</div></div>';
+    return;
+  }
+  nodes.forEach((node, index) => {
+    const item = document.createElement('div');
+    item.className = 'retrieve-card';
+    item.innerHTML = `
+      <div class="item-card-head">
+        <div class="item-title">片段 ${index + 1}</div>
+        <span class="status-pill">score ${Number(node.score || 0).toFixed(3)}</span>
+      </div>
+      <pre>${escapeHtml(node.text || '')}</pre>
+    `;
+    container.appendChild(item);
   });
 }
 
