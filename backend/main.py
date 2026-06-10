@@ -1,7 +1,7 @@
 """
 国网云平台检修方案生成服务 - 基于 AgentScope 框架。
 
-流程：用户输入 → Skill 路由/展开 → AnthropicChatModel → 结构化 JSON → generate_plan.py → Word 文档
+流程：用户输入 → workflow agent 意图识别 → plan agent 读取 Skill/RAG → Word 文档
 
 Skill 装卸：修改 backend/skills/ 目录下的 Skill，重启即生效。
 """
@@ -11,11 +11,10 @@ import os
 import uuid
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, Form, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -308,6 +307,10 @@ def sse_event(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def docx_path_to_markdown(path: Path) -> str:
+    return docx_to_markdown(path.read_bytes())
+
+
 @app.post("/api/chat/stream")
 async def chat_stream(request: ChatRequest):
     async def stream():
@@ -525,58 +528,6 @@ async def download_generated(file_id: str):
         filename=path.name,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
-
-
-@app.post("/api/generate")
-async def generate_plan(
-    background: str = Form(default=""),
-    maintenance_type: str = Form(default="配置变更"),
-    network: str = Form(default="内网"),
-    location: str = Form(default="国网亦庄数据中心二期运维专区"),
-    instances: str = Form(default=""),
-    schedule_year: str = Form(default=str(datetime.now().year) + "年"),
-    schedule_start: str = Form(default=""),
-    schedule_end: str = Form(default=""),
-    provider: str = Form(default=""),
-    executor: str = Form(default=""),
-    reviewer: str = Form(default=""),
-    security_officer: str = Form(default=""),
-    ascm_account: str = Form(default=""),
-    bastion_account: str = Form(default=""),
-    ops_detail: str = Form(default=""),
-    tech_params: str = Form(default=""),
-):
-    """接收检修需求，调用 Claude API 生成结构化数据，返回 .docx 文件。"""
-    try:
-        state = {
-            "background": background,
-            "maintenance_type": maintenance_type,
-            "network": network,
-            "location": location,
-            "instances": instances,
-            "schedule_year": schedule_year,
-            "schedule_start": schedule_start,
-            "schedule_end": schedule_end,
-            "provider": provider,
-            "executor": executor,
-            "reviewer": reviewer,
-            "security_officer": security_officer,
-            "ascm_account": ascm_account,
-            "bastion_account": bastion_account,
-            "ops_detail": ops_detail,
-            "tech_params": tech_params,
-        }
-        _file_id, output_path, filename = await generate_docx_from_state(state)
-        return FileResponse(
-            path=str(output_path),
-            filename=filename,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"生成失败: {str(e)}")
 
 
 # ── 前端静态文件 ─────────────────────────────────────────────────

@@ -149,7 +149,7 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
             blocks.append(f"[RAG-{idx}]\n{clean}")
         rag_context = "\n\n".join(blocks) if blocks else "当前未检索到 RAG 参考资料。"
     else:
-        rag_context = "当前未检索到 RAG 参考资料。若后续配置 embedding API 并添加 backend/knowledge 文档，这里会注入内部模板、历史方案和阿里云通用方案片段。"
+        rag_context = "当前未检索到 RAG 参考资料。请确认百炼知识库配置、远程文档解析状态、索引任务状态和检索阈值。"
 
     return {
         "selected_skill_names": [skill.name for skill in selected_skills],

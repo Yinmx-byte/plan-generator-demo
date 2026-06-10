@@ -76,6 +76,34 @@ function renderItemGrid(container, items, emptyText, render) {
   items.forEach((item) => container.appendChild(render(item)));
 }
 
+function bindUploadDropzone(dropzone, input, fileNameEl) {
+  if (!dropzone || !input) return;
+  const updateName = () => {
+    if (fileNameEl) fileNameEl.textContent = input.files[0]?.name || '未选择文件';
+  };
+  input.addEventListener('change', updateName);
+  ['dragenter', 'dragover'].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropzone.classList.add('dragging');
+    });
+  });
+  ['dragleave', 'drop'].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropzone.classList.remove('dragging');
+    });
+  });
+  dropzone.addEventListener('drop', (event) => {
+    const file = event.dataTransfer?.files?.[0];
+    if (!file) return;
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    updateName();
+  });
+}
+
 async function loadSkills() {
   const listEl = document.getElementById('skillList');
   const countEl = document.getElementById('skillCount');
@@ -90,11 +118,13 @@ async function loadSkills() {
       const item = document.createElement('div');
       item.className = 'item-card';
       item.innerHTML = `
-        <div class="item-card-head">
+        <div>
           <div class="item-title">${escapeHtml(skill.name)}</div>
-          <button class="icon-action" type="button" title="编辑 SKILL.md" aria-label="编辑 ${escapeHtml(skill.name)}">编辑</button>
         </div>
         <div class="item-meta">${escapeHtml(skill.description || '未填写描述')}</div>
+        <div class="card-actions">
+          <button class="icon-action" type="button" title="编辑 SKILL.md" aria-label="编辑 ${escapeHtml(skill.name)}">编辑</button>
+        </div>
       `;
       item.querySelector('.icon-action').addEventListener('click', () => openSkillEditor(skill.name));
       return item;
@@ -155,29 +185,15 @@ async function loadKnowledge() {
 
 function renderKnowledgeStatus(status, files) {
   const workspaceEl = document.getElementById('bailianWorkspace');
-  const indexEl = document.getElementById('bailianIndex');
   const countEl = document.getElementById('bailianFileCount');
+  const docCountEl = document.getElementById('knowledgeDocCount');
   const ragEl = document.getElementById('bailianRagStatus');
   const categoryEl = document.getElementById('bailianCategory');
-  const categoryInput = document.getElementById('indexCategoryInput');
-  const indexNameInput = document.getElementById('indexNameInput');
-  const uploadCategoryInput = document.getElementById('knowledgeCategoryInput');
   if (workspaceEl) workspaceEl.textContent = status.workspace_id || '-';
-  if (indexEl) indexEl.textContent = status.index_id || '-';
   if (countEl) countEl.textContent = `${files.length} 个`;
+  if (docCountEl) docCountEl.textContent = `${files.length} 个`;
   if (ragEl) ragEl.textContent = status.rag_enabled ? '已启用' : '未启用';
   if (categoryEl) categoryEl.textContent = status.category_name || 'plan-generator-ecs';
-  if (categoryInput && !categoryInput.value) categoryInput.value = status.category_name || '';
-  if (indexNameInput && !indexNameInput.value) indexNameInput.value = nextIndexName(status.index_name || 'pg-ecs-v4');
-  if (uploadCategoryInput && !uploadCategoryInput.value) uploadCategoryInput.value = status.category_name || '';
-}
-
-function nextIndexName(current) {
-  const match = String(current || '').match(/^(.*?)(\d+)$/);
-  if (!match) return 'pg-ecs-v5';
-  const prefix = match[1];
-  const next = String(Number(match[2]) + 1);
-  return `${prefix}${next}`.slice(0, 20);
 }
 
 function renderRemoteFiles(container, files) {
@@ -196,9 +212,13 @@ function renderRemoteFiles(container, files) {
           ${escapeHtml(file.status || '-')}&nbsp;&nbsp;${escapeHtml(file.file_type || '-')}&nbsp;&nbsp;${formatKb(file.size_in_bytes)}
         </div>
       </div>
-      <button class="danger ghost" type="button" data-file-id="${escapeHtml(file.file_id)}">删除</button>
+      <div class="card-actions">
+        <button class="ghost" type="button" data-action="view" data-file-id="${escapeHtml(file.file_id)}">查看</button>
+        <button class="danger ghost" type="button" data-action="delete" data-file-id="${escapeHtml(file.file_id)}">删除</button>
+      </div>
     `;
-    item.querySelector('button').addEventListener('click', () => deleteRemoteFile(file.file_id));
+    item.querySelector('[data-action="view"]').addEventListener('click', () => openKnowledgeFile(file.file_id));
+    item.querySelector('[data-action="delete"]').addEventListener('click', () => deleteRemoteFile(file.file_id));
     container.appendChild(item);
   });
 }
@@ -212,16 +232,79 @@ function formatKb(size) {
 async function deleteRemoteFile(fileId) {
   if (!fileId) return;
   const statusEl = document.getElementById('knowledgeUploadStatus');
-  if (!confirm('确认删除该百炼远程文件？删除后需要重新创建索引才会影响新知识库。')) return;
+  if (!confirm('确认删除该知识文档？删除成功后系统会自动重建索引。')) return;
   statusEl.textContent = '正在删除远程文件...';
   try {
     const resp = await fetch(`/api/bailian/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || '删除失败');
-    statusEl.textContent = '远程文件已删除';
+    statusEl.textContent = '文件已删除，正在自动重建索引...';
+    await rebuildKnowledgeIndex('删除文档后');
     await loadKnowledge();
   } catch (err) {
     statusEl.textContent = '删除失败：' + err.message;
+  }
+}
+
+async function rebuildKnowledgeIndex(reason) {
+  const statusEl = document.getElementById('knowledgeUploadStatus');
+  const resp = await fetch('/api/bailian/index/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.detail || '重建索引失败');
+  if (statusEl) {
+    statusEl.textContent = `${reason}索引重建任务已提交：${data.job_id || '-'}，文档数：${data.document_count || 0}`;
+  }
+  return data;
+}
+
+async function openKnowledgeFile(fileId) {
+  const dialog = document.getElementById('knowledgeViewDialog');
+  const title = document.getElementById('knowledgeViewTitle');
+  const meta = document.getElementById('knowledgeViewMeta');
+  const detailEl = document.getElementById('knowledgeViewDetail');
+  const previewEl = document.getElementById('knowledgeContentPreview');
+  const indexEl = document.getElementById('knowledgeIndexDetail');
+  if (!dialog || !fileId) return;
+  title.textContent = '查看知识文档';
+  meta.textContent = fileId;
+  detailEl.innerHTML = '<div class="item-card"><div class="item-title">正在读取百炼远程文件...</div></div>';
+  previewEl.textContent = '-';
+  indexEl.textContent = '-';
+  dialog.showModal();
+  try {
+    const resp = await fetch(`/api/bailian/files/${encodeURIComponent(fileId)}`);
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '查看失败');
+    const file = data.file || {};
+    title.textContent = file.file_name || fileId;
+    meta.textContent = data.message || '百炼远程文件详情';
+    detailEl.innerHTML = [
+      ['文件 ID', file.file_id],
+      ['文件名', file.file_name],
+      ['类型', file.file_type],
+      ['大小', formatKb(file.size_in_bytes)],
+      ['状态', file.status],
+      ['解析器', file.parser],
+      ['类目 ID', file.category_id],
+      ['创建时间', file.create_time],
+      ['标签', (file.tags || []).join('，')],
+      ['解析结果地址', file.parse_result_download_url],
+    ].map(([label, value]) => `
+      <div class="detail-item">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value || '-')}</strong>
+      </div>
+    `).join('');
+    previewEl.textContent = file.content_preview || '百炼当前未返回该文件的解析文本预览。';
+    indexEl.textContent = data.index_document
+      ? JSON.stringify(data.index_document, null, 2)
+      : '当前索引中未找到该文件，可能需要重建索引。';
+  } catch (err) {
+    detailEl.innerHTML = `<div class="msg error">查看失败：${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -333,10 +416,13 @@ function initSkillsPage() {
   const openUploadBtn = document.getElementById('openSkillUploadBtn');
   const skillNameInput = document.getElementById('skillNameInput');
   const skillFileInput = document.getElementById('skillFileInput');
+  const skillDropzone = document.getElementById('skillDropzone');
+  const skillFileName = document.getElementById('skillFileName');
   const skillEditor = document.getElementById('skillEditor');
   const skillEditStatus = document.getElementById('skillEditStatus');
   const saveSkillBtn = document.getElementById('saveSkillBtn');
   loadSkills();
+  bindUploadDropzone(skillDropzone, skillFileInput, skillFileName);
   openUploadBtn.addEventListener('click', () => uploadDialog.showModal());
   uploadForm.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -359,6 +445,7 @@ function initSkillsPage() {
       if (!resp.ok) throw new Error(data.detail || '上传失败');
       uploadStatus.textContent = '上传完成，Skill 已刷新';
       skillFileInput.value = '';
+      if (skillFileName) skillFileName.textContent = '未选择文件';
       skillNameInput.value = '';
       uploadDialog.close();
       await loadSkills();
@@ -405,19 +492,16 @@ function initKnowledgePage() {
   const form = document.getElementById('knowledgeUploadForm');
   const uploadDialog = document.getElementById('knowledgeUploadDialog');
   const openUploadBtn = document.getElementById('openKnowledgeUploadBtn');
-  const categoryInput = document.getElementById('knowledgeCategoryInput');
   const fileInput = document.getElementById('knowledgeFileInput');
+  const knowledgeDropzone = document.getElementById('knowledgeDropzone');
+  const knowledgeFileName = document.getElementById('knowledgeFileName');
   const statusEl = document.getElementById('knowledgeUploadStatus');
   const refreshBtn = document.getElementById('refreshKnowledgeBtn');
-  const createIndexBtn = document.getElementById('createIndexBtn');
-  const checkIndexJobBtn = document.getElementById('checkIndexJobBtn');
-  const indexCategoryInput = document.getElementById('indexCategoryInput');
-  const indexNameInput = document.getElementById('indexNameInput');
-  const indexJobStatus = document.getElementById('indexJobStatus');
   const retrieveQueryInput = document.getElementById('retrieveQueryInput');
   const runRetrieveBtn = document.getElementById('runRetrieveBtn');
   const retrieveResults = document.getElementById('retrieveResults');
   loadKnowledge();
+  bindUploadDropzone(knowledgeDropzone, fileInput, knowledgeFileName);
   openUploadBtn.addEventListener('click', () => uploadDialog.showModal());
   refreshBtn.addEventListener('click', loadKnowledge);
 
@@ -434,53 +518,19 @@ function initKnowledgePage() {
     }
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('category_name', categoryInput.value.trim() || 'plan-generator-ecs');
-    statusEl.textContent = '正在上传到百炼...';
+    statusEl.textContent = '正在上传到默认百炼知识库...';
     try {
       const resp = await fetch('/api/bailian/files/upload', { method: 'POST', body: formData });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.detail || '上传失败');
-      statusEl.textContent = '上传完成。请创建新索引后用于方案生成。';
+      statusEl.textContent = '上传完成，正在自动重建索引...';
       fileInput.value = '';
+      if (knowledgeFileName) knowledgeFileName.textContent = '未选择文件';
       uploadDialog.close();
+      await rebuildKnowledgeIndex('上传文档后');
       await loadKnowledge();
     } catch (err) {
       statusEl.textContent = '上传失败：' + err.message;
-    }
-  });
-
-  createIndexBtn.addEventListener('click', async () => {
-    createIndexBtn.disabled = true;
-    indexJobStatus.textContent = '正在创建百炼远程索引...';
-    try {
-      const resp = await fetch('/api/bailian/index/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          category_name: indexCategoryInput.value.trim(),
-          index_name: indexNameInput.value.trim(),
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || '创建失败');
-      indexJobStatus.textContent = `索引已创建：${data.index_id}，任务：${data.job_id || '-'}`;
-      await loadKnowledge();
-    } catch (err) {
-      indexJobStatus.textContent = '创建索引失败：' + err.message;
-    } finally {
-      createIndexBtn.disabled = false;
-    }
-  });
-
-  checkIndexJobBtn.addEventListener('click', async () => {
-    indexJobStatus.textContent = '正在查询索引任务...';
-    try {
-      const resp = await fetch('/api/bailian/index/job');
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || '查询失败');
-      indexJobStatus.textContent = `任务 ${data.job_id || '-'}：${data.status || '-'}`;
-    } catch (err) {
-      indexJobStatus.textContent = '查询失败：' + err.message;
     }
   });
 

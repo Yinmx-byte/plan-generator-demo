@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from datetime import datetime
 from typing import Any
 
 import requests
@@ -14,9 +15,11 @@ from alibabacloud_bailian20231229.models import (
     ApplyFileUploadLeaseRequest,
     CreateIndexRequest,
     DeleteFileRequest,
+    DescribeFileRequest,
     GetIndexJobStatusRequest,
     ListCategoryRequest,
     ListFileRequest,
+    ListIndexFileDetailsRequest,
     RetrieveRequest,
     SubmitIndexJobRequest,
 )
@@ -63,6 +66,11 @@ def category_name_default() -> str:
 
 def index_name_default() -> str:
     return os.getenv("BAILIAN_INDEX_NAME", "pg-ecs-v4")
+
+
+def next_index_name() -> str:
+    prefix = os.getenv("BAILIAN_INDEX_NAME_PREFIX", "pg-ecs")
+    return f"{prefix}-{datetime.now().strftime('%m%d%H%M')}"[:20]
 
 
 def list_categories(category_name: str | None = None) -> list[dict[str, Any]]:
@@ -191,9 +199,80 @@ def delete_file(file_id: str) -> dict[str, Any]:
     return {"status": "ok", "file_id": file_id}
 
 
+def describe_file(file_id: str) -> dict[str, Any]:
+    data = data_of(build_client().describe_file(workspace_id(), file_id, DescribeFileRequest()))
+    if data is None:
+        raise RuntimeError("未找到百炼远程文件")
+    parse_result_download_url = getattr(data, "parse_result_download_url", None)
+    return {
+        "file_id": getattr(data, "file_id", None),
+        "file_name": getattr(data, "file_name", None),
+        "file_type": getattr(data, "file_type", None),
+        "size_in_bytes": getattr(data, "size_in_bytes", None),
+        "status": getattr(data, "status", None),
+        "parser": getattr(data, "parser", None),
+        "category_id": getattr(data, "category_id", None),
+        "create_time": getattr(data, "create_time", None),
+        "tags": getattr(data, "tags", None) or [],
+        "parse_result_download_url": parse_result_download_url,
+        "content_preview": load_parse_result_preview(parse_result_download_url),
+    }
+
+
+def load_parse_result_preview(url: str | None) -> str:
+    if not url:
+        return ""
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        content_type = response.headers.get("content-type", "")
+        if "text" not in content_type and "json" not in content_type and "xml" not in content_type:
+            return ""
+        response.encoding = response.encoding or "utf-8"
+        return response.text[:20000]
+    except Exception:
+        return ""
+
+
+def get_index_file_detail(file_id: str, index_id: str | None = None) -> dict[str, Any] | None:
+    client = build_client()
+    page = 1
+    while True:
+        response = client.list_index_file_details(
+            workspace_id(),
+            ListIndexFileDetailsRequest(
+                index_id=index_id or os.getenv("BAILIAN_INDEX_ID"),
+                page_number=page,
+                page_size=100,
+            ),
+        )
+        data = data_of(response)
+        documents = getattr(data, "documents", None) or []
+        for item in documents:
+            if getattr(item, "id", None) == file_id:
+                return {
+                    "id": item.id,
+                    "name": item.name,
+                    "document_type": item.document_type,
+                    "status": item.status,
+                    "code": item.code,
+                    "message": item.message,
+                    "chunk_mode": item.chunk_mode,
+                    "chunk_size": item.chunk_size,
+                    "overlap_size": item.overlap_size,
+                    "separator": item.separator,
+                    "size": item.size,
+                    "gmt_modified": item.gmt_modified,
+                }
+        total = int(getattr(data, "total_count", 0) or 0)
+        if page * 100 >= total or not documents:
+            return None
+        page += 1
+
+
 def create_index(category_name: str | None = None, index_name: str | None = None) -> dict[str, Any]:
     category = category_name or category_name_default()
-    name = (index_name or index_name_default())[:20]
+    name = (index_name or next_index_name())[:20]
     category_id = find_or_create_category(category)
     files = list_files(category)
     document_ids = [item["file_id"] for item in files if item.get("file_id")]

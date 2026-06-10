@@ -28,7 +28,13 @@
     </div>
     <p>支持单个 SKILL.md，或包含 SKILL.md 的 zip 包。</p>
     <input id="skillNameInput" name="skill_name" type="text" placeholder="Skill 目录名，可选">
-    <input id="skillFileInput" name="file" type="file" accept=".md,.zip">
+    <label class="upload-dropzone" id="skillDropzone" for="skillFileInput">
+      <span class="upload-icon">↑</span>
+      <strong>点击或拖拽上传文件</strong>
+      <span>支持 SKILL.md 或 zip 包</span>
+      <small id="skillFileName">未选择文件</small>
+    </label>
+    <input class="file-input-hidden" id="skillFileInput" name="file" type="file" accept=".md,.zip">
     <button class="primary" type="submit">确认上传</button>
   </form>
 </dialog>

@@ -1,8 +1,7 @@
 """RAG integration for maintenance-plan knowledge.
 
 The production path uses Alibaba Cloud Model Studio (Bailian) knowledge-base
-Retrieve API. The legacy AgentScope/Qdrant implementation is intentionally not
-kept here: project business code should depend on one small ``retrieve`` API.
+Retrieve API. Project business code depends on one small ``retrieve`` API.
 """
 
 from __future__ import annotations

@@ -233,6 +233,20 @@ async def delete_bailian_file(file_id: str):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.get("/api/bailian/files/{file_id}")
+async def describe_bailian_file(file_id: str):
+    try:
+        file_detail = await run_blocking(bailian_admin.describe_file, file_id)
+        index_detail = await run_blocking(bailian_admin.get_index_file_detail, file_id)
+        return {
+            "file": file_detail,
+            "index_document": index_detail,
+            "message": "百炼接口不直接返回原始文档正文；如果文件提供解析结果下载地址，则这里会返回解析文本预览。",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.post("/api/bailian/index/create")
 async def create_bailian_index(request: BailianIndexCreateRequest):
     try:
