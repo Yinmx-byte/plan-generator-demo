@@ -89,6 +89,16 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - **Word 渲染**：`scripts/generate_plan.py` 只负责将已验证的文档 JSON 渲染为 `.docx`。
 - **远程知识库管理**：前端知识库页可上传/查看/删除百炼文档；上传或删除后会自动提交重建索引任务。
 
+## Master Agent 工具组配置
+
+Master Agent 的工具实现位于 `backend/tools/`，由 `backend/tools/master_toolkit.py` 统一注册。默认注册 `context`、`planning`、`generation`、`document` 四个工具组；如需临时收窄工具面，可设置：
+
+```env
+MASTER_AGENT_TOOL_GROUPS=context,planning,generation,document
+```
+
+设置为 `all` 或不配置时启用全部工具组，设置为 `none`、`off` 或 `disabled` 时不注册分组工具。工具执行逻辑保留在 Python 函数中，稳定规则和业务约束继续放在 Skill 中。
+
 ## API
 
 ### 对话与方案生成
