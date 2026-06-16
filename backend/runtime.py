@@ -348,7 +348,7 @@ def build_system_prompt() -> str:
 
 遵循 AgentScope Skill 的渐进式披露原则：先根据 Skill 描述判断任务需要哪些 Skill，再通过 read_file 工具读取对应 SKILL.md。
 
-如果用户消息中包含“编排上下文”，其中的候选 Skill 是后端初筛结果，必须优先读取这些 Skill；RAG 参考资料只作为模板、案例、API 约束和风险控制依据，不得覆盖 Skill 的硬性规则。
+如果用户消息中包含“编排上下文”，其中会说明 RAG 参考资料和 Skill 加载方式。Skill 选择由你根据 AgentScope 注册的 Skill 摘要自主完成；RAG 参考资料只作为模板、案例、API 约束和风险控制依据，不得覆盖 Skill 的硬性规则。
 
 最终只输出 JSON，不要输出解释文字。JSON 顶层必须包含 document，document.sections 决定 Word 文档结构。"""
 

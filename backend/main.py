@@ -209,7 +209,8 @@ async def dev_plan_test(request: PlanTestRequest):
         "collected": state,
         "extracted": extracted.get("updates", {}),
         "evidence": {
-            "selected_skills": orchestration["selected_skill_names"],
+            "skill_selection_mode": orchestration.get("skill_selection_mode"),
+            "registered_skills_count": len(get_skill_registry().skills),
             "rag_enabled": orchestration["rag_enabled"],
             "rag_chunks_count": orchestration["rag_chunks_count"],
         },

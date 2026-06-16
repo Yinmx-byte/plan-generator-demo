@@ -58,9 +58,9 @@ async def build_master_toolkit(
     toolkit = Toolkit()
     toolkit.create_tool_group(
         "context",
-        description="Skill discovery, deterministic Skill routing and RAG retrieval.",
+        description="Skill discovery and RAG retrieval.",
         active=False,
-        notes="Use for inspecting available Skills, selecting candidate Skills, and retrieving knowledge evidence.",
+        notes="Use for inspecting available Skills and retrieving knowledge evidence. Do not hard-code product-to-Skill routing; rely on AgentScope Skill selection.",
     )
     toolkit.create_tool_group(
         "planning",
@@ -117,35 +117,6 @@ async def build_master_toolkit(
                 }
             )
         return _json_tool_response({"status": "ok", "skills": skills, "count": len(skills)})
-
-    def select_maintenance_skills(
-        maintenance_type: str = "",
-        requirement_text: str = "",
-    ) -> ToolResponse:
-        """Select likely maintenance Skills using project routing rules.
-
-        Args:
-            maintenance_type: Maintenance type or action category.
-            requirement_text: User requirement text or extracted resource details.
-        """
-        selected = runtime.get_skill_registry().select_skills(
-            maintenance_type,
-            requirement_text,
-        )
-        return _json_tool_response(
-            {
-                "status": "ok",
-                "selected_skills": [
-                    {
-                        "name": skill.name,
-                        "description": skill.description,
-                        "skill_dir": str(skill.path),
-                        "skill_file": str(skill.path / "SKILL.md"),
-                    }
-                    for skill in selected
-                ],
-            }
-        )
 
     async def retrieve_knowledge(query: str, top_k: int = 5) -> ToolResponse:
         """Retrieve remote RAG knowledge chunks from the configured knowledge base.
@@ -223,7 +194,8 @@ async def build_master_toolkit(
         return _json_tool_response(
             {
                 "status": "ready",
-                "selected_skills": orchestration["selected_skill_names"],
+                "skill_selection_mode": orchestration.get("skill_selection_mode"),
+                "registered_skills_count": len(runtime.get_skill_registry().skills),
                 "rag_enabled": orchestration["rag_enabled"],
                 "rag_chunks_count": orchestration["rag_chunks_count"],
             }
@@ -268,7 +240,8 @@ async def build_master_toolkit(
                 **generated,
                 "collected": state,
                 "evidence": {
-                    "selected_skills": orchestration["selected_skill_names"],
+                    "skill_selection_mode": orchestration.get("skill_selection_mode"),
+                    "registered_skills_count": len(runtime.get_skill_registry().skills),
                     "rag_enabled": orchestration["rag_enabled"],
                     "rag_chunks_count": orchestration["rag_chunks_count"],
                 },
@@ -305,11 +278,6 @@ async def build_master_toolkit(
         list_registered_skills,
         group_name="context",
         func_name="list_registered_skills",
-    )
-    toolkit.register_tool_function(
-        select_maintenance_skills,
-        group_name="context",
-        func_name="select_maintenance_skills",
     )
     toolkit.register_tool_function(
         retrieve_knowledge,

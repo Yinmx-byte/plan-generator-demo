@@ -24,7 +24,6 @@ from runtime import (
 )
 from scripts.generate_plan import build_document
 from services.json_utils import extract_json, get_response_text
-from services.requirements import FORM_FIELDS
 
 _generated_files: dict[str, Path] = {}
 
@@ -83,19 +82,6 @@ def get_generated_path(session: dict[str, Any]) -> Optional[Path]:
 
 
 async def build_generation_orchestration_context(state: dict[str, str]) -> dict[str, Any]:
-    state_text = "\n".join(
-        f"{field}: {state.get(field, '')}"
-        for field in FORM_FIELDS
-        if state.get(field, "").strip()
-    )
-    selected_skills = get_skill_registry().select_skills(
-        state.get("maintenance_type", ""),
-        state_text,
-    )
-
-    skill_text = "\n".join(
-        f"{skill.name}: {skill.description}" for skill in selected_skills
-    )
     rag_chunks: list[str] = []
     knowledge_base = get_knowledge_base(SKILLS_ROOT)
     if knowledge_base is not None:
@@ -106,8 +92,6 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
 涉及实例：{state.get("instances", "")}
 技术参数：{state.get("tech_params", "")}
 补充要求：{state.get("ops_detail", "")}
-候选 Skill：
-{skill_text}
 请检索相似内部模板、阿里云通用检修方案、风险控制、前置检查、实施步骤、回退和验证要求。"""
         try:
             rag_chunks = await knowledge_base.retrieve(
@@ -116,23 +100,6 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
             )
         except Exception:
             rag_chunks = []
-
-    skill_contract_context = get_skill_registry().expand_skills(selected_skills)
-    if selected_skills:
-        selected_skill_context = "\n".join(
-            [
-                "系统已根据检修类型和需求内容初筛出候选 Skill。你必须优先读取这些 Skill 的 SKILL.md；如判断不充分，再结合已注册 Skill 追加读取。",
-                *[
-                    f"- name: {skill.name}\n"
-                    f"  description: {skill.description}\n"
-                    f"  skill_dir: {skill.path}\n"
-                    f"  skill_file: {skill.path / 'SKILL.md'}"
-                    for skill in selected_skills
-                ],
-            ]
-        )
-    else:
-        selected_skill_context = "未命中明确候选 Skill，请根据已注册 Skill 自行判断。"
 
     if rag_chunks:
         blocks = []
@@ -152,23 +119,24 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
     else:
         rag_context = "当前未检索到 RAG 参考资料。请确认百炼知识库配置、远程文档解析状态、索引任务状态和检索阈值。"
 
+    skill_prompt = get_skill_registry().get_agent_skill_prompt()
     return {
-        "selected_skill_names": [skill.name for skill in selected_skills],
+        "skill_selection_mode": "agentscope_react_auto",
         "rag_enabled": knowledge_base is not None,
         "rag_chunks_count": len(rag_chunks),
         "prompt_context": (
-            "## 编排上下文：Skill 初筛结果\n"
-            f"{selected_skill_context}\n\n"
+            "## 编排上下文：Skill 加载方式\n"
+            "Skill 选择完全交给 AgentScope 注册信息和 ReActAgent 自主判断。所有 Skill 已通过 AgentScope Toolkit.register_agent_skill 注册，"
+            "请根据 AgentScope 暴露的 Skill name/description 自主判断需要读取哪些 SKILL.md。\n\n"
+            "## AgentScope Skill 摘要\n"
+            f"{skill_prompt}\n\n"
             "## 编排上下文：RAG 参考资料\n"
             f"{rag_context}\n\n"
-            "## 编排上下文：已展开 Skill 契约\n"
-            f"{skill_contract_context or '未展开具体 Skill 内容。'}\n\n"
             "## 使用要求\n"
-            "- Skill 是主规则来源：文档结构、必填章节、风险点、实施步骤和脚本模板优先遵循 Skill。\n"
+            "- Skill 是主规则来源：文档结构、必填章节、风险点、实施步骤和脚本模板优先遵循 ReActAgent 自主读取的 Skill。\n"
             "- RAG 是参考依据：用于补充内部模板措辞、历史方案经验、阿里云通用方案/API 约束，不得覆盖 Skill 的硬性规则。\n"
-            "- 输出 JSON 中建议包含 evidence 字段，记录 selected_skills 和 rag_chunks_count，便于后续审计。\n"
+            "- 输出 JSON 中建议包含 evidence 字段，记录 agent_selected_skills 和 rag_chunks_count，便于后续审计。\n"
         ),
-        "skill_contract_context": skill_contract_context,
     }
 
 
@@ -239,7 +207,7 @@ def build_fallback_plan_data(
         "department": "云运营中心平台运维处",
         "date": datetime.now().strftime("%Y年%m月%d日"),
         "evidence": {
-            "selected_skills": orchestration.get("selected_skill_names", []),
+            "skill_selection_mode": orchestration.get("skill_selection_mode", "agentscope_react_auto"),
             "rag_enabled": orchestration.get("rag_enabled", False),
             "rag_chunks_count": orchestration.get("rag_chunks_count", 0),
             "fallback_used": True,
@@ -358,7 +326,7 @@ personnel, risks, steps, rollback content, scripts, or other parts explicitly re
 """
     return f"""请根据以下检修需求生成标准化检修方案 JSON。
 
-后端已经提供候选 Skill、SKILL.md 契约摘要和 RAG 检索上下文。你必须优先使用这些依据，并使用 read_file 工具读取/核对相关 SKILL.md；若涉及多个检修类型，应组合多个 Skill。
+后端已经通过 AgentScope 注册全部可用 Skill，并提供 RAG 检索上下文。你必须根据 Skill 摘要自主判断需要哪些 Skill，并使用 read_file 工具读取/核对相关 SKILL.md；若涉及多个检修类型，应组合多个 Skill。
 
 输出结构硬性要求：
 - 必须读取并遵守 `maintenance-plan-composer` Skill 中的“Word 渲染 JSON 格式契约”。
@@ -575,7 +543,10 @@ def ensure_renderer_ready_document(
     data.setdefault("evidence", {})
     if isinstance(data["evidence"], dict):
         data["evidence"]["renderer_schema_guard"] = True
-        data["evidence"].setdefault("selected_skills", orchestration.get("selected_skill_names", []))
+        data["evidence"].setdefault(
+            "skill_selection_mode",
+            orchestration.get("skill_selection_mode", "agentscope_react_auto"),
+        )
     return data
 
 def docx_to_markdown(raw: bytes) -> str:
@@ -731,14 +702,14 @@ def validate_plan_json(
     data.setdefault("date", datetime.now().strftime("%Y年%m月%d日"))
     data.setdefault("evidence", {})
     if isinstance(data["evidence"], dict):
-        data["evidence"].setdefault(
-            "selected_skills",
-            orchestration["selected_skill_names"],
-        )
         data["evidence"].setdefault("rag_enabled", orchestration["rag_enabled"])
         data["evidence"].setdefault(
             "rag_chunks_count",
             orchestration["rag_chunks_count"],
+        )
+        data["evidence"].setdefault(
+            "skill_selection_mode",
+            orchestration.get("skill_selection_mode", "agentscope_react_auto"),
         )
         data["evidence"]["validation_issues"] = validation_issues
 

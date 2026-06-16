@@ -19,7 +19,7 @@ description: 云平台检修 Master ReActAgent 的自主规划协议。用于实
 
 ## 工具组
 
-- `context`：查看 Skill 列表、按需求初筛 Skill、检索 RAG 知识。
+- `context`：查看 Skill 列表、检索 RAG 知识。Skill 选择由 AgentScope 注册的 Skill 摘要和 ReActAgent 自主判断完成。
 - `planning`：抽取需求字段、检查缺失字段、生成追问。
 - `generation`：准备方案生成上下文、生成 DOCX。
 - `document`：查看当前会话已生成文档的信息和文本预览。
@@ -40,9 +40,9 @@ description: 云平台检修 Master ReActAgent 的自主规划协议。用于实
 2. 调用 `update_requirements`，把用户最新消息抽取进会话 state。
 3. 调用 `check_missing_requirements`。
 4. 如果返回 `need_more`，直接把 `question` 发给用户。
-5. 如果返回 `complete`，调用 `reset_equipped_tools` 激活 `context`，按需使用 `select_maintenance_skills` 和 `retrieve_knowledge`。
+5. 如果返回 `complete`，调用 `reset_equipped_tools` 激活 `context`，按需使用 `list_registered_skills` 查看 Skill 摘要，并使用 `retrieve_knowledge` 检索参考资料。
 6. 调用 `reset_equipped_tools` 激活 `generation`。
-7. 调用 `prepare_plan_context`，获取候选 Skill 和 RAG 依据。
+7. 调用 `prepare_plan_context`，获取 AgentScope Skill 自动选择说明和 RAG 依据。
 8. 调用 `generate_maintenance_plan`。
 9. 最终回复中说明已生成，并给出文件名和 `download_url`。
 

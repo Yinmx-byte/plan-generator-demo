@@ -72,7 +72,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
       ├─ 生成方案：调用 planning 工具抽取关键信息，缺失则追问
       ├─ 重新生成：复用已收集需求，重新准备 Skill/RAG 依据
       └─ 修改方案：读取会话状态和已生成文档信息，按用户要求修订
-          ├─ context 工具：初筛 AgentScope Skill，检索百炼 RAG
+          ├─ context 工具：查看 AgentScope Skill 摘要，检索百炼 RAG
           ├─ generation 工具：调用方案生成服务
           │   ├─ compose_plan_json：由专用 Plan ReActAgent 读取 Skill 并输出结构 JSON
           │   ├─ validate_plan_json：检查章节、风险和实施步骤完整性

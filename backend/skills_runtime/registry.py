@@ -3,7 +3,7 @@
 Newer AgentScope versions expose ``Toolkit.register_agent_skill``. The
 installed project dependency may be older, so this module keeps the same
 progressive-disclosure principle locally: expose only skill metadata first,
-then expand selected SKILL.md files on demand.
+then let AgentScope expose and load SKILL.md files on demand.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 import yaml
 
@@ -75,68 +75,11 @@ class SkillRegistry:
         except Exception:
             return None
 
-    def select_skills(self, maintenance_type: str, user_text: str) -> list[Skill]:
-        """Select likely skills with deterministic routing.
-
-        This keeps routing predictable for an API service. The prompt still
-        receives the compact skill list, so LLM behavior follows the same
-        selection-and-expansion model described in AgentScope's Skill guide.
-        """
-        query = f"{maintenance_type}\n{user_text}".lower()
-        selected = []
-
-        common = self.get("maintenance-plan-composer")
-        if common:
-            selected.append(common)
-
-        route_rules = [
-            (
-                "ecs-lifecycle-maintenance",
-                ["ecs", "云服务器", "创建ecs", "创建 ecs", "回收ecs", "回收 ecs", "ecs升配", "ecs 升配", "ecs降配", "维护性重启"],
-            ),
-            (
-                "k8s-worker-maintenance",
-                ["k8s", "kubernetes", "worker", "edas", "oam", "集群", "节点"],
-            ),
-            ("mq-maintenance-plan", ["mq", "rocketmq", "groupid", "gid", "topic", "队列"]),
-            ("oss-maintenance-plan", ["oss", "bucket", "对象存储"]),
-            ("polardb-maintenance-plan", ["polardb", "只读实例", "读写分离"]),
-            ("rds-maintenance-plan", ["rds", "drds", "mysql", "参数调整"]),
-            ("redis-maintenance-plan", ["redis", "缓存"]),
-            ("slb-maintenance-plan", ["slb", "负载均衡", "监听", "后端服务器组", "ipv6"]),
-            ("database-maintenance-plan", ["polardb", "mongodb", "mysql", "数据库", "白名单"]),
-            ("component-scaling-plan", ["扩容", "缩容", "扩缩容", "规格", "变更配置"]),
-            ("restart-maintenance-plan", ["重启", "维护性重启", "k8s", "节点"]),
-        ]
-
-        for skill_name, keywords in route_rules:
-            if any(keyword.lower() in query for keyword in keywords):
-                skill = self.get(skill_name)
-                if skill and skill not in selected:
-                    selected.append(skill)
-
-        if len(selected) == 1:
-            generic = self.get("generic-maintenance-plan")
-            if generic:
-                selected.append(generic)
-
-        return selected
-
     def get(self, name: str) -> Optional[Skill]:
         for skill in self._skills:
             if skill.name == name:
                 return skill
         return None
-
-    def expand_skills(self, skills: Iterable[Skill]) -> str:
-        blocks = []
-        for skill in skills:
-            blocks.append(
-                f"## 已激活 Skill: {skill.name}\n"
-                f"路径：{skill.path}\n\n"
-                f"{skill.body.strip()}"
-            )
-        return "\n\n---\n\n".join(blocks)
 
     @staticmethod
     def _load_skills(skills_root: Path) -> list[Skill]:
