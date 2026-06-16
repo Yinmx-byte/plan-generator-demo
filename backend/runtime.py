@@ -301,7 +301,7 @@ def get_model() -> AnthropicChatModel | OpenAIChatModel:
                 model_name=model_name,
                 api_key=api_key,
                 stream=False,
-                max_tokens=int(os.getenv("MAX_TOKENS", "4096")),
+                max_tokens=int(os.getenv("MAX_TOKENS", "16000")),
                 client_kwargs=client_kwargs if client_kwargs else None,
             )
         elif provider in {"openai", "deepseek"}:
@@ -322,7 +322,7 @@ def get_model() -> AnthropicChatModel | OpenAIChatModel:
                 stream=False,
                 client_kwargs=client_kwargs if client_kwargs else None,
                 generate_kwargs={
-                    "max_tokens": int(os.getenv("MAX_TOKENS", "4096")),
+                    "max_tokens": int(os.getenv("MAX_TOKENS", "16000")),
                     **(
                         {"extra_body": {"thinking": {"type": "disabled"}}}
                         if provider == "deepseek"

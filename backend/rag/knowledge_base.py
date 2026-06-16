@@ -78,8 +78,8 @@ class MaintenanceKnowledgeBase:
             else None,
         )
 
-        def _call() -> list[str]:
-            response = self._get_client().retrieve(self.workspace_id, request)
+        def _chunks_from_request(current_request: RetrieveRequest) -> list[str]:
+            response = self._get_client().retrieve(self.workspace_id, current_request)
             nodes = getattr(getattr(response.body, "data", None), "nodes", None) or []
             chunks = []
             for node in nodes:
@@ -87,6 +87,19 @@ class MaintenanceKnowledgeBase:
                 if text:
                     chunks.append(text)
             return chunks
+
+        def _call() -> list[str]:
+            chunks = _chunks_from_request(request)
+            if chunks or not self.enable_rerank:
+                return chunks
+            relaxed_request = RetrieveRequest(
+                index_id=self.index_id,
+                query=query,
+                dense_similarity_top_k=limit,
+                sparse_similarity_top_k=limit,
+                enable_reranking=False,
+            )
+            return _chunks_from_request(relaxed_request)
 
         return await asyncio.to_thread(_call)
 

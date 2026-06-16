@@ -7,6 +7,7 @@ only provides reusable rendering primitives.
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -167,6 +168,12 @@ def add_checkbox_group(doc, block: dict[str, Any]):
         add_paragraph(doc, "    ".join(rendered[idx : idx + per_line]), first_line_indent=0.74)
 
 
+def strip_manual_list_number(text: Any) -> str:
+    """Remove model-supplied numbering before renderer adds its own."""
+    value = str(text or "").strip()
+    return re.sub(r"^\s*(?:\d+[\u3001、.,，．]|[（(]\d+[）)]|[一二三四五六七八九十]+[\u3001、])\s*", "", value)
+
+
 def render_block(doc, block: dict[str, Any]):
     block_type = block.get("type", "paragraph")
 
@@ -186,7 +193,7 @@ def render_block(doc, block: dict[str, Any]):
             add_paragraph(doc, text, first_line_indent=block.get("first_line_indent"))
     elif block_type == "numbered_list":
         for idx, text in enumerate(block.get("items", []), 1):
-            add_paragraph(doc, f"{idx}、{text}", first_line_indent=block.get("first_line_indent"))
+            add_paragraph(doc, f"{idx}、{strip_manual_list_number(text)}", first_line_indent=block.get("first_line_indent"))
     elif block_type == "plain_list":
         prefix = block.get("prefix", "")
         for text in block.get("items", []):

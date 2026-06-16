@@ -99,6 +99,20 @@ MASTER_AGENT_TOOL_GROUPS=context,planning,generation,document
 
 设置为 `all` 或不配置时启用全部工具组，设置为 `none`、`off` 或 `disabled` 时不注册分组工具。工具执行逻辑保留在 Python 函数中，稳定规则和业务约束继续放在 Skill 中。
 
+## 方案生成稳定性配置
+
+方案生成会输出完整 Word 渲染 JSON，建议保持较高输出上限：
+
+```env
+MAX_TOKENS=16000
+```
+
+默认不再返回泛化兜底方案：当模型 JSON 解析失败或结构不符合渲染契约时，后端会重试一次；重试仍失败则返回错误并保存 debug 输出，避免下载到内容不可用的 DOCX。如需临时恢复旧兜底行为，可显式设置：
+
+```env
+ALLOW_FALLBACK_PLAN=true
+```
+
 ## API
 
 ### 对话与方案生成

@@ -180,6 +180,26 @@ def write_model_output_debug(text: str, prefix: str = "plan_model_output") -> Pa
     return path
 
 
+def allow_fallback_plan() -> bool:
+    """Whether to return a generic fallback DOCX when model JSON is invalid."""
+    return os.getenv("ALLOW_FALLBACK_PLAN", "false").lower() in {"1", "true", "yes"}
+
+
+def build_json_retry_prompt(user_prompt: str, error_detail: str) -> str:
+    """Build a stricter retry prompt after malformed or truncated JSON output."""
+    return f"""{user_prompt}
+
+## 上一次输出未通过后端解析
+错误信息：{error_detail}
+
+请重新生成最终 JSON，并严格遵守：
+- 最终回复只能是一个完整 JSON 对象，不能包含 markdown 代码块、说明文字或“渲染检查通过”等前后缀。
+- 所有字符串内的英文双引号必须转义，避免破坏 JSON。
+- 不要输出未闭合的数组或对象；必须完整包含“回滚步骤”和“回滚后验证”。
+- 内容要可执行但保持精炼，避免因过长导致输出被截断。
+"""
+
+
 def build_fallback_plan_data(
     state: dict[str, str],
     orchestration: dict[str, Any],
@@ -625,9 +645,37 @@ async def compose_plan_json(
     text = get_response_text(response)
     try:
         data = await repair_and_extract_json(text)
-    except HTTPException:
-        write_model_output_debug(text)
-        data = build_fallback_plan_data(state, orchestration, text)
+    except HTTPException as first_exc:
+        debug_path = write_model_output_debug(text)
+        retry_prompt = build_json_retry_prompt(user_prompt, str(first_exc.detail))
+        retry_response = await run_plan_agent(
+            retry_prompt,
+            get_plan_agent_runtime(),
+            trace_callback=trace_callback,
+        )
+        retry_text = get_response_text(retry_response)
+        try:
+            data = await repair_and_extract_json(retry_text)
+        except HTTPException as second_exc:
+            retry_debug_path = write_model_output_debug(retry_text, prefix="plan_model_output_retry")
+            if allow_fallback_plan():
+                data = build_fallback_plan_data(state, orchestration, retry_text or text)
+                data.setdefault("evidence", {})
+                if isinstance(data["evidence"], dict):
+                    data["evidence"]["fallback_reason"] = "model_json_parse_failed_after_retry"
+                    data["evidence"]["debug_path"] = str(debug_path)
+                    data["evidence"]["retry_debug_path"] = str(retry_debug_path)
+            else:
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "message": "模型输出的方案 JSON 无法解析，已重试但仍失败；未生成兜底文档。",
+                        "debug_path": str(debug_path),
+                        "retry_debug_path": str(retry_debug_path),
+                        "first_error": first_exc.detail,
+                        "second_error": second_exc.detail,
+                    },
+                ) from second_exc
     return data
 
 
@@ -692,6 +740,16 @@ def validate_plan_json(
             json.dumps(data, ensure_ascii=False, indent=2),
             prefix="invalid_plan_model_output",
         )
+        if not allow_fallback_plan():
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "message": "模型输出的方案结构不符合 Word 渲染契约，未生成兜底文档。",
+                    "fallback_reason": fallback_reason,
+                    "validation_issues": validation_issues,
+                    "debug_path": str(debug_path),
+                },
+            )
         data = build_fallback_plan_data(state, orchestration, json.dumps(data, ensure_ascii=False))
         data.setdefault("evidence", {})
         if isinstance(data["evidence"], dict):
