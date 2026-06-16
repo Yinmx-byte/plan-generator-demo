@@ -39,7 +39,10 @@ from services.json_utils import get_response_text
 from services.plan_generation import (
     build_generation_orchestration_context,
     generate_docx_from_state,
+    get_generated_document,
     get_generated_file,
+    render_docx,
+    update_generated_document,
 )
 from services.page_agent import run_page_agent_task, run_plan_validation_agent
 from services.requirements import (
@@ -71,6 +74,10 @@ class PlanTestRequest(BaseModel):
     message: str = ""
     state: Optional[dict[str, Any]] = None
     allow_partial: bool = False
+
+
+class GeneratedDocumentUpdateRequest(BaseModel):
+    data: dict[str, Any]
 
 
 def get_master_agent_runtime() -> MasterAgentRuntime:
@@ -213,6 +220,7 @@ async def dev_plan_test(request: PlanTestRequest):
             "registered_skills_count": len(get_skill_registry().skills),
             "rag_enabled": orchestration["rag_enabled"],
             "rag_chunks_count": orchestration["rag_chunks_count"],
+            "rag_status": orchestration.get("rag_status"),
         },
     }
 
@@ -378,6 +386,34 @@ async def download_generated(file_id: str):
         filename=path.name,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
+
+
+@app.get("/api/documents/{file_id}")
+async def get_generated_document_preview(file_id: str):
+    data = get_generated_document(file_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="生成文档数据不存在或已过期")
+    return {"status": "ok", "file_id": file_id, "data": data}
+
+
+@app.put("/api/documents/{file_id}")
+async def save_generated_document(file_id: str, request: GeneratedDocumentUpdateRequest):
+    data = update_generated_document(file_id, request.data)
+    return {"status": "ok", "file_id": file_id, "data": data}
+
+
+@app.post("/api/documents/{file_id}/render")
+async def render_generated_document(file_id: str):
+    data = get_generated_document(file_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="生成文档数据不存在或已过期")
+    new_file_id, _path, filename = render_docx(data)
+    return {
+        "status": "generated",
+        "file_id": new_file_id,
+        "filename": filename,
+        "download_url": f"/api/download/{new_file_id}",
+    }
 
 
 # ── 前端静态文件 ─────────────────────────────────────────────────

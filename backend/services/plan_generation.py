@@ -5,6 +5,7 @@ import os
 import re
 import tempfile
 import uuid
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -26,6 +27,7 @@ from scripts.generate_plan import build_document
 from services.json_utils import extract_json, get_response_text
 
 _generated_files: dict[str, Path] = {}
+_generated_documents: dict[str, dict[str, Any]] = {}
 
 
 def compact_text(value: Any) -> str:
@@ -76,6 +78,20 @@ def get_generated_file(file_id: str | None) -> Optional[Path]:
     return path if path and path.exists() else None
 
 
+def get_generated_document(file_id: str | None) -> Optional[dict[str, Any]]:
+    data = _generated_documents.get(file_id or "")
+    return deepcopy(data) if data else None
+
+
+def update_generated_document(file_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    if file_id not in _generated_documents:
+        raise HTTPException(status_code=404, detail="生成文档数据不存在或已过期")
+    if not isinstance(data.get("document"), dict):
+        raise HTTPException(status_code=400, detail="文档 JSON 必须包含 document 对象")
+    _generated_documents[file_id] = deepcopy(data)
+    return get_generated_document(file_id) or data
+
+
 def get_generated_path(session: dict[str, Any]) -> Optional[Path]:
     generated = session.get("generated") or {}
     return get_generated_file(generated.get("file_id"))
@@ -84,7 +100,10 @@ def get_generated_path(session: dict[str, Any]) -> Optional[Path]:
 async def build_generation_orchestration_context(state: dict[str, str]) -> dict[str, Any]:
     rag_chunks: list[str] = []
     knowledge_base = get_knowledge_base(SKILLS_ROOT)
+    rag_status = "disabled"
+    rag_error = ""
     if knowledge_base is not None:
+        rag_status = "requested"
         rag_query = f"""检修方案参考资料检索
 检修类型：{state.get("maintenance_type", "")}
 网络环境：{state.get("network", "")}
@@ -98,8 +117,11 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
                 rag_query,
                 top_k=int(os.getenv("PLAN_RAG_TOP_K", os.getenv("RAG_TOP_K", "5"))),
             )
+            rag_status = "hit" if rag_chunks else "no_chunks_returned"
         except Exception:
             rag_chunks = []
+            rag_status = "error"
+            rag_error = "百炼 Retrieve API 调用失败，已跳过 RAG 参考资料。"
 
     if rag_chunks:
         blocks = []
@@ -123,6 +145,8 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
     return {
         "skill_selection_mode": "agentscope_react_auto",
         "rag_enabled": knowledge_base is not None,
+        "rag_status": rag_status,
+        "rag_error": rag_error,
         "rag_chunks_count": len(rag_chunks),
         "prompt_context": (
             "## 编排上下文：Skill 加载方式\n"
@@ -765,6 +789,9 @@ def validate_plan_json(
             "rag_chunks_count",
             orchestration["rag_chunks_count"],
         )
+        data["evidence"].setdefault("rag_status", orchestration.get("rag_status"))
+        if orchestration.get("rag_error"):
+            data["evidence"].setdefault("rag_error", orchestration.get("rag_error"))
         data["evidence"].setdefault(
             "skill_selection_mode",
             orchestration.get("skill_selection_mode", "agentscope_react_auto"),
@@ -789,6 +816,7 @@ def render_docx(data: dict[str, Any]) -> tuple[str, Path, str]:
     output_path = output_dir / f"检修方案_{file_id[:8]}.docx"
     doc.save(str(output_path))
     _generated_files[file_id] = output_path
+    _generated_documents[file_id] = deepcopy(data)
 
     files = sorted(
         output_dir.glob("检修方案_*.docx"),
@@ -800,6 +828,10 @@ def render_docx(data: dict[str, Any]) -> tuple[str, Path, str]:
             old_file.unlink()
         except OSError:
             pass
+        for old_id, old_path in list(_generated_files.items()):
+            if old_path == old_file:
+                _generated_files.pop(old_id, None)
+                _generated_documents.pop(old_id, None)
 
     filename = data.get("title") or data.get("document", {}).get("title", "检修方案")
     return file_id, output_path, filename + ".docx"

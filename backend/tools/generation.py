@@ -45,6 +45,7 @@ def build_prepare_plan_context_tool(
                 "registered_skills_count": len(runtime.get_skill_registry().skills),
                 "rag_enabled": orchestration["rag_enabled"],
                 "rag_chunks_count": orchestration["rag_chunks_count"],
+                "rag_status": orchestration.get("rag_status"),
             }
         )
 
@@ -98,9 +99,9 @@ def build_generate_maintenance_plan_tool(
                     "registered_skills_count": len(runtime.get_skill_registry().skills),
                     "rag_enabled": orchestration["rag_enabled"],
                     "rag_chunks_count": orchestration["rag_chunks_count"],
+                    "rag_status": orchestration.get("rag_status"),
                 },
             }
         )
 
     return generate_maintenance_plan
-

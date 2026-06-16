@@ -16,6 +16,15 @@ let sessionId = localStorage.getItem('planGeneratorSessionId') || null;
 let currentPage = 'plan';
 let messagesEl = null;
 let pageAgentMessagesEl = null;
+let currentDocumentFileId = null;
+let currentDocumentData = null;
+let documentJsonEditor = null;
+let documentPreview = null;
+let documentStatus = null;
+let documentTitleEl = null;
+let documentDownloadLink = null;
+let documentEditStatus = null;
+let documentDialog = null;
 
 function scrollToBottom(el) {
   if (el) el.scrollTop = el.scrollHeight;
@@ -229,6 +238,141 @@ function formatKb(size) {
   return `${Math.ceil(value / 1024)} KB`;
 }
 
+function setDocumentEditorState(status, message) {
+  if (documentStatus) documentStatus.textContent = status;
+  if (documentEditStatus) documentEditStatus.textContent = message || '';
+}
+
+function setDocumentDownload(url, filename) {
+  if (!documentDownloadLink) return;
+  if (!url) {
+    documentDownloadLink.href = '#';
+    documentDownloadLink.classList.add('disabled');
+    documentDownloadLink.setAttribute('aria-disabled', 'true');
+    documentDownloadLink.textContent = '下载 DOCX';
+    return;
+  }
+  documentDownloadLink.href = url;
+  documentDownloadLink.classList.remove('disabled');
+  documentDownloadLink.removeAttribute('aria-disabled');
+  documentDownloadLink.textContent = filename ? `下载 ${filename}` : '下载 DOCX';
+}
+
+function collectDocumentSections(data) {
+  const sections = data?.document?.sections || [];
+  if (!Array.isArray(sections)) return [];
+  return sections.filter((section) => section && typeof section === 'object');
+}
+
+function renderDocumentPreview(data) {
+  if (!documentPreview) return;
+  const title = data?.title || data?.document?.title || '未命名检修方案';
+  const sections = collectDocumentSections(data);
+  if (documentTitleEl) documentTitleEl.textContent = title;
+  if (!sections.length) {
+    documentPreview.innerHTML = `
+      <div class="empty-document">
+        <strong>文档结构为空</strong>
+        <span>请检查 JSON 编辑区是否包含 document.sections。</span>
+      </div>
+    `;
+    return;
+  }
+  documentPreview.innerHTML = `
+    <div class="document-summary">
+      <strong>${escapeHtml(title)}</strong>
+      <span>${sections.length} 个章节 · ${escapeHtml(data?.department || '云运营中心平台运维处')}</span>
+    </div>
+    <div class="document-section-list">
+      ${sections.map((section, index) => {
+        const blocks = Array.isArray(section.blocks) ? section.blocks.length : 0;
+        return `
+          <div class="document-section-item">
+            <span>${index + 1}</span>
+            <div>
+              <strong>${escapeHtml(section.heading || section.title || '未命名章节')}</strong>
+              <small>${blocks} 个内容块</small>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+async function loadGeneratedDocument(fileId, downloadUrl = '', filename = '') {
+  if (!fileId) return;
+  currentDocumentFileId = fileId;
+  setDocumentEditorState('加载中', '正在读取生成文档结构...');
+  setDocumentDownload(downloadUrl, filename);
+  try {
+    const resp = await fetch(`/api/documents/${encodeURIComponent(fileId)}`);
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '读取文档失败');
+    currentDocumentData = data.data;
+    if (documentJsonEditor) {
+      documentJsonEditor.value = JSON.stringify(currentDocumentData, null, 2);
+    }
+    renderDocumentPreview(currentDocumentData);
+    setDocumentEditorState('可编辑', '已加载生成文档。修改 JSON 后点击“保存并重新渲染”。');
+  } catch (err) {
+    setDocumentEditorState('加载失败', err.message);
+  }
+}
+
+async function openGeneratedDocument(fileId, downloadUrl = '', filename = '') {
+  if (!documentDialog) return;
+  documentDialog.showModal();
+  await loadGeneratedDocument(fileId || currentDocumentFileId, downloadUrl, filename);
+}
+
+function parseDocumentEditorJson() {
+  if (!documentJsonEditor) throw new Error('文档编辑器未初始化');
+  try {
+    return JSON.parse(documentJsonEditor.value);
+  } catch (err) {
+    throw new Error(`JSON 格式错误：${err.message}`);
+  }
+}
+
+async function saveAndRenderDocument() {
+  if (!currentDocumentFileId) {
+    setDocumentEditorState('未加载', '请先生成一份检修方案。');
+    return;
+  }
+  let edited;
+  try {
+    edited = parseDocumentEditorJson();
+  } catch (err) {
+    setDocumentEditorState('JSON错误', err.message);
+    return;
+  }
+  setDocumentEditorState('保存中', '正在保存修改并重新渲染 DOCX...');
+  try {
+    const saveResp = await fetch(`/api/documents/${encodeURIComponent(currentDocumentFileId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: edited }),
+    });
+    const saveData = await saveResp.json();
+    if (!saveResp.ok) throw new Error(saveData.detail || '保存失败');
+
+    const renderResp = await fetch(`/api/documents/${encodeURIComponent(currentDocumentFileId)}/render`, {
+      method: 'POST',
+    });
+    const renderData = await renderResp.json();
+    if (!renderResp.ok) throw new Error(renderData.detail || '重新渲染失败');
+
+    currentDocumentFileId = renderData.file_id;
+    currentDocumentData = saveData.data;
+    renderDocumentPreview(currentDocumentData);
+    setDocumentDownload(renderData.download_url, renderData.filename);
+    setDocumentEditorState('已保存', '修改已保存，并生成新的 DOCX。');
+  } catch (err) {
+    setDocumentEditorState('保存失败', err.message);
+  }
+}
+
 async function deleteRemoteFile(fileId) {
   if (!fileId) return;
   const statusEl = document.getElementById('knowledgeUploadStatus');
@@ -313,7 +457,34 @@ function initPlanPage() {
   const inputEl = document.getElementById('messageInput');
   const sendBtn = document.getElementById('sendBtn');
   const executeValidationInput = document.getElementById('executeValidationInput');
+  documentJsonEditor = document.getElementById('documentJsonEditor');
+  documentPreview = document.getElementById('documentPreview');
+  documentStatus = document.getElementById('documentStatus');
+  documentTitleEl = document.getElementById('documentTitle');
+  documentDownloadLink = document.getElementById('documentDownloadLink');
+  documentEditStatus = document.getElementById('documentEditStatus');
+  documentDialog = document.getElementById('documentDialog');
+  const formatDocumentJsonBtn = document.getElementById('formatDocumentJsonBtn');
+  const saveDocumentBtn = document.getElementById('saveDocumentBtn');
   addMessage(messagesEl, 'assistant', '请粘贴检修需求描述或需求文档。我会逐步抽取信息、追问缺失项，并在信息齐全后生成 Word 检修方案。');
+  setDocumentDownload(null);
+  setDocumentEditorState(currentDocumentFileId ? '可编辑' : '未加载', currentDocumentFileId ? '已保留上一份生成文档。' : '未生成文档。');
+  if (currentDocumentData) {
+    if (documentJsonEditor) documentJsonEditor.value = JSON.stringify(currentDocumentData, null, 2);
+    renderDocumentPreview(currentDocumentData);
+  }
+
+  formatDocumentJsonBtn?.addEventListener('click', () => {
+    try {
+      const data = parseDocumentEditorJson();
+      documentJsonEditor.value = JSON.stringify(data, null, 2);
+      renderDocumentPreview(data);
+      setDocumentEditorState('已格式化', 'JSON 已格式化，尚未保存。');
+    } catch (err) {
+      setDocumentEditorState('JSON错误', err.message);
+    }
+  });
+  saveDocumentBtn?.addEventListener('click', saveAndRenderDocument);
 
   const setBusy = (busy) => {
     sendBtn.disabled = busy;
@@ -376,7 +547,7 @@ function initPlanPage() {
     if (event === 'evidence') {
       const skills = (data.selected_skills || []).join('、') || '未命中明确 Skill';
       const ragText = data.rag_enabled
-        ? `RAG 已启用，命中 ${data.rag_chunks_count || 0} 个参考片段`
+        ? `RAG 已启用，状态 ${data.rag_status || 'unknown'}，命中 ${data.rag_chunks_count || 0} 个参考片段`
         : 'RAG 未启用，当前仅使用 Skill 规则与用户输入';
       addMessage(messagesEl, 'status', `${data.message || '生成依据已准备完成'}\n候选 Skill：${skills}\n${ragText}`);
       return;
@@ -386,9 +557,22 @@ function initPlanPage() {
         const validationText = data.validation_result ? `\n\nPage Agent 验证结果：\n${data.validation_result}` : '';
         const msg = addMessage(messagesEl, 'assistant', '');
         await typeInto(msg, data.message + validationText);
+        const generated = data.generated || {};
+        currentDocumentFileId = generated.file_id || data.file_id;
         const wrap = document.createElement('div');
-        wrap.innerHTML = `<a class="download" href="${data.download_url}">下载检修方案</a>`;
+        wrap.className = 'document-message-actions';
+        wrap.innerHTML = `
+          <button class="document-open-btn" type="button">查看/编辑文档</button>
+          <a class="download" href="${data.download_url || generated.download_url}">下载检修方案</a>
+        `;
         msg.appendChild(wrap);
+        wrap.querySelector('.document-open-btn')?.addEventListener('click', () => {
+          openGeneratedDocument(
+            currentDocumentFileId,
+            data.download_url || generated.download_url,
+            data.filename || generated.filename,
+          );
+        });
       } else {
         const msg = addMessage(messagesEl, 'assistant', '');
         await typeInto(msg, data.message || '');

@@ -11,7 +11,7 @@
   </div>
 
   <section class="composer">
-    <textarea id="messageInput" placeholder="粘贴需求描述或需求文档。可以一次性包含检修窗口、人员、账号、实例、技术参数。"></textarea>
+    <textarea id="messageInput" placeholder="粘贴需求描述或需求文档。可一次性包含检修窗口、人员、账号、实例、技术参数。"></textarea>
     <div class="composer-actions">
       <label class="check-option">
         <input id="executeValidationInput" type="checkbox">
@@ -20,4 +20,40 @@
       <button class="primary" id="sendBtn" type="button">发送</button>
     </div>
   </section>
+
+  <dialog class="modal document-modal" id="documentDialog">
+    <form method="dialog" class="modal-card document-editor-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Generated Document</p>
+          <h3 id="documentTitle">生成文档</h3>
+        </div>
+        <div class="document-modal-actions">
+          <span class="status-pill" id="documentStatus">未加载</span>
+          <button class="ghost" value="cancel" type="submit">关闭</button>
+        </div>
+      </div>
+
+      <div class="document-editor-grid">
+        <section class="document-preview" id="documentPreview">
+          <div class="empty-document">
+            <strong>正在等待文档结构</strong>
+            <span>生成 DOCX 后可在这里查看章节结构，修改 JSON 后保存并重新渲染。</span>
+          </div>
+        </section>
+
+        <section class="document-json-pane">
+          <label class="field-label" for="documentJsonEditor">文档结构 JSON</label>
+          <textarea id="documentJsonEditor" class="document-json-editor" spellcheck="false" placeholder="生成方案后这里会显示可编辑的文档 JSON。"></textarea>
+        </section>
+      </div>
+
+      <div class="document-actions">
+        <button id="formatDocumentJsonBtn" type="button">格式化</button>
+        <button id="saveDocumentBtn" type="button">保存并重新渲染</button>
+        <a id="documentDownloadLink" class="download disabled" href="#" aria-disabled="true">下载 DOCX</a>
+      </div>
+      <p class="status-text" id="documentEditStatus">未生成文档。</p>
+    </form>
+  </dialog>
 </section>
