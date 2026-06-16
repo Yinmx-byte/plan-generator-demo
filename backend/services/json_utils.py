@@ -54,6 +54,13 @@ def extract_json(text: Any) -> dict:
 
 def get_response_text(response) -> str:
     """Extract text from AgentScope 1.x ChatResponse."""
+    try:
+        direct_text = response.get_text_content()
+    except Exception:
+        direct_text = None
+    if isinstance(direct_text, str) and direct_text.strip():
+        return direct_text.strip()
+
     def collect(value: Any, depth: int = 0) -> list[str]:
         if value is None or depth > 8:
             return []
@@ -78,7 +85,7 @@ def get_response_text(response) -> str:
                 if key in value:
                     fragments.extend(collect(value[key], depth + 1))
             for key, item in value.items():
-                if key not in priority_keys:
+                if key not in priority_keys and key not in {"type", "id", "role", "name"}:
                     fragments.extend(collect(item, depth + 1))
             if "document" in value:
                 fragments.insert(0, json.dumps(value, ensure_ascii=False))

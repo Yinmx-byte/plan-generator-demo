@@ -97,6 +97,11 @@ def infer_updates_from_text(user_message: str) -> dict[str, str]:
     text = user_message.strip()
     lower_text = text.lower()
     updates: dict[str, str] = {}
+    next_labels = (
+        "检修背景|检修类型|网络环境|内外网环境|实施地点|涉及实例|涉及的组件实例|检修窗口|"
+        "方案提供人|检修执行人|检修复核人|安全责任人|ASCM 授权账号|"
+        "ASCM授权账号|堡垒机账号|技术参数|补充要求"
+    )
 
     if text:
         updates["background"] = text
@@ -104,16 +109,18 @@ def infer_updates_from_text(user_message: str) -> dict[str, str]:
     def labeled_value(*labels: str, multiline: bool = False) -> str:
         label_group = "|".join(re.escape(label) for label in labels)
         if multiline:
-            next_labels = (
-                "检修背景|检修类型|网络环境|内外网环境|实施地点|涉及实例|检修窗口|"
-                "方案提供人|检修执行人|检修复核人|安全责任人|ASCM 授权账号|"
-                "ASCM授权账号|堡垒机账号|技术参数|补充要求"
+            pattern = (
+                rf"(?:{label_group})\s*[:：]\s*(.*?)"
+                rf"(?=(?:\n|[。；;]\s*)?(?:{next_labels})\s*[:：]|\Z)"
             )
-            pattern = rf"(?:{label_group})\s*[:：]\s*(.*?)(?=\n\s*(?:{next_labels})\s*[:：]|\Z)"
             match = re.search(pattern, text, re.S | re.I)
         else:
-            match = re.search(rf"(?:{label_group})\s*[:：]\s*([^\n]+)", text, re.I)
-        return match.group(1).strip() if match else ""
+            pattern = (
+                rf"(?:{label_group})\s*[:：]\s*(.*?)"
+                rf"(?=(?:[。；;]\s*)?(?:{next_labels})\s*[:：]|\n|\Z)"
+            )
+            match = re.search(pattern, text, re.S | re.I)
+        return match.group(1).strip(" 。；;\n\t") if match else ""
 
     labeled_background = labeled_value("检修背景", multiline=True)
     if labeled_background:
@@ -163,6 +170,9 @@ def infer_updates_from_text(user_message: str) -> dict[str, str]:
         updates["network"] = "内网"
     elif has_external:
         updates["network"] = "外网"
+
+    if updates.get("maintenance_type"):
+        return updates
 
     if any(keyword in lower_text for keyword in ("ecs", "云服务器")) and any(
         keyword in text for keyword in ("创建", "新建", "申请", "开通")
@@ -230,7 +240,7 @@ async def extract_chat_updates(state: dict[str, str], user_message: str) -> dict
         data = {"updates": {}}
 
     model_updates = data.get("updates") if isinstance(data.get("updates"), dict) else {}
-    data["updates"] = {**inferred_updates, **model_updates}
+    data["updates"] = {**model_updates, **inferred_updates}
     if not data.get("assistant_note") and data["updates"]:
         data["assistant_note"] = "已收到需求描述，我先整理出可识别的信息。"
     return data

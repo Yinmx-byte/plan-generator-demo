@@ -93,6 +93,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 - `POST /api/chat/stream`：主对话入口，SSE 流式返回状态、追问、Agent trace、生成结果。
 - `POST /api/chat`：非流式对话入口。
+- `POST /api/agent/stream`：实验性 Master ReActAgent 入口，验证单 Agent 自主规划、按需启用工具组、抽取需求、追问和生成 DOCX 的链路；当前不替代稳定的 `/api/chat/stream`。
 - `POST /api/chat/reset`：重置会话。
 - `GET /api/download/{file_id}`：下载生成的 Word 文档。
 - `POST /api/dev/plan-test`：开发快测入口，用需求文本或 state 快速生成 DOCX。

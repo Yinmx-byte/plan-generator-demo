@@ -26,6 +26,10 @@ from agents.workflow_agent import (
     WorkflowAgentRuntime,
     run_workflow_turn,
 )
+from agents.master_agent import (
+    MasterAgentRuntime,
+    run_master_agent_turn,
+)
 from runtime import (
     ROOT,
     SKILLS_ROOT,
@@ -85,6 +89,24 @@ def get_workflow_agent_runtime() -> WorkflowAgentRuntime:
         get_toolkit=get_skill_toolkit,
         extract_json=extract_json,
         get_response_text=get_response_text,
+    )
+
+
+def get_master_agent_runtime() -> MasterAgentRuntime:
+    """Wire runtime dependencies for the experimental master ReActAgent."""
+
+    def register_project_skills(toolkit) -> None:
+        for skill in get_skill_registry().skills:
+            toolkit.register_agent_skill(str(skill.path))
+
+    from runtime import read_file
+
+    return MasterAgentRuntime(
+        get_model=get_model,
+        get_formatter=get_formatter,
+        get_response_text=get_response_text,
+        register_skills=register_project_skills,
+        read_file=read_file,
     )
 
 
@@ -503,6 +525,89 @@ async def chat_stream(request: ChatRequest):
             yield sse_event(
                 "error",
                 {"session_id": session_id, "message": f"生成失败：{exc}"},
+            )
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream; charset=utf-8",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/agent/stream")
+async def master_agent_stream(request: ChatRequest):
+    """Experimental autonomous Master ReActAgent entry.
+
+    This does not replace /api/chat/stream. It is used to validate whether a
+    single ReActAgent can plan and execute the maintenance workflow with
+    guarded tools.
+    """
+
+    async def stream():
+        session_id = request.session_id or uuid.uuid4().hex
+        session = _chat_sessions.setdefault(
+            session_id,
+            {
+                "state": default_form_state(),
+                "history": [],
+                "generated": None,
+            },
+        )
+        message = request.message.strip()
+        if not message:
+            yield sse_event(
+                "error",
+                {"session_id": session_id, "message": "请输入需求描述或问题"},
+            )
+            return
+
+        try:
+            yield sse_event(
+                "status",
+                {
+                    "session_id": session_id,
+                    "message": "正在启动 Master ReActAgent 自主规划实验链路...",
+                },
+            )
+            trace_queue: asyncio.Queue = asyncio.Queue()
+
+            async def trace_callback(trace_message: str) -> None:
+                await trace_queue.put({"session_id": session_id, "message": trace_message})
+
+            task = asyncio.create_task(
+                run_master_agent_turn(
+                    message,
+                    session,
+                    get_master_agent_runtime(),
+                    trace_callback=trace_callback,
+                )
+            )
+            while True:
+                if task.done() and trace_queue.empty():
+                    break
+                try:
+                    trace_data = await asyncio.wait_for(trace_queue.get(), timeout=0.2)
+                except asyncio.TimeoutError:
+                    continue
+                yield sse_event("trace", trace_data)
+
+            response = await task
+            assistant_message = get_response_text(response) or "Master Agent 已完成本轮处理。"
+            generated = session.get("generated")
+            yield sse_event(
+                "done",
+                {
+                    "session_id": session_id,
+                    "status": "generated" if generated else "done",
+                    "message": assistant_message,
+                    "generated": generated,
+                    "collected": session["state"],
+                },
+            )
+        except Exception as exc:
+            yield sse_event(
+                "error",
+                {"session_id": session_id, "message": f"Master Agent 执行失败：{exc}"},
             )
 
     return StreamingResponse(

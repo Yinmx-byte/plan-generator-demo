@@ -358,6 +358,15 @@ async def get_agent_knowledge():
     knowledge_base = get_knowledge_base(SKILLS_ROOT)
     if knowledge_base is None:
         return None
-    return await knowledge_base.get_knowledge()
+    knowledge = await knowledge_base.get_knowledge()
+    try:
+        from agentscope.rag import KnowledgeBase
+    except Exception:
+        return None
+    if isinstance(knowledge, KnowledgeBase):
+        return knowledge
+    if isinstance(knowledge, list) and all(isinstance(item, KnowledgeBase) for item in knowledge):
+        return knowledge
+    return None
 
 
