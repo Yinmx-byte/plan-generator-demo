@@ -20,6 +20,7 @@ let currentDocumentFileId = null;
 let currentDocumentData = null;
 let documentJsonEditor = null;
 let documentPreview = null;
+let documentOutline = null;
 let documentStatus = null;
 let documentTitleEl = null;
 let documentDownloadLink = null;
@@ -264,12 +265,108 @@ function collectDocumentSections(data) {
   return sections.filter((section) => section && typeof section === 'object');
 }
 
+function renderDocumentTable(block) {
+  const columns = Array.isArray(block.columns) ? block.columns : [];
+  const rows = Array.isArray(block.rows) ? block.rows : [];
+  if (!columns.length) return '';
+  return `
+    <div class="doc-table-wrap">
+      <table class="doc-table">
+        <thead>
+          <tr>
+            ${columns.map((column) => `<th>${escapeHtml(column.label || column.key || '')}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => `
+            <tr>
+              ${columns.map((column) => {
+                const key = column.key || column.label || '';
+                return `<td>${escapeHtml(row?.[key] ?? '')}</td>`;
+              }).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderDocumentBlock(block) {
+  if (typeof block === 'string') {
+    return `<p>${escapeHtml(block)}</p>`;
+  }
+  if (!block || typeof block !== 'object') return '';
+  const type = block.type || 'paragraph';
+  if (type === 'heading') {
+    const level = Math.min(Math.max(Number(block.level || 3), 2), 4);
+    return `<h${level}>${escapeHtml(block.text || '')}</h${level}>`;
+  }
+  if (type === 'paragraph') {
+    const className = block.bold ? ' class="strong-line"' : '';
+    return `<p${className}>${escapeHtml(block.text || '')}</p>`;
+  }
+  if (type === 'paragraphs') {
+    const items = Array.isArray(block.items) ? block.items : [];
+    return items.map((item) => `<p>${escapeHtml(item)}</p>`).join('');
+  }
+  if (type === 'numbered_list') {
+    const items = Array.isArray(block.items) ? block.items : [];
+    return `<ol>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ol>`;
+  }
+  if (type === 'plain_list') {
+    const items = Array.isArray(block.items) ? block.items : [];
+    return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+  }
+  if (type === 'checkbox_group') {
+    const items = Array.isArray(block.items) ? block.items : [];
+    return `
+      <div class="doc-checkbox-grid">
+        ${items.map((item) => {
+          const checked = item?.checked ? 'checked' : '';
+          return `<span class="${checked}"><i></i>${escapeHtml(item?.label || '')}${item?.extra ? ` ${escapeHtml(item.extra)}` : ''}</span>`;
+        }).join('')}
+      </div>
+    `;
+  }
+  if (type === 'key_values') {
+    const items = Array.isArray(block.items) ? block.items : [];
+    return `
+      <dl class="doc-key-values">
+        ${items.map((item) => `
+          <div>
+            <dt>${escapeHtml(item?.label || '')}</dt>
+            <dd>${escapeHtml(item?.value || '')}</dd>
+          </div>
+        `).join('')}
+      </dl>
+    `;
+  }
+  if (type === 'table') {
+    return renderDocumentTable(block);
+  }
+  if (type === 'spacer') {
+    return '<div class="doc-spacer"></div>';
+  }
+  return `<p>${escapeHtml(block.text || block.content || '')}</p>`;
+}
+
 function renderDocumentPreview(data) {
   if (!documentPreview) return;
   const title = data?.title || data?.document?.title || '未命名检修方案';
+  const department = data?.department || data?.document?.department || '云运营中心平台运维处';
+  const dateText = data?.date || data?.document?.date || '';
   const sections = collectDocumentSections(data);
   if (documentTitleEl) documentTitleEl.textContent = title;
   if (!sections.length) {
+    if (documentOutline) {
+      documentOutline.innerHTML = `
+        <div class="empty-document">
+          <strong>文档结构为空</strong>
+          <span>请检查 JSON 编辑区是否包含 document.sections。</span>
+        </div>
+      `;
+    }
     documentPreview.innerHTML = `
       <div class="empty-document">
         <strong>文档结构为空</strong>
@@ -278,26 +375,50 @@ function renderDocumentPreview(data) {
     `;
     return;
   }
-  documentPreview.innerHTML = `
-    <div class="document-summary">
-      <strong>${escapeHtml(title)}</strong>
-      <span>${sections.length} 个章节 · ${escapeHtml(data?.department || '云运营中心平台运维处')}</span>
-    </div>
-    <div class="document-section-list">
-      ${sections.map((section, index) => {
-        const blocks = Array.isArray(section.blocks) ? section.blocks.length : 0;
-        return `
-          <div class="document-section-item">
+  if (documentOutline) {
+    documentOutline.innerHTML = `
+      <div class="outline-title">文档章节</div>
+      <div class="outline-list">
+        ${sections.map((section, index) => `
+          <a href="#doc-section-${index + 1}">
             <span>${index + 1}</span>
-            <div>
-              <strong>${escapeHtml(section.heading || section.title || '未命名章节')}</strong>
-              <small>${blocks} 个内容块</small>
-            </div>
-          </div>
+            <strong>${escapeHtml(section.heading || section.title || '未命名章节')}</strong>
+          </a>
+        `).join('')}
+      </div>
+    `;
+  }
+  documentPreview.innerHTML = `
+    <article class="doc-page">
+      <header class="doc-cover">
+        <div class="doc-logo">国网</div>
+        <h1>${escapeHtml(title)}</h1>
+        <p>${escapeHtml(department)}</p>
+        ${dateText ? `<time>${escapeHtml(dateText)}</time>` : ''}
+      </header>
+      ${sections.map((section, index) => {
+        const blocks = Array.isArray(section.blocks) ? section.blocks : [];
+        return `
+          <section class="doc-section" id="doc-section-${index + 1}">
+            <h2>${escapeHtml(section.heading || section.title || '未命名章节')}</h2>
+            ${blocks.map(renderDocumentBlock).join('')}
+          </section>
         `;
       }).join('')}
-    </div>
+    </article>
   `;
+  documentPreview.querySelectorAll('.outline-list a').forEach((link) => {
+    link.addEventListener('click', (event) => event.preventDefault());
+  });
+  if (documentOutline) {
+    documentOutline.querySelectorAll('.outline-list a').forEach((link) => {
+      link.addEventListener('click', (event) => {
+        event.preventDefault();
+        const target = documentPreview.querySelector(link.getAttribute('href'));
+        target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+  }
 }
 
 async function loadGeneratedDocument(fileId, downloadUrl = '', filename = '') {
@@ -459,6 +580,7 @@ function initPlanPage() {
   const executeValidationInput = document.getElementById('executeValidationInput');
   documentJsonEditor = document.getElementById('documentJsonEditor');
   documentPreview = document.getElementById('documentPreview');
+  documentOutline = document.getElementById('documentOutline');
   documentStatus = document.getElementById('documentStatus');
   documentTitleEl = document.getElementById('documentTitle');
   documentDownloadLink = document.getElementById('documentDownloadLink');

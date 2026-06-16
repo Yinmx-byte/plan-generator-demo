@@ -34,19 +34,26 @@
         </div>
       </div>
 
-      <div class="document-editor-grid">
-        <section class="document-preview" id="documentPreview">
+      <div class="document-reader-grid">
+        <aside class="document-outline" id="documentOutline">
           <div class="empty-document">
             <strong>正在等待文档结构</strong>
-            <span>生成 DOCX 后可在这里查看章节结构，修改 JSON 后保存并重新渲染。</span>
+            <span>生成 DOCX 后可在这里查看章节。</span>
+          </div>
+        </aside>
+
+        <section class="document-preview" id="documentPreview">
+          <div class="empty-document">
+            <strong>正在等待文档内容</strong>
+            <span>点击生成结果中的“查看/编辑文档”后，将以文档版式预览。</span>
           </div>
         </section>
-
-        <section class="document-json-pane">
-          <label class="field-label" for="documentJsonEditor">文档结构 JSON</label>
-          <textarea id="documentJsonEditor" class="document-json-editor" spellcheck="false" placeholder="生成方案后这里会显示可编辑的文档 JSON。"></textarea>
-        </section>
       </div>
+
+      <details class="document-json-pane">
+        <summary>结构编辑 JSON</summary>
+        <textarea id="documentJsonEditor" class="document-json-editor" spellcheck="false" placeholder="需要精确修改结构时，可在这里编辑文档 JSON。"></textarea>
+      </details>
 
       <div class="document-actions">
         <button id="formatDocumentJsonBtn" type="button">格式化</button>
