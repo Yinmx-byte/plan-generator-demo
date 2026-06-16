@@ -26,8 +26,12 @@ from services.requirements import (
 )
 from services.plan_generation import (
     build_generation_orchestration_context,
+    docx_to_markdown,
     generate_docx_from_state,
+    get_generated_file,
 )
+from runtime import SKILLS_ROOT
+from rag import get_knowledge_base
 
 
 @dataclass(frozen=True)
@@ -37,6 +41,7 @@ class MasterAgentRuntime:
     get_response_text: Callable[[Any], str]
     register_skills: Callable[[Toolkit], None]
     read_file: Callable[[str], Awaitable[ToolResponse]]
+    get_skill_registry: Callable[[], Any]
 
 
 def _json_tool_response(payload: dict[str, Any]) -> ToolResponse:
@@ -57,6 +62,12 @@ async def build_master_toolkit(
     """Build a per-session toolkit with guarded, stateful workflow tools."""
     toolkit = Toolkit()
     toolkit.create_tool_group(
+        "context",
+        description="Skill discovery, deterministic Skill routing and RAG retrieval.",
+        active=False,
+        notes="Use for inspecting available Skills, selecting candidate Skills, and retrieving knowledge evidence.",
+    )
+    toolkit.create_tool_group(
         "planning",
         description="Requirement extraction and missing-field checks.",
         active=False,
@@ -68,8 +79,104 @@ async def build_master_toolkit(
         active=False,
         notes="Use only after required maintenance fields are complete.",
     )
+    toolkit.create_tool_group(
+        "document",
+        description="Generated document inspection helpers.",
+        active=False,
+        notes="Use after a document has been generated or when the user asks about the generated file.",
+    )
 
     toolkit.register_tool_function(runtime.read_file)
+
+    def get_session_snapshot() -> ToolResponse:
+        """Return current session state, generated document info and recent history."""
+        state = session.setdefault("state", default_form_state())
+        return _json_tool_response(
+            {
+                "status": "ok",
+                "collected": state,
+                "generated": session.get("generated"),
+                "orchestration_ready": bool(session.get("orchestration")),
+                "recent_history": session.get("history", [])[-6:],
+            }
+        )
+
+    def list_registered_skills(filter_text: str = "") -> ToolResponse:
+        """List registered AgentScope Skills.
+
+        Args:
+            filter_text: Optional keyword used to filter skill name or description.
+        """
+        keyword = filter_text.strip().lower()
+        skills = []
+        for skill in runtime.get_skill_registry().skills:
+            haystack = f"{skill.name}\n{skill.description}".lower()
+            if keyword and keyword not in haystack:
+                continue
+            skills.append(
+                {
+                    "name": skill.name,
+                    "description": skill.description,
+                    "skill_dir": str(skill.path),
+                    "skill_file": str(skill.path / "SKILL.md"),
+                }
+            )
+        return _json_tool_response({"status": "ok", "skills": skills, "count": len(skills)})
+
+    def select_maintenance_skills(
+        maintenance_type: str = "",
+        requirement_text: str = "",
+    ) -> ToolResponse:
+        """Select likely maintenance Skills using project routing rules.
+
+        Args:
+            maintenance_type: Maintenance type or action category.
+            requirement_text: User requirement text or extracted resource details.
+        """
+        selected = runtime.get_skill_registry().select_skills(
+            maintenance_type,
+            requirement_text,
+        )
+        return _json_tool_response(
+            {
+                "status": "ok",
+                "selected_skills": [
+                    {
+                        "name": skill.name,
+                        "description": skill.description,
+                        "skill_dir": str(skill.path),
+                        "skill_file": str(skill.path / "SKILL.md"),
+                    }
+                    for skill in selected
+                ],
+            }
+        )
+
+    async def retrieve_knowledge(query: str, top_k: int = 5) -> ToolResponse:
+        """Retrieve remote RAG knowledge chunks from the configured knowledge base.
+
+        Args:
+            query: Retrieval query.
+            top_k: Maximum number of chunks to return.
+        """
+        knowledge_base = get_knowledge_base(SKILLS_ROOT)
+        if knowledge_base is None:
+            return _json_tool_response(
+                {
+                    "status": "disabled",
+                    "chunks": [],
+                    "message": "RAG 未启用或百炼知识库配置不完整。",
+                }
+            )
+        chunks = await knowledge_base.retrieve(query, top_k=top_k)
+        return _json_tool_response(
+            {
+                "status": "ok",
+                "query": query,
+                "chunks": chunks,
+                "count": len(chunks),
+            }
+        )
 
     async def update_requirements(message: str) -> ToolResponse:
         """Extract maintenance-plan requirement fields from a user message.
@@ -173,6 +280,47 @@ async def build_master_toolkit(
             }
         )
 
+    def get_generated_document_info(include_preview: bool = False) -> ToolResponse:
+        """Return metadata and optional text preview for the latest generated DOCX.
+
+        Args:
+            include_preview: Whether to include a Markdown text preview of the
+                latest generated document.
+        """
+        generated = session.get("generated")
+        if not generated:
+            return _json_tool_response(
+                {"status": "not_found", "message": "当前会话还没有生成文档。"}
+            )
+        path = get_generated_file(generated.get("file_id"))
+        payload: dict[str, Any] = {
+            "status": "ok" if path else "expired",
+            "generated": generated,
+            "exists": bool(path),
+        }
+        if path:
+            payload["path"] = str(path)
+            payload["size_bytes"] = path.stat().st_size
+            if include_preview:
+                payload["preview_markdown"] = docx_to_markdown(path.read_bytes())[:8000]
+        return _json_tool_response(payload)
+
+    toolkit.register_tool_function(get_session_snapshot, func_name="get_session_snapshot")
+    toolkit.register_tool_function(
+        list_registered_skills,
+        group_name="context",
+        func_name="list_registered_skills",
+    )
+    toolkit.register_tool_function(
+        select_maintenance_skills,
+        group_name="context",
+        func_name="select_maintenance_skills",
+    )
+    toolkit.register_tool_function(
+        retrieve_knowledge,
+        group_name="context",
+        func_name="retrieve_knowledge",
+    )
     toolkit.register_tool_function(
         update_requirements,
         group_name="planning",
@@ -192,6 +340,11 @@ async def build_master_toolkit(
         generate_maintenance_plan,
         group_name="generation",
         func_name="generate_maintenance_plan",
+    )
+    toolkit.register_tool_function(
+        get_generated_document_info,
+        group_name="document",
+        func_name="get_generated_document_info",
     )
     toolkit.register_tool_function(toolkit.reset_equipped_tools)
     runtime.register_skills(toolkit)

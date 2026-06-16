@@ -107,6 +107,7 @@ def get_master_agent_runtime() -> MasterAgentRuntime:
         get_response_text=get_response_text,
         register_skills=register_project_skills,
         read_file=read_file,
+        get_skill_registry=get_skill_registry,
     )
 
 
@@ -247,6 +248,39 @@ async def chat(request: ChatRequest):
     )
     message = request.message.strip()
     if not message:
+        raise HTTPException(status_code=400, detail="请输入需求描述或问题")
+
+    response = await run_master_agent_turn(
+        message,
+        session,
+        get_master_agent_runtime(),
+    )
+    assistant_message = get_response_text(response) or "Master Agent 已完成本轮处理。"
+    generated = session.get("generated")
+    return {
+        "session_id": session_id,
+        "status": "generated" if generated else "done",
+        "message": assistant_message,
+        "generated": generated,
+        "download_url": generated.get("download_url") if generated else None,
+        "filename": generated.get("filename") if generated else None,
+        "collected": session["state"],
+    }
+
+
+@app.post("/api/chat/legacy")
+async def chat_legacy(request: ChatRequest):
+    session_id = request.session_id or uuid.uuid4().hex
+    session = _chat_sessions.setdefault(
+        session_id,
+        {
+            "state": default_form_state(),
+            "history": [],
+            "generated": None,
+        },
+    )
+    message = request.message.strip()
+    if not message:
         raise HTTPException(status_code=400, detail="请输入需求描述或补充信息")
 
     session["history"].append({"role": "user", "content": message})
@@ -333,8 +367,79 @@ def docx_path_to_markdown(path: Path) -> str:
     return docx_to_markdown(path.read_bytes())
 
 
-@app.post("/api/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def stream_master_agent_response(request: ChatRequest, startup_message: str):
+    """Shared SSE stream for the planner-first Master ReActAgent chain."""
+    session_id = request.session_id or uuid.uuid4().hex
+    session = _chat_sessions.setdefault(
+        session_id,
+        {
+            "state": default_form_state(),
+            "history": [],
+            "generated": None,
+        },
+    )
+    message = request.message.strip()
+    if not message:
+        yield sse_event(
+            "error",
+            {"session_id": session_id, "message": "请输入需求描述或问题"},
+        )
+        return
+
+    try:
+        yield sse_event(
+            "status",
+            {
+                "session_id": session_id,
+                "message": startup_message,
+            },
+        )
+        trace_queue: asyncio.Queue = asyncio.Queue()
+
+        async def trace_callback(trace_message: str) -> None:
+            await trace_queue.put({"session_id": session_id, "message": trace_message})
+
+        task = asyncio.create_task(
+            run_master_agent_turn(
+                message,
+                session,
+                get_master_agent_runtime(),
+                trace_callback=trace_callback,
+            )
+        )
+        while True:
+            if task.done() and trace_queue.empty():
+                break
+            try:
+                trace_data = await asyncio.wait_for(trace_queue.get(), timeout=0.2)
+            except asyncio.TimeoutError:
+                continue
+            yield sse_event("trace", trace_data)
+
+        response = await task
+        assistant_message = get_response_text(response) or "Master Agent 已完成本轮处理。"
+        generated = session.get("generated")
+        yield sse_event(
+            "done",
+            {
+                "session_id": session_id,
+                "status": "generated" if generated else "done",
+                "message": assistant_message,
+                "generated": generated,
+                "download_url": generated.get("download_url") if generated else None,
+                "filename": generated.get("filename") if generated else None,
+                "collected": session["state"],
+            },
+        )
+    except Exception as exc:
+        yield sse_event(
+            "error",
+            {"session_id": session_id, "message": f"Master Agent 执行失败：{exc}"},
+        )
+
+
+@app.post("/api/chat/legacy-stream")
+async def chat_legacy_stream(request: ChatRequest):
     async def stream():
         session_id = request.session_id or uuid.uuid4().hex
         session = _chat_sessions.setdefault(
@@ -534,84 +639,15 @@ async def chat_stream(request: ChatRequest):
     )
 
 
+@app.post("/api/chat/stream")
 @app.post("/api/agent/stream")
 async def master_agent_stream(request: ChatRequest):
-    """Experimental autonomous Master ReActAgent entry.
-
-    This does not replace /api/chat/stream. It is used to validate whether a
-    single ReActAgent can plan and execute the maintenance workflow with
-    guarded tools.
-    """
-
-    async def stream():
-        session_id = request.session_id or uuid.uuid4().hex
-        session = _chat_sessions.setdefault(
-            session_id,
-            {
-                "state": default_form_state(),
-                "history": [],
-                "generated": None,
-            },
-        )
-        message = request.message.strip()
-        if not message:
-            yield sse_event(
-                "error",
-                {"session_id": session_id, "message": "请输入需求描述或问题"},
-            )
-            return
-
-        try:
-            yield sse_event(
-                "status",
-                {
-                    "session_id": session_id,
-                    "message": "正在启动 Master ReActAgent 自主规划实验链路...",
-                },
-            )
-            trace_queue: asyncio.Queue = asyncio.Queue()
-
-            async def trace_callback(trace_message: str) -> None:
-                await trace_queue.put({"session_id": session_id, "message": trace_message})
-
-            task = asyncio.create_task(
-                run_master_agent_turn(
-                    message,
-                    session,
-                    get_master_agent_runtime(),
-                    trace_callback=trace_callback,
-                )
-            )
-            while True:
-                if task.done() and trace_queue.empty():
-                    break
-                try:
-                    trace_data = await asyncio.wait_for(trace_queue.get(), timeout=0.2)
-                except asyncio.TimeoutError:
-                    continue
-                yield sse_event("trace", trace_data)
-
-            response = await task
-            assistant_message = get_response_text(response) or "Master Agent 已完成本轮处理。"
-            generated = session.get("generated")
-            yield sse_event(
-                "done",
-                {
-                    "session_id": session_id,
-                    "status": "generated" if generated else "done",
-                    "message": assistant_message,
-                    "generated": generated,
-                    "collected": session["state"],
-                },
-            )
-        except Exception as exc:
-            yield sse_event(
-                "error",
-                {"session_id": session_id, "message": f"Master Agent 执行失败：{exc}"},
-            )
-
+    """Planner-first Master ReActAgent stream entry."""
     return StreamingResponse(
-        stream(),
+        stream_master_agent_response(
+            request,
+            "正在启动 Master ReActAgent 自主规划主链路...",
+        ),
         media_type="text/event-stream; charset=utf-8",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
