@@ -1,9 +1,4 @@
-"""Plan generation AgentScope runtime.
-
-This module owns the ReAct agent used to write maintenance-plan content.
-Route handlers should call ``run_plan_agent`` instead of constructing the
-generation agent directly.
-"""
+"""Plan-writing AgentScope runtime used behind the plan generation service."""
 
 import asyncio
 import json
@@ -98,4 +93,3 @@ async def run_plan_agent(
         for trace in format_agent_trace(msg, runtime.get_response_text, last):
             await trace_callback(trace)
     return await task
-

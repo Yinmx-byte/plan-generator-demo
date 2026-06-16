@@ -73,8 +73,11 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
       ├─ 重新生成：复用已收集需求，重新准备 Skill/RAG 依据
       └─ 修改方案：读取会话状态和已生成文档信息，按用户要求修订
           ├─ context 工具：初筛 AgentScope Skill，检索百炼 RAG
-          ├─ generation 工具：调用方案生成服务输出结构 JSON
-          └─ Word 渲染工具：生成 .docx 并返回下载地址
+          ├─ generation 工具：调用方案生成服务
+          │   ├─ compose_plan_json：由专用 Plan ReActAgent 读取 Skill 并输出结构 JSON
+          │   ├─ validate_plan_json：检查章节、风险和实施步骤完整性
+          │   └─ render_docx：只负责将已验证 JSON 渲染为 .docx
+          └─ 返回下载地址
 ```
 
 ## 核心模块
@@ -82,7 +85,8 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - **Skill**：每类检修方案的稳定规则、章节结构、风险项、实施步骤约束和工具调用原则放在 `backend/skills/`。
 - **百炼 RAG**：历史检修方案、通用模板和阿里云参考资料通过百炼知识库管理，业务生成链路通过 Retrieve API 获取切片。
 - **MCP / Page Agent**：`backend/mcp_servers.json` 配置外部 MCP，当前用于 Page Agent 浏览器侧执行与验证。
-- **Word 渲染**：`scripts/generate_plan.py` 负责将 plan agent 输出的文档 JSON 渲染为 `.docx`。
+- **方案生成服务**：`services/plan_generation.py` 将写文档能力封装为 `compose_plan_json`、`validate_plan_json`、`render_docx` 三步；其中 `compose_plan_json` 内部仍使用专用 Plan ReActAgent，方便加载 Skill 和调用渲染检查工具。
+- **Word 渲染**：`scripts/generate_plan.py` 只负责将已验证的文档 JSON 渲染为 `.docx`。
 - **远程知识库管理**：前端知识库页可上传/查看/删除百炼文档；上传或删除后会自动提交重建索引任务。
 
 ## API

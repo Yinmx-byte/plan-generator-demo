@@ -1,9 +1,4 @@
-"""Experimental master ReActAgent for autonomous task planning.
-
-The current production chat flow remains explicit and stable. This module
-adds an opt-in master agent that can decide which registered tools to call in
-one ReAct loop.
-"""
+"""Master ReActAgent for planner-first conversation and task routing."""
 
 import asyncio
 import json

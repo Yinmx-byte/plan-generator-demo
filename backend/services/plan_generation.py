@@ -61,7 +61,7 @@ def derive_plan_title(state: dict[str, str], data: dict[str, Any]) -> str:
 
 
 def get_plan_agent_runtime() -> PlanAgentRuntime:
-    """Wire runtime dependencies for the maintenance plan generation agent."""
+    """Wire runtime dependencies for the maintenance plan composition agent."""
     return PlanAgentRuntime(
         build_system_prompt=build_system_prompt,
         get_model=get_model,
@@ -117,6 +117,7 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
         except Exception:
             rag_chunks = []
 
+    skill_contract_context = get_skill_registry().expand_skills(selected_skills)
     if selected_skills:
         selected_skill_context = "\n".join(
             [
@@ -160,11 +161,14 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
             f"{selected_skill_context}\n\n"
             "## 编排上下文：RAG 参考资料\n"
             f"{rag_context}\n\n"
+            "## 编排上下文：已展开 Skill 契约\n"
+            f"{skill_contract_context or '未展开具体 Skill 内容。'}\n\n"
             "## 使用要求\n"
             "- Skill 是主规则来源：文档结构、必填章节、风险点、实施步骤和脚本模板优先遵循 Skill。\n"
             "- RAG 是参考依据：用于补充内部模板措辞、历史方案经验、阿里云通用方案/API 约束，不得覆盖 Skill 的硬性规则。\n"
             "- 输出 JSON 中建议包含 evidence 字段，记录 selected_skills 和 rag_chunks_count，便于后续审计。\n"
         ),
+        "skill_contract_context": skill_contract_context,
     }
 
 
@@ -336,7 +340,7 @@ def build_user_prompt(
     edit_instruction: str = "",
     previous_document_text: str = "",
 ) -> str:
-    """Convert form fields into the user task for the Agent."""
+    """Convert form fields into the user task for the plan-writing ReActAgent."""
     edit_context = ""
     if edit_instruction:
         previous_text = previous_document_text[:8000] if previous_document_text else "No previous document text was available."
@@ -354,7 +358,7 @@ personnel, risks, steps, rollback content, scripts, or other parts explicitly re
 """
     return f"""请根据以下检修需求生成标准化检修方案 JSON。
 
-你必须先根据系统中注册的 Agent Skills 判断需要哪些 Skill，然后使用 read_file 工具读取对应 SKILL.md。若涉及多个检修类型，应组合多个 Skill。
+后端已经提供候选 Skill、SKILL.md 契约摘要和 RAG 检索上下文。你必须优先使用这些依据，并使用 read_file 工具读取/核对相关 SKILL.md；若涉及多个检修类型，应组合多个 Skill。
 
 输出结构硬性要求：
 - 必须读取并遵守 `maintenance-plan-composer` Skill 中的“Word 渲染 JSON 格式契约”。
@@ -615,6 +619,31 @@ async def generate_docx_from_state(
 ) -> tuple[str, Path, str]:
     if orchestration is None:
         orchestration = await build_generation_orchestration_context(state)
+    data = await compose_plan_json(
+        state,
+        orchestration,
+        trace_callback=trace_callback,
+        edit_instruction=edit_instruction,
+        previous_document_text=previous_document_text,
+    )
+    data = validate_plan_json(data, state, orchestration)
+    return render_docx(data)
+
+
+async def compose_plan_json(
+    state: dict[str, str],
+    orchestration: dict[str, Any],
+    trace_callback=None,
+    edit_instruction: str = "",
+    previous_document_text: str = "",
+) -> dict[str, Any]:
+    """Compose structured maintenance-plan JSON with the Plan ReActAgent.
+
+    The ReActAgent remains the document-writing specialist because it can load
+    AgentScope Skills and call the render-check tool. This service boundary
+    keeps the rest of the backend coupled to a stable JSON-composition API
+    instead of to the agent implementation.
+    """
     user_prompt = build_user_prompt(
         **state,
         orchestration_context=orchestration["prompt_context"],
@@ -628,24 +657,75 @@ async def generate_docx_from_state(
     except HTTPException:
         write_model_output_debug(text)
         data = build_fallback_plan_data(state, orchestration, text)
-    else:
-        format_stats = document_format_stats(data)
-        fallback_reason = ""
-        if count_document_body_blocks(data) < 3:
-            fallback_reason = "model_document_had_too_few_body_blocks"
-        elif isinstance(data.get("document"), dict) and format_stats["typed_blocks"] < 8:
-            fallback_reason = "model_document_was_not_canonical_template_format"
+    return data
 
-        if fallback_reason:
-            debug_path = write_model_output_debug(
-                json.dumps(data, ensure_ascii=False, indent=2),
-                prefix="invalid_plan_model_output",
-            )
-            data = build_fallback_plan_data(state, orchestration, text)
-            data.setdefault("evidence", {})
-            if isinstance(data["evidence"], dict):
-                data["evidence"]["fallback_reason"] = fallback_reason
-                data["evidence"]["debug_path"] = str(debug_path)
+
+def collect_plan_validation_issues(data: dict[str, Any]) -> list[str]:
+    """Collect structural issues that matter for an actionable plan."""
+    issues: list[str] = []
+    spec = data.get("document")
+    if not isinstance(spec, dict):
+        return ["missing_document_object"]
+    sections = spec.get("sections") or spec.get("chapters") or []
+    if not isinstance(sections, list) or not sections:
+        return ["missing_document_sections"]
+
+    normalized_headings = [
+        normalize_heading(section.get("heading") or section.get("title"))
+        for section in sections
+        if isinstance(section, dict)
+    ]
+    for required_name in REQUIRED_SECTION_NAMES:
+        required = normalize_heading(required_name)
+        if not any(required in heading or heading in required for heading in normalized_headings):
+            issues.append(f"missing_section:{required_name}")
+
+    def section_block_count(keyword: str) -> int:
+        count = 0
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            heading = normalize_heading(section.get("heading") or section.get("title"))
+            if keyword not in heading:
+                continue
+            count += len(section.get("blocks") or [])
+            for block in section.get("blocks") or []:
+                if isinstance(block, dict):
+                    count += len(block.get("items") or [])
+                    count += len(block.get("rows") or [])
+        return count
+
+    if section_block_count("风险") < 4:
+        issues.append("risk_section_too_thin")
+    if section_block_count("实施步骤") < 4:
+        issues.append("implementation_steps_too_thin")
+    return issues
+
+
+def validate_plan_json(
+    data: dict[str, Any],
+    state: dict[str, str],
+    orchestration: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate and normalize structured plan JSON before DOCX rendering."""
+    validation_issues = collect_plan_validation_issues(data)
+    format_stats = document_format_stats(data)
+    fallback_reason = ""
+    if count_document_body_blocks(data) < 3:
+        fallback_reason = "model_document_had_too_few_body_blocks"
+    elif isinstance(data.get("document"), dict) and format_stats["typed_blocks"] < 8:
+        fallback_reason = "model_document_was_not_canonical_template_format"
+
+    if fallback_reason:
+        debug_path = write_model_output_debug(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            prefix="invalid_plan_model_output",
+        )
+        data = build_fallback_plan_data(state, orchestration, json.dumps(data, ensure_ascii=False))
+        data.setdefault("evidence", {})
+        if isinstance(data["evidence"], dict):
+            data["evidence"]["fallback_reason"] = fallback_reason
+            data["evidence"]["debug_path"] = str(debug_path)
 
     data.setdefault("department", "云运营中心平台运维处")
     data.setdefault("date", datetime.now().strftime("%Y年%m月%d日"))
@@ -660,6 +740,7 @@ async def generate_docx_from_state(
             "rag_chunks_count",
             orchestration["rag_chunks_count"],
         )
+        data["evidence"]["validation_issues"] = validation_issues
 
     data = ensure_renderer_ready_document(data, state, orchestration)
     normalized_title = derive_plan_title(state, data)
@@ -667,7 +748,11 @@ async def generate_docx_from_state(
     document_spec = data.setdefault("document", {})
     if isinstance(document_spec, dict):
         document_spec["title"] = normalized_title
+    return data
 
+
+def render_docx(data: dict[str, Any]) -> tuple[str, Path, str]:
+    """Render validated plan JSON into a Word document and register download."""
     doc = build_document(data)
     output_dir = Path(tempfile.gettempdir()) / "plan-generator"
     output_dir.mkdir(parents=True, exist_ok=True)
