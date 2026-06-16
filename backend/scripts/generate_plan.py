@@ -357,8 +357,8 @@ def render_document(doc, spec: dict[str, Any]):
             render_block(doc, block)
 
 
-def legacy_to_document_spec(data: dict[str, Any]) -> dict[str, Any]:
-    """Convert the original hard-coded schema into the Skill-driven schema."""
+def fallback_schema_to_document_spec(data: dict[str, Any]) -> dict[str, Any]:
+    """Convert a non-canonical model schema into the Skill-driven schema."""
     mt = data.get("maintenance_type", {})
     env = data.get("environment", {})
     schedule = data.get("schedule", {})
@@ -605,7 +605,7 @@ def build_document(data):
 
     spec = data.get("document")
     if spec is None:
-        spec = legacy_to_document_spec(data)
+        spec = fallback_schema_to_document_spec(data)
     render_document(doc, spec)
     return doc
 

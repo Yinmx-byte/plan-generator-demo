@@ -8,7 +8,7 @@
 plan-generator-demo/
 ├── backend/
 │   ├── main.py                    # FastAPI 服务入口
-│   ├── agents/                    # workflow agent 与 plan agent
+│   ├── agents/                    # Master Agent 与方案生成 Agent
 │   ├── api/admin_routes.py        # Skill、百炼知识库等管理接口
 │   ├── rag/                       # 百炼知识库 Retrieve 与管理封装
 │   ├── scripts/generate_plan.py   # Word 文档渲染工具
@@ -67,16 +67,14 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 ```text
 用户输入
-  └─ workflow agent
-      ├─ 正常聊天：直接回复
-      ├─ 生成方案：抽取关键信息，缺失则追问
-      ├─ 重新生成：复用已收集需求重新生成
-      └─ 修改方案：读取上一版文档，按用户要求修订
-          └─ plan agent
-              ├─ 初筛并读取 AgentScope Skill
-              ├─ 检索百炼 RAG 参考资料
-              ├─ 生成文档结构 JSON
-              └─ 调用 Word 渲染工具生成 .docx
+  └─ Master ReActAgent
+      ├─ 普通聊天：直接回复
+      ├─ 生成方案：调用 planning 工具抽取关键信息，缺失则追问
+      ├─ 重新生成：复用已收集需求，重新准备 Skill/RAG 依据
+      └─ 修改方案：读取会话状态和已生成文档信息，按用户要求修订
+          ├─ context 工具：初筛 AgentScope Skill，检索百炼 RAG
+          ├─ generation 工具：调用方案生成服务输出结构 JSON
+          └─ Word 渲染工具：生成 .docx 并返回下载地址
 ```
 
 ## 核心模块
@@ -93,9 +91,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 - `POST /api/chat/stream`：主对话入口，基于 Master ReActAgent 自主规划，SSE 流式返回状态、工具调用 trace、追问和生成结果。
 - `POST /api/chat`：非流式 Master ReActAgent 对话入口。
-- `POST /api/agent/stream`：`/api/chat/stream` 的等价实验别名，便于单独调试 planner 链路。
-- `POST /api/chat/legacy-stream`：旧版 workflow agent + plan agent 流式链路，用于回退和对照测试。
-- `POST /api/chat/legacy`：旧版非流式链路。
+- `POST /api/agent/stream`：`/api/chat/stream` 的等价调试别名，便于单独观察 planner 链路。
 - `POST /api/chat/reset`：重置会话。
 - `GET /api/download/{file_id}`：下载生成的 Word 文档。
 - `POST /api/dev/plan-test`：开发快测入口，用需求文本或 state 快速生成 DOCX。

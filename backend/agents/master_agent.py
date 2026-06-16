@@ -355,7 +355,7 @@ async def create_master_agent(
     session: dict[str, Any],
     runtime: MasterAgentRuntime,
 ) -> ReActAgent:
-    """Create the experimental autonomous master ReActAgent."""
+    """Create the planner-first autonomous master ReActAgent."""
     agent = ReActAgent(
         name="CloudMaintenanceMasterAgent",
         sys_prompt=(
