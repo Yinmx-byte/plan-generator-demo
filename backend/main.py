@@ -31,7 +31,8 @@ from runtime import (
     SKILLS_ROOT,
     close_mcp_clients,
     get_formatter,
-    get_model,
+    get_master_model,
+    get_model_role_config,
     get_skill_registry,
     get_toolkit,
     load_mcp_server_configs,
@@ -91,7 +92,7 @@ def get_master_agent_runtime() -> MasterAgentRuntime:
     from runtime import read_file
 
     return MasterAgentRuntime(
-        get_model=get_model,
+        get_model=get_master_model,
         get_formatter=get_formatter,
         get_response_text=get_response_text,
         register_skills=register_project_skills,
@@ -127,6 +128,7 @@ app.add_middleware(
 
 @app.get("/api/health")
 async def health():
+    model_config = get_model_role_config()
     return {
         "status": "ok",
         "skills_loaded": [skill.name for skill in get_skill_registry().skills],
@@ -134,7 +136,8 @@ async def health():
         "rag_enabled": _rag_enabled,
         "mcp_servers_configured": len(load_mcp_server_configs()),
         "model_provider": os.getenv("MODEL_PROVIDER", "deepseek"),
-        "model_name": os.getenv("MODEL_NAME", "deepseek-v4-pro"),
+        "model_name": model_config["master"],
+        "models": model_config,
     }
 
 

@@ -19,7 +19,8 @@ from runtime import (
     build_system_prompt,
     get_agent_knowledge,
     get_formatter,
-    get_model,
+    get_plan_model,
+    get_plan_retry_model,
     get_skill_registry,
     get_skill_toolkit,
 )
@@ -137,11 +138,11 @@ def derive_plan_title(state: dict[str, str], data: dict[str, Any]) -> str:
     return title[:40]
 
 
-def get_plan_agent_runtime() -> PlanAgentRuntime:
+def get_plan_agent_runtime(*, retry: bool = False) -> PlanAgentRuntime:
     """Wire runtime dependencies for the maintenance plan composition agent."""
     return PlanAgentRuntime(
         build_system_prompt=build_system_prompt,
-        get_model=get_model,
+        get_model=get_plan_retry_model if retry else get_plan_model,
         get_formatter=get_formatter,
         get_toolkit=get_skill_toolkit,
         get_agent_knowledge=get_agent_knowledge,
@@ -266,7 +267,7 @@ async def repair_and_extract_json(text: str) -> dict:
 原始输出：
 {text}
 """
-        response = await get_model()(
+        response = await get_plan_retry_model()(
             [
                 {"role": "system", "content": "你是 JSON 修复器，只输出严格合法 JSON。"},
                 {"role": "user", "content": repair_prompt},
@@ -762,7 +763,7 @@ async def compose_plan_json(
         retry_prompt = build_json_retry_prompt(user_prompt, str(first_exc.detail))
         retry_response = await run_plan_agent(
             retry_prompt,
-            get_plan_agent_runtime(),
+            get_plan_agent_runtime(retry=True),
             trace_callback=trace_callback,
         )
         retry_text = get_response_text(retry_response)

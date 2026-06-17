@@ -11,7 +11,7 @@ from agentscope.memory import InMemoryMemory
 from agentscope.message import Msg
 from agentscope.tool import ToolResponse
 
-from runtime import get_formatter, get_model, get_toolkit
+from runtime import get_formatter, get_master_model, get_toolkit
 from services.json_utils import get_response_text
 
 async def run_plan_validation_agent(
@@ -27,7 +27,7 @@ async def run_plan_validation_agent(
             "不得执行任何真实生产变更、删除、重启、扩缩容、创建资源等不可逆操作。"
             "如果 Page Agent Hub 未连接，直接说明需要在 Chrome 中允许 Page Agent 扩展连接。"
         ),
-        model=get_model(),
+        model=get_master_model(),
         formatter=get_formatter(),
         toolkit=await get_toolkit(),
         memory=InMemoryMemory(),

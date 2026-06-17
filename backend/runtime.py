@@ -28,7 +28,8 @@ _skill_registry: Optional[SkillRegistry] = None
 _skill_toolkit: Optional[Toolkit] = None
 _toolkit: Optional[Toolkit] = None
 _mcp_clients: list[Any] = []
-_model: Optional[AnthropicChatModel | OpenAIChatModel] = None
+ChatModel = AnthropicChatModel | OpenAIChatModel
+_models: dict[tuple[str, str, bool, int], ChatModel] = {}
 
 def get_skill_registry() -> SkillRegistry:
     """Load Skill metadata without expanding all Skill bodies."""
@@ -279,60 +280,122 @@ async def get_skill_toolkit() -> Toolkit:
     return _skill_toolkit
 
 
-# ── LLM 客户端 (AgentScope AnthropicChatModel) ─────────────────
-_model: Optional[AnthropicChatModel | OpenAIChatModel] = None
+# ── LLM 客户端 ─────────────────────────────────────────────────
+def env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def get_model() -> AnthropicChatModel | OpenAIChatModel:
-    global _model
-    if _model is None:
-        provider = os.getenv("MODEL_PROVIDER", "deepseek").lower()
-        model_name = os.getenv("MODEL_NAME", "deepseek-v4-pro")
-        client_kwargs = {}
+def role_model_name(env_name: str, deepseek_default: str) -> str:
+    configured = os.getenv(env_name)
+    if configured:
+        return configured
+    provider = os.getenv("MODEL_PROVIDER", "deepseek").lower()
+    if provider == "deepseek":
+        return deepseek_default
+    return os.getenv("MODEL_NAME", deepseek_default)
 
-        if provider == "anthropic":
-            api_key = os.getenv("ANTHROPIC_API_KEY")
-            if not api_key:
-                raise RuntimeError("请在 .env 中设置 ANTHROPIC_API_KEY")
-            base_url = os.getenv("ANTHROPIC_BASE_URL")
-            if base_url:
-                client_kwargs["base_url"] = base_url
-            _model = AnthropicChatModel(
-                model_name=model_name,
-                api_key=api_key,
-                stream=False,
-                max_tokens=int(os.getenv("MAX_TOKENS", "16000")),
-                client_kwargs=client_kwargs if client_kwargs else None,
-            )
-        elif provider in {"openai", "deepseek"}:
-            env_key = "DEEPSEEK_API_KEY" if provider == "deepseek" else "OPENAI_API_KEY"
-            api_key = os.getenv(env_key) or os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                raise RuntimeError(f"请在 .env 中设置 {env_key}")
-            base_url = (
-                os.getenv("DEEPSEEK_BASE_URL")
-                if provider == "deepseek"
-                else os.getenv("OPENAI_BASE_URL")
-            )
-            if base_url:
-                client_kwargs["base_url"] = base_url
-            _model = OpenAIChatModel(
-                model_name=model_name,
-                api_key=api_key,
-                stream=False,
-                client_kwargs=client_kwargs if client_kwargs else None,
-                generate_kwargs={
-                    "max_tokens": int(os.getenv("MAX_TOKENS", "16000")),
-                    **(
-                        {"extra_body": {"thinking": {"type": "disabled"}}}
-                        if provider == "deepseek"
-                        else {}
-                    ),
-                },
-            )
-        else:
-            raise RuntimeError(f"不支持的 MODEL_PROVIDER: {provider}")
-    return _model
+
+def get_model_role_config() -> dict[str, Any]:
+    """Return the effective model routing without creating API clients."""
+    return {
+        "master": role_model_name("MASTER_MODEL_NAME", "deepseek-v4-flash"),
+        "extraction": role_model_name("EXTRACTION_MODEL_NAME", "deepseek-v4-flash"),
+        "plan": role_model_name("PLAN_MODEL_NAME", "deepseek-v4-pro"),
+        "plan_retry": role_model_name("PLAN_RETRY_MODEL_NAME", "deepseek-v4-pro"),
+        "plan_retry_thinking": env_flag("PLAN_RETRY_THINKING_ENABLED", True),
+    }
+
+
+def get_role_model(
+    model_name: str,
+    *,
+    thinking_enabled: bool = False,
+    max_tokens_env: str = "MAX_TOKENS",
+) -> ChatModel:
+    """Create and cache one AgentScope model per role configuration."""
+    provider = os.getenv("MODEL_PROVIDER", "deepseek").lower()
+    max_tokens = int(os.getenv(max_tokens_env, os.getenv("MAX_TOKENS", "16000")))
+    cache_key = (provider, model_name, thinking_enabled, max_tokens)
+    if cache_key in _models:
+        return _models[cache_key]
+
+    client_kwargs: dict[str, Any] = {}
+    if provider == "anthropic":
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError("请在 .env 中设置 ANTHROPIC_API_KEY")
+        base_url = os.getenv("ANTHROPIC_BASE_URL")
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        model: ChatModel = AnthropicChatModel(
+            model_name=model_name,
+            api_key=api_key,
+            stream=False,
+            max_tokens=max_tokens,
+            client_kwargs=client_kwargs if client_kwargs else None,
+        )
+    elif provider in {"openai", "deepseek"}:
+        env_key = "DEEPSEEK_API_KEY" if provider == "deepseek" else "OPENAI_API_KEY"
+        api_key = os.getenv(env_key) or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError(f"请在 .env 中设置 {env_key}")
+        base_url = (
+            os.getenv("DEEPSEEK_BASE_URL")
+            if provider == "deepseek"
+            else os.getenv("OPENAI_BASE_URL")
+        )
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        generate_kwargs: dict[str, Any] = {"max_tokens": max_tokens}
+        if provider == "deepseek":
+            generate_kwargs["extra_body"] = {
+                "thinking": {"type": "enabled" if thinking_enabled else "disabled"}
+            }
+        model = OpenAIChatModel(
+            model_name=model_name,
+            api_key=api_key,
+            stream=False,
+            client_kwargs=client_kwargs if client_kwargs else None,
+            generate_kwargs=generate_kwargs,
+        )
+    else:
+        raise RuntimeError(f"不支持的 MODEL_PROVIDER: {provider}")
+
+    _models[cache_key] = model
+    return model
+
+
+def get_master_model() -> ChatModel:
+    return get_role_model(
+        get_model_role_config()["master"],
+        max_tokens_env="MASTER_MAX_TOKENS",
+    )
+
+
+def get_extraction_model() -> ChatModel:
+    return get_role_model(
+        get_model_role_config()["extraction"],
+        max_tokens_env="EXTRACTION_MAX_TOKENS",
+    )
+
+
+def get_plan_model() -> ChatModel:
+    return get_role_model(
+        get_model_role_config()["plan"],
+        max_tokens_env="PLAN_MAX_TOKENS",
+    )
+
+
+def get_plan_retry_model() -> ChatModel:
+    config = get_model_role_config()
+    return get_role_model(
+        config["plan_retry"],
+        thinking_enabled=config["plan_retry_thinking"],
+        max_tokens_env="PLAN_RETRY_MAX_TOKENS",
+    )
 
 
 def get_formatter():

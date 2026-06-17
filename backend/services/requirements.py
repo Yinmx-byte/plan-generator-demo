@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from runtime import get_model
+from runtime import get_extraction_model
 from services.json_utils import extract_json, get_response_text
 
 REQUIRED_FIELDS = {
@@ -220,7 +220,7 @@ async def extract_chat_updates(state: dict[str, str], user_message: str) -> dict
 不要输出 markdown，不要解释。"""
     inferred_updates = infer_updates_from_text(user_message)
     try:
-        response = await get_model()(
+        response = await get_extraction_model()(
             [
                 {"role": "system", "content": "你只输出可解析 JSON。"},
                 {"role": "user", "content": prompt},

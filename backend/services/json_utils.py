@@ -53,13 +53,23 @@ def extract_json(text: Any) -> dict:
 
 
 def get_response_text(response) -> str:
-    """Extract text from AgentScope 1.x ChatResponse."""
+    """Extract final answer text from AgentScope 1.x ChatResponse."""
     try:
         direct_text = response.get_text_content()
     except Exception:
         direct_text = None
     if isinstance(direct_text, str) and direct_text.strip():
         return direct_text.strip()
+
+    if isinstance(response, dict) and isinstance(response.get("content"), list):
+        final_blocks = [
+            str(block.get("text", "")).strip()
+            for block in response["content"]
+            if isinstance(block, dict) and block.get("type") == "text"
+        ]
+        final_text = "\n".join(text for text in final_blocks if text)
+        if final_text:
+            return final_text
 
     def collect(value: Any, depth: int = 0) -> list[str]:
         if value is None or depth > 8:
@@ -69,6 +79,8 @@ def get_response_text(response) -> str:
         if isinstance(value, (int, float, bool)):
             return []
         if isinstance(value, dict):
+            if value.get("type") == "thinking":
+                return []
             fragments: list[str] = []
             priority_keys = (
                 "text",

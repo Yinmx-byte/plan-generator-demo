@@ -44,7 +44,11 @@ cp .env.example .env
 
 ```env
 MODEL_PROVIDER=deepseek
-MODEL_NAME=deepseek-v4-pro
+MASTER_MODEL_NAME=deepseek-v4-flash
+EXTRACTION_MODEL_NAME=deepseek-v4-flash
+PLAN_MODEL_NAME=deepseek-v4-pro
+PLAN_RETRY_MODEL_NAME=deepseek-v4-pro
+PLAN_RETRY_THINKING_ENABLED=true
 DEEPSEEK_API_KEY=sk-xxx
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 
