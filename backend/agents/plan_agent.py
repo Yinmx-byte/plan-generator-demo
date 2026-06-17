@@ -54,9 +54,13 @@ def format_agent_trace(
             continue
         block_type = block.get("type")
         if block_type == "tool_use":
+            if block.get("name") == "read_file":
+                continue
             tool_input = json.dumps(block.get("input", {}), ensure_ascii=False)
             traces.append(f"调用工具：{block.get('name', 'unknown')}\n参数：{tool_input[:600]}")
         elif block_type == "tool_result":
+            if block.get("name") == "read_file":
+                continue
             output = get_response_text(block.get("output", ""))
             traces.append(f"工具返回：{block.get('name', 'unknown')}\n{output[:800]}")
         elif block_type == "thinking":

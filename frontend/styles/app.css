@@ -308,6 +308,34 @@ input:focus {
   line-height: 1.55;
   box-shadow: none;
 }
+.msg.trace.trace-collapsible {
+  padding: 0;
+  overflow: hidden;
+  white-space: normal;
+}
+.trace-collapsible summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  color: #244866;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  list-style-position: inside;
+}
+.trace-collapsible pre {
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  padding: 10px 12px 12px;
+  border-top: 1px dashed #c5cfdb;
+  background: #fbfcfd;
+  color: #2d3b4d;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "Cascadia Mono", "Consolas", "Microsoft YaHei UI", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
 .msg.trace::before {
   content: "Agent";
   display: inline-block;
@@ -318,6 +346,9 @@ input:focus {
   color: #244866;
   font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
   font-weight: 700;
+}
+.msg.trace.trace-collapsible::before {
+  content: none;
 }
 .msg.error { background: var(--red-soft); border: 1px solid #efb9b3; color: var(--red); }
 .download {
@@ -932,6 +963,20 @@ button.danger:hover {
   font-weight: 700;
   text-indent: 0;
 }
+.doc-page [contenteditable="true"] {
+  min-width: 1em;
+  border-radius: 4px;
+  outline: 1px solid transparent;
+  outline-offset: 2px;
+  transition: background 0.14s ease, outline-color 0.14s ease;
+}
+.doc-page [contenteditable="true"]:hover {
+  background: rgba(31, 95, 153, 0.06);
+}
+.doc-page [contenteditable="true"]:focus {
+  background: #fffdf3;
+  outline-color: #9fb8ce;
+}
 .doc-section ol,
 .doc-section ul {
   margin: 6px 0 8px 28px;
@@ -950,6 +995,10 @@ button.danger:hover {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  cursor: pointer;
+}
+.doc-checkbox-grid b {
+  font-weight: inherit;
 }
 .doc-checkbox-grid i {
   position: relative;

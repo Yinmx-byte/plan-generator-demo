@@ -26,6 +26,7 @@ let documentTitleEl = null;
 let documentDownloadLink = null;
 let documentEditStatus = null;
 let documentDialog = null;
+let documentVisualDirty = false;
 
 function scrollToBottom(el) {
   if (el) el.scrollTop = el.scrollHeight;
@@ -44,6 +45,23 @@ function addMessage(container, role, text, extraHtml = '') {
   container.appendChild(div);
   scrollToBottom(container);
   return div;
+}
+
+function addTraceMessage(container, text) {
+  if (!container || !text) return null;
+  if (/read_file/i.test(text)) return null;
+  const details = document.createElement('details');
+  details.className = 'msg trace trace-collapsible';
+  const summary = document.createElement('summary');
+  const firstLine = text.split('\n')[0] || 'Agent 执行细节';
+  summary.textContent = firstLine.replace(/^调用工具：/, '调用工具 · ').replace(/^工具返回：/, '工具返回 · ');
+  const pre = document.createElement('pre');
+  pre.textContent = text;
+  details.appendChild(summary);
+  details.appendChild(pre);
+  container.appendChild(details);
+  scrollToBottom(container);
+  return details;
 }
 
 async function typeInto(el, text) {
@@ -265,7 +283,11 @@ function collectDocumentSections(data) {
   return sections.filter((section) => section && typeof section === 'object');
 }
 
-function renderDocumentTable(block) {
+function editableAttrs(extra = '') {
+  return `contenteditable="true" spellcheck="false" ${extra}`.trim();
+}
+
+function renderDocumentTable(block, sectionIndex, blockIndex) {
   const columns = Array.isArray(block.columns) ? block.columns : [];
   const rows = Array.isArray(block.rows) ? block.rows : [];
   if (!columns.length) return '';
@@ -278,11 +300,11 @@ function renderDocumentTable(block) {
           </tr>
         </thead>
         <tbody>
-          ${rows.map((row) => `
+          ${rows.map((row, rowIndex) => `
             <tr>
               ${columns.map((column) => {
                 const key = column.key || column.label || '';
-                return `<td>${escapeHtml(row?.[key] ?? '')}</td>`;
+                return `<td ${editableAttrs(`data-table-cell data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-row-index="${rowIndex}" data-column-key="${escapeHtml(key)}"`)}>${escapeHtml(row?.[key] ?? '')}</td>`;
               }).join('')}
             </tr>
           `).join('')}
@@ -292,39 +314,39 @@ function renderDocumentTable(block) {
   `;
 }
 
-function renderDocumentBlock(block) {
+function renderDocumentBlock(block, sectionIndex, blockIndex) {
   if (typeof block === 'string') {
-    return `<p>${escapeHtml(block)}</p>`;
+    return `<p ${editableAttrs(`data-block-text data-section-index="${sectionIndex}" data-block-index="${blockIndex}"`)}>${escapeHtml(block)}</p>`;
   }
   if (!block || typeof block !== 'object') return '';
   const type = block.type || 'paragraph';
   if (type === 'heading') {
     const level = Math.min(Math.max(Number(block.level || 3), 2), 4);
-    return `<h${level}>${escapeHtml(block.text || '')}</h${level}>`;
+    return `<h${level} ${editableAttrs(`data-block-text data-section-index="${sectionIndex}" data-block-index="${blockIndex}"`)}>${escapeHtml(block.text || '')}</h${level}>`;
   }
   if (type === 'paragraph') {
     const className = block.bold ? ' class="strong-line"' : '';
-    return `<p${className}>${escapeHtml(block.text || '')}</p>`;
+    return `<p${className} ${editableAttrs(`data-block-text data-section-index="${sectionIndex}" data-block-index="${blockIndex}"`)}>${escapeHtml(block.text || '')}</p>`;
   }
   if (type === 'paragraphs') {
     const items = Array.isArray(block.items) ? block.items : [];
-    return items.map((item) => `<p>${escapeHtml(item)}</p>`).join('');
+    return items.map((item, itemIndex) => `<p ${editableAttrs(`data-block-item data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"`)}>${escapeHtml(item)}</p>`).join('');
   }
   if (type === 'numbered_list') {
     const items = Array.isArray(block.items) ? block.items : [];
-    return `<ol>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ol>`;
+    return `<ol>${items.map((item, itemIndex) => `<li ${editableAttrs(`data-block-item data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"`)}>${escapeHtml(item)}</li>`).join('')}</ol>`;
   }
   if (type === 'plain_list') {
     const items = Array.isArray(block.items) ? block.items : [];
-    return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+    return `<ul>${items.map((item, itemIndex) => `<li ${editableAttrs(`data-block-item data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"`)}>${escapeHtml(item)}</li>`).join('')}</ul>`;
   }
   if (type === 'checkbox_group') {
     const items = Array.isArray(block.items) ? block.items : [];
     return `
       <div class="doc-checkbox-grid">
-        ${items.map((item) => {
+        ${items.map((item, itemIndex) => {
           const checked = item?.checked ? 'checked' : '';
-          return `<span class="${checked}"><i></i>${escapeHtml(item?.label || '')}${item?.extra ? ` ${escapeHtml(item.extra)}` : ''}</span>`;
+          return `<span class="${checked}" data-checkbox-item data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"><i></i><b ${editableAttrs('')}>${escapeHtml(item?.label || '')}${item?.extra ? ` ${escapeHtml(item.extra)}` : ''}</b></span>`;
         }).join('')}
       </div>
     `;
@@ -333,17 +355,17 @@ function renderDocumentBlock(block) {
     const items = Array.isArray(block.items) ? block.items : [];
     return `
       <dl class="doc-key-values">
-        ${items.map((item) => `
+        ${items.map((item, itemIndex) => `
           <div>
             <dt>${escapeHtml(item?.label || '')}</dt>
-            <dd>${escapeHtml(item?.value || '')}</dd>
+            <dd ${editableAttrs(`data-key-value data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"`)}>${escapeHtml(item?.value || '')}</dd>
           </div>
         `).join('')}
       </dl>
     `;
   }
   if (type === 'table') {
-    return renderDocumentTable(block);
+    return renderDocumentTable(block, sectionIndex, blockIndex);
   }
   if (type === 'spacer') {
     return '<div class="doc-spacer"></div>';
@@ -392,16 +414,16 @@ function renderDocumentPreview(data) {
     <article class="doc-page">
       <header class="doc-cover">
         <div class="doc-logo">国网</div>
-        <h1>${escapeHtml(title)}</h1>
-        <p>${escapeHtml(department)}</p>
-        ${dateText ? `<time>${escapeHtml(dateText)}</time>` : ''}
+        <h1 ${editableAttrs('data-doc-field="title"')}>${escapeHtml(title)}</h1>
+        <p ${editableAttrs('data-doc-field="department"')}>${escapeHtml(department)}</p>
+        <time ${editableAttrs('data-doc-field="date"')}>${escapeHtml(dateText || '')}</time>
       </header>
       ${sections.map((section, index) => {
         const blocks = Array.isArray(section.blocks) ? section.blocks : [];
         return `
           <section class="doc-section" id="doc-section-${index + 1}">
-            <h2>${escapeHtml(section.heading || section.title || '未命名章节')}</h2>
-            ${blocks.map(renderDocumentBlock).join('')}
+            <h2 ${editableAttrs(`data-section-heading data-section-index="${index}"`)}>${escapeHtml(section.heading || section.title || '未命名章节')}</h2>
+            ${blocks.map((block, blockIndex) => renderDocumentBlock(block, index, blockIndex)).join('')}
           </section>
         `;
       }).join('')}
@@ -419,6 +441,91 @@ function renderDocumentPreview(data) {
       });
     });
   }
+  bindDocumentVisualEditing();
+}
+
+function getDocumentBlock(data, element) {
+  const sectionIndex = Number(element.dataset.sectionIndex);
+  const blockIndex = Number(element.dataset.blockIndex);
+  const section = data?.document?.sections?.[sectionIndex];
+  return section?.blocks?.[blockIndex] || null;
+}
+
+function textFromEditable(element) {
+  return (element.innerText || element.textContent || '').replace(/\u00a0/g, ' ').trim();
+}
+
+function bindDocumentVisualEditing() {
+  if (!documentPreview) return;
+  documentVisualDirty = false;
+  documentPreview.querySelectorAll('[contenteditable="true"]').forEach((element) => {
+    element.addEventListener('input', () => {
+      documentVisualDirty = true;
+      setDocumentEditorState('编辑中', '已修改文档预览内容，点击“保存并重新渲染”生成新的 DOCX。');
+    });
+  });
+  documentPreview.querySelectorAll('[data-checkbox-item]').forEach((element) => {
+    element.addEventListener('click', (event) => {
+      if (event.target?.matches?.('[contenteditable="true"]')) return;
+      element.classList.toggle('checked');
+      documentVisualDirty = true;
+      setDocumentEditorState('编辑中', '已修改文档预览内容，点击“保存并重新渲染”生成新的 DOCX。');
+    });
+  });
+}
+
+function syncDocumentPreviewToData(data) {
+  if (!documentPreview || !data || !data.document) return data;
+  const synced = structuredClone(data);
+  documentPreview.querySelectorAll('[data-doc-field]').forEach((element) => {
+    const field = element.dataset.docField;
+    const value = textFromEditable(element);
+    if (field === 'title') {
+      synced.title = value;
+      synced.document.title = value;
+    } else if (field === 'department') {
+      synced.department = value;
+      synced.document.department = value;
+    } else if (field === 'date') {
+      synced.date = value;
+      synced.document.date = value;
+    }
+  });
+  documentPreview.querySelectorAll('[data-section-heading]').forEach((element) => {
+    const section = synced.document.sections?.[Number(element.dataset.sectionIndex)];
+    if (section) section.heading = textFromEditable(element);
+  });
+  documentPreview.querySelectorAll('[data-block-text]').forEach((element) => {
+    const block = getDocumentBlock(synced, element);
+    if (block) block.text = textFromEditable(element);
+  });
+  documentPreview.querySelectorAll('[data-block-item]').forEach((element) => {
+    const block = getDocumentBlock(synced, element);
+    const itemIndex = Number(element.dataset.itemIndex);
+    if (block && Array.isArray(block.items)) block.items[itemIndex] = textFromEditable(element);
+  });
+  documentPreview.querySelectorAll('[data-key-value]').forEach((element) => {
+    const block = getDocumentBlock(synced, element);
+    const itemIndex = Number(element.dataset.itemIndex);
+    if (block?.items?.[itemIndex]) block.items[itemIndex].value = textFromEditable(element);
+  });
+  documentPreview.querySelectorAll('[data-table-cell]').forEach((element) => {
+    const block = getDocumentBlock(synced, element);
+    const rowIndex = Number(element.dataset.rowIndex);
+    const columnKey = element.dataset.columnKey;
+    if (block?.rows?.[rowIndex] && columnKey) block.rows[rowIndex][columnKey] = textFromEditable(element);
+  });
+  documentPreview.querySelectorAll('[data-checkbox-item]').forEach((element) => {
+    const block = getDocumentBlock(synced, element);
+    const itemIndex = Number(element.dataset.itemIndex);
+    const item = block?.items?.[itemIndex];
+    if (item) {
+      item.checked = element.classList.contains('checked');
+      const labelEl = element.querySelector('b');
+      if (labelEl) item.label = textFromEditable(labelEl);
+    }
+  });
+  return synced;
 }
 
 async function loadGeneratedDocument(fileId, downloadUrl = '', filename = '') {
@@ -463,7 +570,10 @@ async function saveAndRenderDocument() {
   }
   let edited;
   try {
-    edited = parseDocumentEditorJson();
+    edited = documentVisualDirty && currentDocumentData
+      ? syncDocumentPreviewToData(currentDocumentData)
+      : parseDocumentEditorJson();
+    if (documentJsonEditor) documentJsonEditor.value = JSON.stringify(edited, null, 2);
   } catch (err) {
     setDocumentEditorState('JSON错误', err.message);
     return;
@@ -488,6 +598,7 @@ async function saveAndRenderDocument() {
     currentDocumentData = saveData.data;
     renderDocumentPreview(currentDocumentData);
     setDocumentDownload(renderData.download_url, renderData.filename);
+    documentVisualDirty = false;
     setDocumentEditorState('已保存', '修改已保存，并生成新的 DOCX。');
   } catch (err) {
     setDocumentEditorState('保存失败', err.message);
@@ -599,6 +710,8 @@ function initPlanPage() {
   formatDocumentJsonBtn?.addEventListener('click', () => {
     try {
       const data = parseDocumentEditorJson();
+      currentDocumentData = data;
+      documentVisualDirty = false;
       documentJsonEditor.value = JSON.stringify(data, null, 2);
       renderDocumentPreview(data);
       setDocumentEditorState('已格式化', 'JSON 已格式化，尚未保存。');
@@ -663,7 +776,7 @@ function initPlanPage() {
       return;
     }
     if (event === 'trace') {
-      addMessage(messagesEl, 'trace', data.message || 'Agent 执行中...');
+      addTraceMessage(messagesEl, data.message || 'Agent 执行中...');
       return;
     }
     if (event === 'evidence') {
