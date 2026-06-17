@@ -76,11 +76,15 @@ async def read_file(file_path: str) -> ToolResponse:
     return ToolResponse(content=[TextBlock(type="text", text=content)])
 
 
-async def build_maintenance_document(document_json: Any) -> ToolResponse:
+async def build_maintenance_document(
+    document_json: Any,
+    style_contract: Optional[dict[str, Any]] = None,
+) -> ToolResponse:
     """校验并试渲染检修方案 JSON。
 
     Args:
         document_json: 方案 JSON 对象或 JSON 字符串，必须包含 document.sections。
+        style_contract: 可选的格式契约对象；省略时使用通用 composer Skill 配置。
     """
     if isinstance(document_json, str):
         data = json.loads(document_json)
@@ -114,7 +118,7 @@ async def build_maintenance_document(document_json: Any) -> ToolResponse:
         if not isinstance(section.get("blocks"), list) or not section.get("blocks"):
             raise ValueError(f"第 {index} 个 section 必须包含非空 blocks。")
 
-    doc = build_document(data)
+    doc = build_document(data, style_contract)
     output_dir = Path(tempfile.gettempdir()) / "plan-generator" / "agent-preview"
     output_dir.mkdir(parents=True, exist_ok=True)
     preview_path = output_dir / f"preview_{uuid.uuid4().hex[:8]}.docx"

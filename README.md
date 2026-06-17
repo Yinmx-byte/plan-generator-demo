@@ -11,9 +11,9 @@ plan-generator-demo/
 │   ├── agents/                    # Master Agent 与方案生成 Agent
 │   ├── api/admin_routes.py        # Skill、百炼知识库等管理接口
 │   ├── rag/                       # 百炼知识库 Retrieve 与管理封装
-│   ├── scripts/generate_plan.py   # Word 文档渲染工具
+│   ├── scripts/generate_plan.py   # 配置驱动的 Word 文档渲染工具
 │   ├── services/                  # 需求抽取、方案生成、Page Agent 等服务
-│   ├── skills/                    # AgentScope Skill 目录
+│   ├── skills/                    # AgentScope Skill 与通用文档格式契约
 │   ├── skills_runtime/            # Skill 元数据加载与路由
 │   ├── mcp_servers.json           # 本地 MCP 接入配置
 │   └── .env.example
@@ -90,7 +90,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - **百炼 RAG**：历史检修方案、通用模板和阿里云参考资料通过百炼知识库管理，业务生成链路通过 Retrieve API 获取切片。
 - **MCP / Page Agent**：`backend/mcp_servers.json` 配置外部 MCP，当前用于 Page Agent 浏览器侧执行与验证。
 - **方案生成服务**：`services/plan_generation.py` 将写文档能力封装为 `compose_plan_json`、`validate_plan_json`、`render_docx` 三步；其中 `compose_plan_json` 内部仍使用专用 Plan ReActAgent，方便加载 Skill 和调用渲染检查工具。
-- **Word 渲染**：`scripts/generate_plan.py` 只负责将已验证的文档 JSON 渲染为 `.docx`。
+- **Word 渲染**：`scripts/generate_plan.py` 将已验证的内容 JSON 与通用格式契约合成为 `.docx`；默认格式位于 `skills/maintenance-plan-composer/references/document-style.json`，所有检修类型共用，渲染工具也支持显式传入 `style_contract`。
 - **远程知识库管理**：前端知识库页可上传/查看/删除百炼文档；上传或删除后会自动提交重建索引任务。
 
 ## Master Agent 工具组配置

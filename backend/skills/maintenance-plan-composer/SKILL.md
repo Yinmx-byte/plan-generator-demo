@@ -25,16 +25,10 @@ version: 0.4.0
 ```json
 {
   "title": "{网络环境}{系统/组件}{动作}检修方案",
-  "cover": {
-    "logo_width_cm": 3.1,
-    "top_spacers": 7,
-    "middle_spacers": 5,
-    "title_font_size": 22,
-    "title_font_name": "方正小标宋_GBK"
-  },
+  "cover": {},
   "header": [
-    {"text": "云运营中心平台运维处", "font_size": 16, "font_name": "仿宋_GB2312", "align": "center"},
-    {"text": "YYYY年M月D日", "font_size": 16, "font_name": "仿宋_GB2312", "align": "center"}
+    {"text": "云运营中心平台运维处", "style": "cover_metadata"},
+    {"text": "YYYY年M月D日", "style": "cover_metadata"}
   ],
   "sections": []
 }
@@ -98,7 +92,7 @@ version: 0.4.0
 - `（4）涉及的组件实例信息：`
 - 每个事项依次写：`1、{事项名}`、`组织：{组织}`、`资源集：{资源集}`
 - 若产品 Skill 要求资源参数表，放在本章后面，格式用 `table`。
-- 现场环境中的产品参数表必须设置 `font_size: 11`，并在 `6.3.1 {事项名}` 后原样重复一次，再书写具体检修操作。
+- 现场环境中的产品参数表使用 `style: "environment_table"`，并在 `6.3.1 {事项名}` 后原样重复一次，再书写具体检修操作。
 
 ### 实施计划
 
@@ -175,15 +169,11 @@ version: 0.4.0
 
 ### 通用版式
 
-- 页面使用 A4；页边距上、下 3.4 cm，左、右 2.8 cm。
-- 所有文字必须为黑色，不得使用 Word 主题蓝色。
-- 首页标题使用方正小标宋_GBK 二号（22 磅）加粗居中；标题后空 5 行。
-- 首页部门和日期使用仿宋_GB2312 三号（16 磅）居中。
-- 一级标题黑体三号加粗且不缩进；二级标题楷体_GB2312 三号加粗并缩进 1 个汉字；三级标题仿宋_GB2312 三号加粗并缩进 2 个汉字。
-- 正文使用仿宋_GB2312 三号，首行缩进 2 个汉字。
-- 全文固定行距 28 磅，段前、段后均为 0.5 行。
-- 普通表格使用宋体四号（14 磅）；现场环境产品参数表及其在 6.3.1 下的副本使用 11 磅。
-- 每页底部居中显示 `—1—` 形式页码，宋体四号。
+- 所有检修类型共用 `references/document-style.json`，它是页面、首页、标题、正文、表格和页码格式的唯一机器可读来源。
+- 不要在方案 JSON 中输出 `font_name`、`font_size`、`line_spacing`、厘米缩进或页边距等底层格式值。
+- 内容块只通过 `style` 引用命名样式；普通正文和普通表格可以省略 `style`，渲染器分别使用 `body` 和 `table`。
+- 当前可用样式为 `title`、`cover_metadata`、`heading_1`、`heading_2`、`heading_3`、`body`、`table`、`environment_table`、`footer_page_number`。
+- 修改通用版式时只修改 `references/document-style.json`，产品 Skill 不得复制或覆盖整套通用格式。
 - `5.3.1 授权` 中 `ASCM：...` 与 `授权账号：...` 之间使用 6 个空格，不使用斜线分隔。
 
 ### 顶层结构
@@ -197,14 +187,10 @@ version: 0.4.0
   "date": "2026年05月31日",
   "document": {
     "title": "内网总部ESB组件创建ECS实例检修方案",
-    "cover": {
-      "logo_width_cm": 3.1,
-      "top_spacers": 7,
-      "middle_spacers": 5
-    },
+    "cover": {},
     "header": [
-      {"text": "云运营中心平台运维处", "font_size": 14, "align": "center"},
-      {"text": "2026年05月31日", "font_size": 12, "align": "center"}
+      {"text": "云运营中心平台运维处", "style": "cover_metadata"},
+      {"text": "2026年05月31日", "style": "cover_metadata"}
     ],
     "sections": []
   }
@@ -246,7 +232,7 @@ version: 0.4.0
 #### 普通段落
 
 ```json
-{"type": "paragraph", "text": "内网总部ESB组件创建ECS实例不涉及备份。", "first_line_indent": 0.74}
+{"type": "paragraph", "text": "内网总部ESB组件创建ECS实例不涉及备份。"}
 ```
 
 #### 多段正文
@@ -325,8 +311,8 @@ version: 0.4.0
         "heading": "背景",
         "level": 1,
         "blocks": [
-          {"type": "paragraph", "text": "{具体事项背景}", "first_line_indent": 0.74},
-          {"type": "paragraph", "text": "以上事项项目组提报问题工单，需检修进行处理，实现问题工单闭环。", "first_line_indent": 0.74}
+          {"type": "paragraph", "text": "{具体事项背景}"},
+          {"type": "paragraph", "text": "以上事项项目组提报问题工单，需检修进行处理，实现问题工单闭环。"}
         ]
       },
       {
