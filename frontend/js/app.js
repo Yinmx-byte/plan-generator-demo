@@ -595,7 +595,11 @@ async function saveAndRenderDocument() {
     if (!renderResp.ok) throw new Error(renderData.detail || '重新渲染失败');
 
     currentDocumentFileId = renderData.file_id;
-    currentDocumentData = saveData.data;
+    const latestResp = await fetch(`/api/documents/${encodeURIComponent(currentDocumentFileId)}`);
+    const latestData = await latestResp.json();
+    if (!latestResp.ok) throw new Error(latestData.detail || '读取重渲染文档失败');
+    currentDocumentData = latestData.data || saveData.data;
+    if (documentJsonEditor) documentJsonEditor.value = JSON.stringify(currentDocumentData, null, 2);
     renderDocumentPreview(currentDocumentData);
     setDocumentDownload(renderData.download_url, renderData.filename);
     documentVisualDirty = false;

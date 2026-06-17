@@ -28,6 +28,7 @@ from services.json_utils import extract_json, get_response_text
 
 _generated_files: dict[str, Path] = {}
 _generated_documents: dict[str, dict[str, Any]] = {}
+DEFAULT_DEPARTMENT = "云运营中心平台运维处"
 
 
 def compact_text(value: Any) -> str:
@@ -36,6 +37,59 @@ def compact_text(value: Any) -> str:
 
 def readable_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def header_text_at(header: Any, index: int) -> str:
+    if not isinstance(header, list) or index >= len(header):
+        return ""
+    item = header[index]
+    if isinstance(item, str):
+        return item.strip()
+    if isinstance(item, dict):
+        return str(item.get("text") or "").strip()
+    return ""
+
+
+def normalize_document_metadata(data: dict[str, Any]) -> dict[str, Any]:
+    """Keep top-level metadata, document metadata, and cover header aligned."""
+    if not isinstance(data, dict):
+        return data
+    spec = data.setdefault("document", {})
+    if not isinstance(spec, dict):
+        spec = {}
+        data["document"] = spec
+
+    header = spec.get("header")
+    title = str(data.get("title") or spec.get("title") or "检修方案").strip()
+    department = str(
+        data.get("department")
+        or spec.get("department")
+        or header_text_at(header, 0)
+        or DEFAULT_DEPARTMENT
+    ).strip()
+    date_text = str(
+        data.get("date")
+        or spec.get("date")
+        or header_text_at(header, 1)
+        or datetime.now().strftime("%Y年%m月%d日")
+    ).strip()
+
+    data["title"] = title
+    data["department"] = department
+    data["date"] = date_text
+    spec["title"] = title
+    spec["department"] = department
+    spec["date"] = date_text
+
+    header_items = header if isinstance(header, list) else []
+    normalized_header: list[Any] = [
+        {"text": department, "font_size": 14},
+        {"text": date_text, "font_size": 12, "space_after": 12},
+    ]
+    if len(header_items) > 2:
+        normalized_header.extend(header_items[2:])
+    spec["header"] = normalized_header
+    return data
 
 
 def derive_plan_subject_anchor(state: dict[str, str]) -> str:
@@ -110,6 +164,7 @@ def update_generated_document(file_id: str, data: dict[str, Any]) -> dict[str, A
         raise HTTPException(status_code=404, detail="生成文档数据不存在或已过期")
     if not isinstance(data.get("document"), dict):
         raise HTTPException(status_code=400, detail="文档 JSON 必须包含 document 对象")
+    data = normalize_document_metadata(deepcopy(data))
     _generated_documents[file_id] = deepcopy(data)
     return get_generated_document(file_id) or data
 
@@ -188,7 +243,9 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
             f"{rag_context}\n\n"
             "## 使用要求\n"
             "- Skill 是主规则来源：文档结构、必填章节、风险点、实施步骤和脚本模板优先遵循 ReActAgent 自主读取的 Skill。\n"
-            "- RAG 是参考依据：用于补充内部模板措辞、历史方案经验、阿里云通用方案/API 约束，不得覆盖 Skill 的硬性规则。\n"
+            "- RAG 是参考依据，但只能用于完善实施操作和回滚部分的通用流程、检查动作、截图留痕要求、验证动作和 ASCM/ECS 控制台操作顺序。\n"
+            "- 严禁从 RAG 历史模板复制或改写成本次事实的字段：系统名、组件名、实例名、组织、资源集、人员、账号、检修时间、IP、规格、VPC、VSwitch、安全组、镜像、密码、业务影响范围。上述字段只能来自用户需求或技术参数。\n"
+            "- 如果 RAG 片段与用户需求冲突，必须以用户需求为准；如果 RAG 中出现其他业务系统名称，只能理解为历史样例，不得写入最终方案。\n"
             f"- 本次检修对象锚点是：`{subject_anchor}`。标题、风险、实施步骤、检修后验证、回滚步骤中的系统/组件/资源名称必须优先使用该锚点、用户给出的实例名称或技术参数，不得把 RAG 历史模板中的其他系统名带入本次方案。\n"
             "- 输出 JSON 中建议包含 evidence 字段，记录 agent_selected_skills 和 rag_chunks_count，便于后续审计。\n"
         ),
@@ -281,7 +338,7 @@ def build_fallback_plan_data(
 
     return {
         "title": title,
-        "department": "云运营中心平台运维处",
+        "department": DEFAULT_DEPARTMENT,
         "date": datetime.now().strftime("%Y年%m月%d日"),
         "evidence": {
             "skill_selection_mode": orchestration.get("skill_selection_mode", "agentscope_react_auto"),
@@ -297,7 +354,7 @@ def build_fallback_plan_data(
             "title": title,
             "cover": {"logo_width_cm": 3.1, "top_spacers": 7, "middle_spacers": 8},
             "header": [
-                {"text": "云运营中心平台运维处", "font_size": 14, "align": "center"},
+                {"text": DEFAULT_DEPARTMENT, "font_size": 14, "align": "center"},
                 {"text": datetime.now().strftime("%Y年%m月%d日"), "font_size": 12, "align": "center"},
             ],
             "sections": [
@@ -816,7 +873,7 @@ def validate_plan_json(
             data["evidence"]["fallback_reason"] = fallback_reason
             data["evidence"]["debug_path"] = str(debug_path)
 
-    data.setdefault("department", "云运营中心平台运维处")
+    data.setdefault("department", DEFAULT_DEPARTMENT)
     data.setdefault("date", datetime.now().strftime("%Y年%m月%d日"))
     data.setdefault("evidence", {})
     if isinstance(data["evidence"], dict):
@@ -842,11 +899,13 @@ def validate_plan_json(
     document_spec = data.setdefault("document", {})
     if isinstance(document_spec, dict):
         document_spec["title"] = normalized_title
+    data = normalize_document_metadata(data)
     return data
 
 
 def render_docx(data: dict[str, Any]) -> tuple[str, Path, str]:
     """Render validated plan JSON into a Word document and register download."""
+    data = normalize_document_metadata(deepcopy(data))
     doc = build_document(data)
     output_dir = Path(tempfile.gettempdir()) / "plan-generator"
     output_dir.mkdir(parents=True, exist_ok=True)
