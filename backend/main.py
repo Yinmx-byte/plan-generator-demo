@@ -23,6 +23,7 @@ from rag import get_knowledge_base
 from api.admin_routes import router as admin_router
 from agents.master_agent import (
     MasterAgentRuntime,
+    get_simple_direct_reply,
     run_master_agent_turn,
 )
 from runtime import (
@@ -286,6 +287,25 @@ async def stream_master_agent_response(request: ChatRequest, startup_message: st
         yield sse_event(
             "error",
             {"session_id": session_id, "message": "请输入需求描述或问题"},
+        )
+        return
+    simple_reply = get_simple_direct_reply(message)
+    if simple_reply:
+        session.setdefault("history", [])
+        session["history"].append({"role": "user", "content": message})
+        session["history"].append({"role": "assistant", "content": simple_reply})
+        yield sse_event(
+            "done",
+            {
+                "session_id": session_id,
+                "status": "done",
+                "message": simple_reply,
+                "generated": None,
+                "download_url": None,
+                "filename": None,
+                "validation_result": None,
+                "collected": session["state"],
+            },
         )
         return
 

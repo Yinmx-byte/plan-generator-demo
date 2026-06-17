@@ -2,7 +2,6 @@
 
 import json
 import re
-from datetime import datetime
 from typing import Any
 
 from runtime import get_model
@@ -50,9 +49,9 @@ def default_form_state() -> dict[str, str]:
         "background": "",
         "maintenance_type": "",
         "network": "",
-        "location": "国网亦庄数据中心二期运维专区",
+        "location": "",
         "instances": "",
-        "schedule_year": str(datetime.now().year) + "年",
+        "schedule_year": "",
         "schedule_start": "",
         "schedule_end": "",
         "provider": "",

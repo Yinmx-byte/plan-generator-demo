@@ -17,6 +17,16 @@ from agents.plan_agent import format_agent_trace
 from services.requirements import default_form_state
 from tools.master_toolkit import build_master_toolkit
 
+SIMPLE_GREETINGS = {
+    "你好",
+    "您好",
+    "hello",
+    "hi",
+    "hey",
+    "在吗",
+}
+SIMPLE_TEST_MESSAGES = {"test", "测试"}
+
 
 @dataclass(frozen=True)
 class MasterAgentRuntime:
@@ -40,6 +50,7 @@ async def create_master_agent(
             "遵循已注册的 AgentScope Skills，尤其是 cloud-maintenance-master-workflow。"
             "你需要根据用户目标自主决定聊天、追问、抽取需求、准备依据或生成文档。"
             "只允许通过已注册工具执行受控动作。"
+            "普通聊天只输出自然回复，不要输出意图判断、协议名称、会话字段或工具调用分析。"
         ),
         model=runtime.get_model(),
         formatter=runtime.get_formatter(),
@@ -61,6 +72,11 @@ async def run_master_agent_turn(
     session.setdefault("state", default_form_state())
     session.setdefault("history", [])
     session["history"].append({"role": "user", "content": message})
+    simple_reply = get_simple_direct_reply(message)
+    if simple_reply:
+        response = Msg("assistant", simple_reply, "assistant")
+        session["history"].append({"role": "assistant", "content": simple_reply})
+        return response
     state_preview = {
         key: value
         for key, value in session.get("state", {}).items()
@@ -79,6 +95,8 @@ async def run_master_agent_turn(
 
 要求：
 - 普通聊天直接回答。
+- 普通聊天不要输出“根据工作流协议/当前会话状态/结论/无需调用工具”等判断过程。
+- 普通聊天不要主动列出已收集字段，也不要引导用户生成检修方案，除非用户主动询问。
 - 检修方案相关任务必须先用工具更新、检查需求字段。
 - 缺字段时直接向用户追问，不要生成文档。
 - 字段完整后自主准备 Skill/RAG 依据并生成 DOCX。
@@ -109,3 +127,13 @@ async def run_master_agent_turn(
     text = runtime.get_response_text(response)
     session["history"].append({"role": "assistant", "content": text})
     return response
+
+
+def get_simple_direct_reply(message: str) -> str:
+    """Return a direct reply for standalone greetings/tests."""
+    normalized = message.strip().lower().strip("。！？!?,，~～ ")
+    if normalized in SIMPLE_GREETINGS:
+        return "你好！"
+    if normalized in SIMPLE_TEST_MESSAGES:
+        return "收到。"
+    return ""
