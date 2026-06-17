@@ -46,6 +46,8 @@ def build_prepare_plan_context_tool(
                 "rag_enabled": orchestration["rag_enabled"],
                 "rag_chunks_count": orchestration["rag_chunks_count"],
                 "rag_status": orchestration.get("rag_status"),
+                "subject_anchor": orchestration.get("subject_anchor"),
+                "rag_chunk_previews": orchestration.get("rag_chunk_previews", []),
             }
         )
 
@@ -100,6 +102,8 @@ def build_generate_maintenance_plan_tool(
                     "rag_enabled": orchestration["rag_enabled"],
                     "rag_chunks_count": orchestration["rag_chunks_count"],
                     "rag_status": orchestration.get("rag_status"),
+                    "subject_anchor": orchestration.get("subject_anchor"),
+                    "rag_chunk_previews": orchestration.get("rag_chunk_previews", []),
                 },
             }
         )

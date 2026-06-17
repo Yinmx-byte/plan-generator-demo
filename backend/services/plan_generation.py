@@ -34,6 +34,28 @@ def compact_text(value: Any) -> str:
     return re.sub(r"\s+", "", str(value or "").strip())
 
 
+def readable_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def derive_plan_subject_anchor(state: dict[str, str]) -> str:
+    """Return the user-provided maintenance object name that must stay stable."""
+    instances = readable_text(state.get("instances"))
+    if instances:
+        subject = re.split(r"\s*[|｜]\s*", instances, maxsplit=1)[0].strip()
+        if subject:
+            return subject
+
+    background = readable_text(state.get("background"))
+    if background:
+        subject = re.split(r"因|由于|为|需要|项目组|已提报|，|。|,", background, maxsplit=1)[0].strip()
+        subject = re.sub(r"(创建|新增|新建|申请|回收|释放|删除|调整|变更|重启|扩容|缩容|升配|降配).*$", "", subject).strip()
+        if subject:
+            return subject
+
+    return readable_text(state.get("maintenance_type") or "云平台检修对象")
+
+
 def derive_plan_title(state: dict[str, str], data: dict[str, Any]) -> str:
     """Keep the document title as a short plan name, not the raw demand."""
     model_title = compact_text(data.get("title") or data.get("document", {}).get("title", ""))
@@ -102,6 +124,7 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
     knowledge_base = get_knowledge_base(SKILLS_ROOT)
     rag_status = "disabled"
     rag_error = ""
+    subject_anchor = derive_plan_subject_anchor(state)
     if knowledge_base is not None:
         rag_status = "requested"
         rag_query = f"""检修方案参考资料检索
@@ -123,6 +146,7 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
             rag_status = "error"
             rag_error = "百炼 Retrieve API 调用失败，已跳过 RAG 参考资料。"
 
+    rag_chunk_previews: list[dict[str, Any]] = []
     if rag_chunks:
         blocks = []
         max_chars = int(os.getenv("PLAN_RAG_CONTEXT_MAX_CHARS", "6000"))
@@ -137,6 +161,12 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
             clean = clean[:room]
             used += len(clean)
             blocks.append(f"[RAG-{idx}]\n{clean}")
+            rag_chunk_previews.append(
+                {
+                    "id": f"RAG-{idx}",
+                    "preview": clean[:300],
+                }
+            )
         rag_context = "\n\n".join(blocks) if blocks else "当前未检索到 RAG 参考资料。"
     else:
         rag_context = "当前未检索到 RAG 参考资料。请确认百炼知识库配置、远程文档解析状态、索引任务状态和检索阈值。"
@@ -159,8 +189,11 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
             "## 使用要求\n"
             "- Skill 是主规则来源：文档结构、必填章节、风险点、实施步骤和脚本模板优先遵循 ReActAgent 自主读取的 Skill。\n"
             "- RAG 是参考依据：用于补充内部模板措辞、历史方案经验、阿里云通用方案/API 约束，不得覆盖 Skill 的硬性规则。\n"
+            f"- 本次检修对象锚点是：`{subject_anchor}`。标题、风险、实施步骤、检修后验证、回滚步骤中的系统/组件/资源名称必须优先使用该锚点、用户给出的实例名称或技术参数，不得把 RAG 历史模板中的其他系统名带入本次方案。\n"
             "- 输出 JSON 中建议包含 evidence 字段，记录 agent_selected_skills 和 rag_chunks_count，便于后续审计。\n"
         ),
+        "subject_anchor": subject_anchor,
+        "rag_chunk_previews": rag_chunk_previews,
     }
 
 
@@ -254,6 +287,9 @@ def build_fallback_plan_data(
             "skill_selection_mode": orchestration.get("skill_selection_mode", "agentscope_react_auto"),
             "rag_enabled": orchestration.get("rag_enabled", False),
             "rag_chunks_count": orchestration.get("rag_chunks_count", 0),
+            "rag_status": orchestration.get("rag_status"),
+            "subject_anchor": orchestration.get("subject_anchor"),
+            "rag_chunk_previews": orchestration.get("rag_chunk_previews", []),
             "fallback_used": True,
             "raw_output_saved": bool(raw_text),
         },
@@ -790,6 +826,8 @@ def validate_plan_json(
             orchestration["rag_chunks_count"],
         )
         data["evidence"].setdefault("rag_status", orchestration.get("rag_status"))
+        data["evidence"].setdefault("subject_anchor", orchestration.get("subject_anchor"))
+        data["evidence"].setdefault("rag_chunk_previews", orchestration.get("rag_chunk_previews", []))
         if orchestration.get("rag_error"):
             data["evidence"].setdefault("rag_error", orchestration.get("rag_error"))
         data["evidence"].setdefault(

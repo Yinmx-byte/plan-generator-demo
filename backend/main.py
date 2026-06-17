@@ -222,6 +222,8 @@ async def dev_plan_test(request: PlanTestRequest):
             "rag_enabled": orchestration["rag_enabled"],
             "rag_chunks_count": orchestration["rag_chunks_count"],
             "rag_status": orchestration.get("rag_status"),
+            "subject_anchor": orchestration.get("subject_anchor"),
+            "rag_chunk_previews": orchestration.get("rag_chunk_previews", []),
         },
     }
 
