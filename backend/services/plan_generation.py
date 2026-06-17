@@ -169,11 +169,6 @@ def update_generated_document(file_id: str, data: dict[str, Any]) -> dict[str, A
     return get_generated_document(file_id) or data
 
 
-def get_generated_path(session: dict[str, Any]) -> Optional[Path]:
-    generated = session.get("generated") or {}
-    return get_generated_file(generated.get("file_id"))
-
-
 async def build_generation_orchestration_context(state: dict[str, str]) -> dict[str, Any]:
     rag_chunks: list[str] = []
     knowledge_base = get_knowledge_base(SKILLS_ROOT)

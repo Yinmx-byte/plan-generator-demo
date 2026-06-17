@@ -291,42 +291,6 @@ async def retrieve_bailian(query: str = Query(default="", description="检索问
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.get("/api/knowledge")
-async def list_knowledge():
-    """Compatibility endpoint used by older clients."""
-    return await bailian_knowledge_status()
-
-
-@router.post("/api/rag/reindex")
-async def reindex_rag():
-    reset_knowledge_base()
-    knowledge_base = get_knowledge_base(SKILLS_ROOT)
-    if knowledge_base is None:
-        return {
-            "status": "disabled",
-            "message": "RAG 未启用：请配置百炼 AK、业务空间 ID 和知识库索引 ID。",
-        }
-    await knowledge_base.get_knowledge()
-    return {
-        "status": "ok",
-    }
-
-
-@router.get("/api/rag/retrieve")
-async def retrieve_rag(query: str = Query(default="", description="检索问题")):
-    knowledge_base = get_knowledge_base(SKILLS_ROOT)
-    if knowledge_base is None:
-        return {
-            "enabled": False,
-            "chunks": [],
-            "message": "RAG 未启用：请配置百炼 AK、业务空间 ID 和知识库索引 ID。",
-        }
-    return {
-        "enabled": True,
-        "chunks": await knowledge_base.retrieve(query),
-    }
-
-
 async def run_blocking(func, *args):
     import asyncio
 

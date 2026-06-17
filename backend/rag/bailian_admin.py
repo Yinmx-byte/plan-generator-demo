@@ -64,10 +64,6 @@ def category_name_default() -> str:
     return os.getenv("BAILIAN_CATEGORY_NAME", "plan-generator-ecs")
 
 
-def index_name_default() -> str:
-    return os.getenv("BAILIAN_INDEX_NAME", "pg-ecs-v4")
-
-
 def next_index_name() -> str:
     prefix = os.getenv("BAILIAN_INDEX_NAME_PREFIX", "pg-ecs")
     return f"{prefix}-{datetime.now().strftime('%m%d%H%M')}"[:20]
