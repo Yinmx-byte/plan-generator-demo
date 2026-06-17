@@ -84,8 +84,8 @@ def normalize_document_metadata(data: dict[str, Any]) -> dict[str, Any]:
 
     header_items = header if isinstance(header, list) else []
     normalized_header: list[Any] = [
-        {"text": department, "font_size": 14},
-        {"text": date_text, "font_size": 12, "space_after": 12},
+        {"text": department, "font_size": 16, "font_name": "仿宋_GB2312", "align": "center"},
+        {"text": date_text, "font_size": 16, "font_name": "仿宋_GB2312", "align": "center"},
     ]
     if len(header_items) > 2:
         normalized_header.extend(header_items[2:])
@@ -295,6 +295,27 @@ def allow_fallback_plan() -> bool:
     return os.getenv("ALLOW_FALLBACK_PLAN", "false").lower() in {"1", "true", "yes"}
 
 
+MAINTENANCE_TYPE_NAMES = [
+    "配置变更",
+    "组件升级",
+    "组件扩缩容",
+    "数据库变更",
+    "日常维护（原硬件设备）",
+    "其他",
+]
+
+
+def canonical_maintenance_type(value: Any) -> str:
+    """Map free-form maintenance type text to exactly one checkbox label."""
+    text = compact_text(value)
+    if text in MAINTENANCE_TYPE_NAMES:
+        return text
+    matches = [name for name in MAINTENANCE_TYPE_NAMES[:-1] if compact_text(name) in text]
+    if matches:
+        return min(matches, key=lambda name: text.index(compact_text(name)))
+    return "其他"
+
+
 def build_json_retry_prompt(user_prompt: str, error_detail: str) -> str:
     """Build a stricter retry prompt after malformed or truncated JSON output."""
     return f"""{user_prompt}
@@ -318,20 +339,16 @@ def build_fallback_plan_data(
     """Build a renderer-safe generic document when model JSON cannot be parsed."""
     maintenance_type = state.get("maintenance_type") or "检修"
     title = derive_plan_title(state, {"title": f"{maintenance_type}检修方案"})
-    checked_type = maintenance_type.strip()
-    type_names = ["配置变更", "组件升级", "组件扩缩容", "数据库变更", "日常维护（原硬件设备）", "其他"]
+    checked_type = canonical_maintenance_type(maintenance_type)
+    type_names = MAINTENANCE_TYPE_NAMES
     checkbox_items = [
         {
             "label": name,
-            "checked": name == checked_type or (name != "其他" and name in checked_type),
-            "extra": checked_type if name == "其他" and checked_type not in type_names else "",
+            "checked": name == checked_type,
+            "extra": "____" if name == "其他" else "",
         }
         for name in type_names
     ]
-    if not any(item["checked"] for item in checkbox_items):
-        checkbox_items[-1]["checked"] = True
-        checkbox_items[-1]["extra"] = checked_type or "待实施前确认"
-
     return {
         "title": title,
         "department": DEFAULT_DEPARTMENT,
@@ -348,10 +365,10 @@ def build_fallback_plan_data(
         },
         "document": {
             "title": title,
-            "cover": {"logo_width_cm": 3.1, "top_spacers": 7, "middle_spacers": 8},
+            "cover": {"logo_width_cm": 3.1, "top_spacers": 7, "middle_spacers": 5},
             "header": [
-                {"text": DEFAULT_DEPARTMENT, "font_size": 14, "align": "center"},
-                {"text": datetime.now().strftime("%Y年%m月%d日"), "font_size": 12, "align": "center"},
+                {"text": DEFAULT_DEPARTMENT, "font_size": 16, "font_name": "仿宋_GB2312", "align": "center"},
+                {"text": datetime.now().strftime("%Y年%m月%d日"), "font_size": 16, "font_name": "仿宋_GB2312", "align": "center"},
             ],
             "sections": [
                 {
@@ -362,7 +379,16 @@ def build_fallback_plan_data(
                         {"type": "paragraph", "text": "该事项项目组提报问题工单，需检修进行处理，实现问题工单闭环。", "first_line_indent": 0.74},
                     ],
                 },
-                {"heading": "检修类型", "level": 1, "blocks": [{"type": "checkbox_group", "items": checkbox_items, "per_line": 3}]},
+                {
+                    "heading": "检修类型",
+                    "level": 1,
+                    "blocks": [{
+                        "type": "checkbox_group",
+                        "items": checkbox_items,
+                        "per_line": 3,
+                        "row_lengths": [3, 2, 1],
+                    }],
+                },
                 {
                     "heading": "现场环境",
                     "level": 1,
@@ -594,15 +620,25 @@ def default_section(name: str, state: dict[str, str]) -> dict[str, Any]:
             ],
         }
     if name == "检修类型":
-        maintenance_type = state.get("maintenance_type") or "其他"
+        maintenance_type = canonical_maintenance_type(state.get("maintenance_type"))
         items = [
-            {"label": item, "checked": item in maintenance_type, "extra": ""}
-            for item in ["配置变更", "组件升级", "组件扩缩容", "数据库变更", "日常维护（原硬件设备）", "其他"]
+            {
+                "label": item,
+                "checked": item == maintenance_type,
+                "extra": "____" if item == "其他" else "",
+            }
+            for item in MAINTENANCE_TYPE_NAMES
         ]
-        if not any(item["checked"] for item in items):
-            items[-1]["checked"] = True
-            items[-1]["extra"] = maintenance_type
-        return {"heading": name, "level": 1, "blocks": [{"type": "checkbox_group", "items": items, "per_line": 3}]}
+        return {
+            "heading": name,
+            "level": 1,
+            "blocks": [{
+                "type": "checkbox_group",
+                "items": items,
+                "per_line": 3,
+                "row_lengths": [3, 2, 1],
+            }],
+        }
     if name == "现场环境":
         return {
             "heading": name,
@@ -680,6 +716,72 @@ def ensure_renderer_ready_document(
             "skill_selection_mode",
             orchestration.get("skill_selection_mode", "agentscope_react_auto"),
         )
+    return data
+
+
+def enforce_common_document_contract(data: dict[str, Any], state: dict[str, str]) -> dict[str, Any]:
+    """Enforce shared layout semantics that must not depend on model output."""
+    spec = data.get("document")
+    if not isinstance(spec, dict):
+        return data
+
+    cover = spec.setdefault("cover", {})
+    if isinstance(cover, dict):
+        cover.update(
+            {
+                "title_font_name": "方正小标宋_GBK",
+                "title_font_size": 22,
+                "middle_spacers": 5,
+            }
+        )
+
+    selected_type = canonical_maintenance_type(state.get("maintenance_type"))
+    environment_tables: list[dict[str, Any]] = []
+    implementation_section: Optional[dict[str, Any]] = None
+    for section in spec.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        heading = normalize_heading(section.get("heading") or section.get("title"))
+        blocks = section.get("blocks") or []
+        if "检修类型" in heading:
+            checkbox_items = [
+                {
+                    "label": label,
+                    "checked": label == selected_type,
+                    "extra": "____" if label == "其他" else "",
+                }
+                for label in MAINTENANCE_TYPE_NAMES
+            ]
+            section["blocks"] = [
+                {
+                    "type": "checkbox_group",
+                    "items": checkbox_items,
+                    "per_line": 3,
+                    "row_lengths": [3, 2, 1],
+                }
+            ]
+        elif "现场环境" in heading:
+            for block in blocks:
+                if isinstance(block, dict) and block.get("type") == "table":
+                    block["font_size"] = 11
+                    environment_tables.append(deepcopy(block))
+        elif "实施步骤" in heading:
+            implementation_section = section
+
+    if environment_tables and implementation_section is not None:
+        operation_blocks = implementation_section.setdefault("blocks", [])
+        if not any(isinstance(block, dict) and block.get("type") == "table" for block in operation_blocks):
+            insert_at = next(
+                (
+                    index + 1
+                    for index, block in enumerate(operation_blocks)
+                    if isinstance(block, dict)
+                    and block.get("type") == "heading"
+                    and int(block.get("level", 1)) >= 3
+                ),
+                len(operation_blocks),
+            )
+            operation_blocks[insert_at:insert_at] = environment_tables
     return data
 
 def docx_to_markdown(raw: bytes) -> str:
@@ -890,6 +992,7 @@ def validate_plan_json(
         data["evidence"]["validation_issues"] = validation_issues
 
     data = ensure_renderer_ready_document(data, state, orchestration)
+    data = enforce_common_document_contract(data, state)
     normalized_title = derive_plan_title(state, data)
     data["title"] = normalized_title
     document_spec = data.setdefault("document", {})

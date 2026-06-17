@@ -4,6 +4,7 @@ const pageEyebrow = document.getElementById('pageEyebrow');
 const navItems = [...document.querySelectorAll('.nav-item')];
 const resetBtn = document.getElementById('resetBtn');
 const refreshAllBtn = document.getElementById('refreshAllBtn');
+const planSessionStorageKey = 'planGeneratorTabState';
 
 const pageMeta = {
   plan: { title: '方案生成', eyebrow: 'Conversation' },
@@ -12,11 +13,22 @@ const pageMeta = {
   'page-agent': { title: 'Page Agent', eyebrow: 'MCP' },
 };
 
-let sessionId = localStorage.getItem('planGeneratorSessionId') || null;
+function readPlanSessionState() {
+  try {
+    return JSON.parse(sessionStorage.getItem(planSessionStorageKey) || '{}');
+  } catch (_err) {
+    return {};
+  }
+}
+
+let planSessionState = readPlanSessionState();
+let sessionId = planSessionState.sessionId || null;
 let currentPage = 'plan';
 let messagesEl = null;
 let pageAgentMessagesEl = null;
-let currentDocumentFileId = null;
+let currentDocumentFileId = planSessionState.fileId || null;
+let currentDocumentDownloadUrl = planSessionState.downloadUrl || '';
+let currentDocumentFilename = planSessionState.filename || '';
 let currentDocumentData = null;
 let documentJsonEditor = null;
 let documentPreview = null;
@@ -27,6 +39,31 @@ let documentDownloadLink = null;
 let documentEditStatus = null;
 let documentDialog = null;
 let documentVisualDirty = false;
+
+localStorage.removeItem('planGeneratorSessionId');
+
+function persistPlanState() {
+  planSessionState = {
+    sessionId,
+    messagesHtml: messagesEl?.innerHTML || planSessionState.messagesHtml || '',
+    fileId: currentDocumentFileId,
+    downloadUrl: currentDocumentDownloadUrl,
+    filename: currentDocumentFilename,
+  };
+  sessionStorage.setItem(planSessionStorageKey, JSON.stringify(planSessionState));
+}
+
+function bindStoredDocumentActions(container = messagesEl) {
+  container?.querySelectorAll('.document-open-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      openGeneratedDocument(
+        button.dataset.fileId || currentDocumentFileId,
+        button.dataset.downloadUrl || currentDocumentDownloadUrl,
+        button.dataset.filename || currentDocumentFilename,
+      );
+    });
+  });
+}
 
 function scrollToBottom(el) {
   if (el) el.scrollTop = el.scrollHeight;
@@ -44,6 +81,7 @@ function addMessage(container, role, text, extraHtml = '') {
   }
   container.appendChild(div);
   scrollToBottom(container);
+  if (container === messagesEl) persistPlanState();
   return div;
 }
 
@@ -61,6 +99,7 @@ function addTraceMessage(container, text) {
   details.appendChild(pre);
   container.appendChild(details);
   scrollToBottom(container);
+  if (container === messagesEl) persistPlanState();
   return details;
 }
 
@@ -72,6 +111,7 @@ async function typeInto(el, text) {
     scrollToBottom(el.parentElement);
     await new Promise((resolve) => setTimeout(resolve, 8));
   }
+  persistPlanState();
 }
 
 function setActiveNav(page) {
@@ -79,6 +119,7 @@ function setActiveNav(page) {
 }
 
 async function loadPage(page) {
+  if (currentPage === 'plan') persistPlanState();
   currentPage = page;
   setActiveNav(page);
   pageTitle.textContent = pageMeta[page].title;
@@ -263,18 +304,22 @@ function setDocumentEditorState(status, message) {
 }
 
 function setDocumentDownload(url, filename) {
+  currentDocumentDownloadUrl = url || '';
+  currentDocumentFilename = filename || '';
   if (!documentDownloadLink) return;
   if (!url) {
     documentDownloadLink.href = '#';
     documentDownloadLink.classList.add('disabled');
     documentDownloadLink.setAttribute('aria-disabled', 'true');
     documentDownloadLink.textContent = '下载 DOCX';
+    persistPlanState();
     return;
   }
   documentDownloadLink.href = url;
   documentDownloadLink.classList.remove('disabled');
   documentDownloadLink.removeAttribute('aria-disabled');
   documentDownloadLink.textContent = filename ? `下载 ${filename}` : '下载 DOCX';
+  persistPlanState();
 }
 
 function collectDocumentSections(data) {
@@ -467,7 +512,10 @@ function bindDocumentVisualEditing() {
   documentPreview.querySelectorAll('[data-checkbox-item]').forEach((element) => {
     element.addEventListener('click', (event) => {
       if (event.target?.matches?.('[contenteditable="true"]')) return;
-      element.classList.toggle('checked');
+      element.closest('.doc-checkbox-grid')
+        ?.querySelectorAll('[data-checkbox-item]')
+        .forEach((item) => item.classList.remove('checked'));
+      element.classList.add('checked');
       documentVisualDirty = true;
       setDocumentEditorState('编辑中', '已修改文档预览内容，点击“保存并重新渲染”生成新的 DOCX。');
     });
@@ -703,8 +751,14 @@ function initPlanPage() {
   documentDialog = document.getElementById('documentDialog');
   const formatDocumentJsonBtn = document.getElementById('formatDocumentJsonBtn');
   const saveDocumentBtn = document.getElementById('saveDocumentBtn');
-  addMessage(messagesEl, 'assistant', '请粘贴检修需求描述或需求文档。我会逐步抽取信息、追问缺失项，并在信息齐全后生成 Word 检修方案。');
-  setDocumentDownload(null);
+  if (planSessionState.messagesHtml) {
+    messagesEl.innerHTML = planSessionState.messagesHtml;
+    bindStoredDocumentActions();
+    scrollToBottom(messagesEl);
+  } else {
+    addMessage(messagesEl, 'assistant', '请粘贴检修需求描述或需求文档。我会逐步抽取信息、追问缺失项，并在信息齐全后生成 Word 检修方案。');
+  }
+  setDocumentDownload(currentDocumentDownloadUrl, currentDocumentFilename);
   setDocumentEditorState(currentDocumentFileId ? '可编辑' : '未加载', currentDocumentFileId ? '已保留上一份生成文档。' : '未生成文档。');
   if (currentDocumentData) {
     if (documentJsonEditor) documentJsonEditor.value = JSON.stringify(currentDocumentData, null, 2);
@@ -773,7 +827,7 @@ function initPlanPage() {
   async function handlePlanEvent(event, data) {
     if (data.session_id) {
       sessionId = data.session_id;
-      localStorage.setItem('planGeneratorSessionId', sessionId);
+      persistPlanState();
     }
     if (event === 'status' || event === 'collected') {
       addMessage(messagesEl, 'status', data.message || '处理中...');
@@ -798,20 +852,21 @@ function initPlanPage() {
         await typeInto(msg, data.message + validationText);
         const generated = data.generated || {};
         currentDocumentFileId = generated.file_id || data.file_id;
+        currentDocumentDownloadUrl = data.download_url || generated.download_url || '';
+        currentDocumentFilename = data.filename || generated.filename || '';
         const wrap = document.createElement('div');
         wrap.className = 'document-message-actions';
         wrap.innerHTML = `
-          <button class="document-open-btn" type="button">查看/编辑文档</button>
-          <a class="download" href="${data.download_url || generated.download_url}">下载检修方案</a>
+          <button class="document-open-btn" type="button"
+            data-file-id="${escapeHtml(currentDocumentFileId || '')}"
+            data-download-url="${escapeHtml(currentDocumentDownloadUrl)}"
+            data-filename="${escapeHtml(currentDocumentFilename)}">查看/编辑文档</button>
+          <a class="download" href="${escapeHtml(currentDocumentDownloadUrl)}">下载检修方案</a>
         `;
         msg.appendChild(wrap);
-        wrap.querySelector('.document-open-btn')?.addEventListener('click', () => {
-          openGeneratedDocument(
-            currentDocumentFileId,
-            data.download_url || generated.download_url,
-            data.filename || generated.filename,
-          );
-        });
+        bindStoredDocumentActions(wrap);
+        setDocumentDownload(currentDocumentDownloadUrl, currentDocumentFilename);
+        persistPlanState();
       } else {
         const msg = addMessage(messagesEl, 'assistant', '');
         await typeInto(msg, data.message || '');
@@ -1084,7 +1139,12 @@ async function resetChat() {
     }).catch(() => {});
   }
   sessionId = null;
-  localStorage.removeItem('planGeneratorSessionId');
+  currentDocumentFileId = null;
+  currentDocumentDownloadUrl = '';
+  currentDocumentFilename = '';
+  currentDocumentData = null;
+  planSessionState = {};
+  sessionStorage.removeItem(planSessionStorageKey);
   if (currentPage !== 'plan') {
     await loadPage('plan');
   } else {
