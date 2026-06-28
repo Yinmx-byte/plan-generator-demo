@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any
 
 
@@ -51,6 +52,10 @@ def _vpc_endpoint(region_id: str) -> str:
     return os.getenv("ALIYUN_VPC_ENDPOINT") or f"vpc.{region_id}.aliyuncs.com"
 
 
+def _cms_endpoint(region_id: str) -> str:
+    return os.getenv("ALIYUN_CMS_ENDPOINT") or f"metrics.{region_id}.aliyuncs.com"
+
+
 def _ecs_client(region_id: str):
     try:
         from alibabacloud_ecs20140526.client import Client
@@ -69,6 +74,16 @@ def _vpc_client(region_id: str):
             "缺少 alibabacloud-vpc20160428，请在 backend 环境执行 pip install -r requirements.txt"
         ) from exc
     return Client(_build_config(_vpc_endpoint(region_id), region_id))
+
+
+def _cms_client(region_id: str):
+    try:
+        from alibabacloud_cms20190101.client import Client
+    except ModuleNotFoundError as exc:
+        raise AliyunCloudSDKError(
+            "缺少 alibabacloud-cms20190101，请在 backend 环境执行 pip install -r requirements.txt"
+        ) from exc
+    return Client(_build_config(_cms_endpoint(region_id), region_id))
 
 
 def _body_to_dict(response: Any) -> dict[str, Any]:
@@ -124,6 +139,45 @@ def _parse_instance_ids(instance_ids: str | list[str] | None) -> list[str]:
             raise ValueError("instance_ids JSON 必须是数组")
         return [str(item).strip() for item in parsed if str(item).strip()]
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _parse_metric_names(metric_names: str | list[str] | None) -> list[str]:
+    if not metric_names:
+        return []
+    if isinstance(metric_names, list):
+        return [item.strip() for item in metric_names if item and item.strip()]
+    return [item.strip() for item in metric_names.split(",") if item.strip()]
+
+
+def _metric_value(point: dict[str, Any]) -> float | None:
+    for key in ("Average", "Value", "Maximum", "Minimum"):
+        value = point.get(key)
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _summarize_datapoints(datapoints: list[dict[str, Any]]) -> dict[str, Any]:
+    if not datapoints:
+        return {"available": False, "count": 0, "latest": None, "average": None, "maximum": None, "minimum": None}
+    sorted_points = sorted(datapoints, key=lambda item: item.get("timestamp", 0))
+    values = [value for value in (_metric_value(point) for point in sorted_points) if value is not None]
+    latest_point = sorted_points[-1]
+    latest_value = _metric_value(latest_point)
+    return {
+        "available": bool(values),
+        "count": len(sorted_points),
+        "latest": latest_value,
+        "latest_timestamp": latest_point.get("timestamp"),
+        "average": round(sum(values) / len(values), 4) if values else None,
+        "maximum": max(values) if values else None,
+        "minimum": min(values) if values else None,
+        "recent_points": sorted_points[-5:],
+    }
 
 
 def describe_regions(region_id: str) -> list[dict[str, Any]]:
@@ -216,6 +270,124 @@ def describe_instances(
     return _as_list(payload.get("Instances"), "Instance")
 
 
+def describe_metric_list(
+    *,
+    region_id: str,
+    metric_name: str,
+    dimensions: dict[str, Any],
+    namespace: str = "acs_ecs_dashboard",
+    period: str = "300",
+    start_time_ms: int | None = None,
+    end_time_ms: int | None = None,
+) -> list[dict[str, Any]]:
+    from alibabacloud_cms20190101 import models as cms_models
+
+    request = cms_models.DescribeMetricListRequest(
+        namespace=namespace,
+        metric_name=metric_name,
+        dimensions=json.dumps([dimensions], ensure_ascii=False),
+        period=str(period),
+        start_time=str(start_time_ms) if start_time_ms else None,
+        end_time=str(end_time_ms) if end_time_ms else None,
+    )
+    payload = _call_client(
+        _cms_client(region_id),
+        ("describe_metric_list", "describe_metric_list_with_options"),
+        request,
+    )
+    datapoints = payload.get("Datapoints") or payload.get("DataPoints") or []
+    if isinstance(datapoints, str):
+        try:
+            parsed = json.loads(datapoints)
+        except json.JSONDecodeError:
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return datapoints if isinstance(datapoints, list) else []
+
+
+def describe_instance_usage_metrics(
+    *,
+    region_id: str,
+    instance_id: str,
+    metric_names: str | list[str],
+    metric_minutes: int = 60,
+    period: str = "300",
+) -> dict[str, Any]:
+    end_time_ms = int(time.time() * 1000)
+    start_time_ms = end_time_ms - max(metric_minutes, 1) * 60 * 1000
+    summaries = {}
+    for metric_name in _parse_metric_names(metric_names):
+        datapoints = describe_metric_list(
+            region_id=region_id,
+            metric_name=metric_name,
+            dimensions={"instanceId": instance_id},
+            period=period,
+            start_time_ms=start_time_ms,
+            end_time_ms=end_time_ms,
+        )
+        summaries[metric_name] = _summarize_datapoints(datapoints)
+    return {
+        "instance_id": instance_id,
+        "namespace": "acs_ecs_dashboard",
+        "period": str(period),
+        "window_minutes": metric_minutes,
+        "metrics": summaries,
+    }
+
+
+def build_usage_summary(
+    *,
+    vpcs: list[dict[str, Any]],
+    vswitches: list[dict[str, Any]],
+    instances: list[dict[str, Any]],
+) -> dict[str, Any]:
+    status_counts: dict[str, int] = {}
+    total_cpu = 0
+    total_memory_mb = 0
+    vpc_instance_counts: dict[str, int] = {}
+    for instance in instances:
+        status = str(instance.get("Status") or "Unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        total_cpu += int(instance.get("Cpu") or 0)
+        total_memory_mb += int(instance.get("Memory") or 0)
+        vpc_id = ((instance.get("VpcAttributes") or {}).get("VpcId")) or ""
+        if vpc_id:
+            vpc_instance_counts[vpc_id] = vpc_instance_counts.get(vpc_id, 0) + 1
+
+    vswitch_usage = []
+    total_available_ip = 0
+    for vswitch in vswitches:
+        available = int(vswitch.get("AvailableIpAddressCount") or 0)
+        total_available_ip += available
+        vswitch_usage.append(
+            {
+                "vpc_id": vswitch.get("VpcId"),
+                "vswitch_id": vswitch.get("VSwitchId"),
+                "zone_id": vswitch.get("ZoneId"),
+                "cidr_block": vswitch.get("CidrBlock"),
+                "status": vswitch.get("Status"),
+                "available_ip_address_count": available,
+            }
+        )
+
+    return {
+        "ecs": {
+            "total_instances": len(instances),
+            "status_counts": status_counts,
+            "total_cpu_cores": total_cpu,
+            "total_memory_mb": total_memory_mb,
+            "total_memory_gb": round(total_memory_mb / 1024, 2) if total_memory_mb else 0,
+            "instances_by_vpc": vpc_instance_counts,
+        },
+        "vpc": {
+            "total_vpcs": len(vpcs),
+            "total_vswitches": len(vswitches),
+            "total_available_ip_address_count": total_available_ip,
+            "vswitch_usage": vswitch_usage,
+        },
+    }
+
+
 def query_ecs_vpc_info(
     *,
     region_id: str = "cn-beijing",
@@ -224,6 +396,10 @@ def query_ecs_vpc_info(
     instance_ids: str | list[str] | None = None,
     include_instances: bool = True,
     include_vswitches: bool = True,
+    include_usage_metrics: bool = True,
+    metric_names: str | list[str] | None = None,
+    metric_minutes: int = 60,
+    metric_period: str = "300",
 ) -> dict[str, Any]:
     """Query read-only ECS/VPC topology information for a region or VPC."""
     if not region_id.strip():
@@ -275,12 +451,39 @@ def query_ecs_vpc_info(
                     )
                 )
 
+    effective_metric_names = metric_names or os.getenv(
+        "ALIYUN_ECS_USAGE_METRICS",
+        "CPUUtilization",
+    )
+    metric_errors = []
+    usage_metrics = {}
+    if include_usage_metrics and instances:
+        for instance in instances:
+            instance_id = instance.get("InstanceId")
+            if not instance_id:
+                continue
+            try:
+                instance_usage = describe_instance_usage_metrics(
+                    region_id=region_id,
+                    instance_id=instance_id,
+                    metric_names=effective_metric_names,
+                    metric_minutes=metric_minutes,
+                    period=metric_period,
+                )
+                usage_metrics[instance_id] = instance_usage
+                instance["UsageMetrics"] = instance_usage
+            except Exception as exc:
+                metric_errors.append({"instance_id": instance_id, "message": str(exc)})
+
     return {
         "region_id": region_id,
         "regions": regions,
         "vpcs": vpcs,
         "vswitches": vswitches,
         "instances": instances,
+        "usage_summary": build_usage_summary(vpcs=vpcs, vswitches=vswitches, instances=instances),
+        "usage_metrics": usage_metrics,
+        "metric_errors": metric_errors,
         "counts": {
             "regions": len(regions),
             "vpcs": len(vpcs),
@@ -293,9 +496,14 @@ def query_ecs_vpc_info(
             "instance_ids": _parse_instance_ids(instance_ids),
             "include_instances": include_instances,
             "include_vswitches": include_vswitches,
+            "include_usage_metrics": include_usage_metrics,
+            "metric_names": _parse_metric_names(effective_metric_names),
+            "metric_minutes": metric_minutes,
+            "metric_period": str(metric_period),
         },
         "sdk": {
             "ecs": "alibabacloud-ecs20140526",
             "vpc": "alibabacloud-vpc20160428",
+            "cms": "alibabacloud-cms20190101",
         },
     }

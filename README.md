@@ -88,7 +88,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 - **Skill**：每类检修方案的稳定规则、章节结构、风险项、实施步骤约束和工具调用原则放在 `backend/skills/`。
 - **百炼 RAG**：历史检修方案、通用模板和阿里云参考资料通过百炼知识库管理，业务生成链路通过 Retrieve API 获取切片。
-- **阿里云只读资源查询**：通过阿里云官方 Python SDK 查询 ECS/VPC/VSwitch/实例归属信息，作为 `cloud_query` 工具组嵌入 Master Agent，用于智能问数、生成前资源核对和验证前检查。
+- **阿里云只读资源查询**：通过阿里云官方 Python SDK 查询 ECS/VPC/VSwitch/实例归属信息和 CloudMonitor 使用率指标，作为 `cloud_query` 工具组嵌入 Master Agent，用于智能问数、生成前资源核对和验证前检查。
 - **MCP / Page Agent**：`backend/mcp_servers.json` 配置外部 MCP，当前用于 Page Agent 浏览器侧执行与验证。
 - **方案生成服务**：`services/plan_generation.py` 将写文档能力封装为 `compose_plan_json`、`validate_plan_json`、`render_docx` 三步；其中 `compose_plan_json` 内部仍使用专用 Plan ReActAgent，方便加载 Skill 和调用渲染检查工具。
 - **Word 渲染**：`scripts/generate_plan.py` 将已验证的内容 JSON 与通用格式契约合成为 `.docx`；默认格式位于 `skills/maintenance-plan-composer/references/document-style.json`，所有检修类型共用，渲染工具也支持显式传入 `style_contract`。

@@ -20,8 +20,12 @@ def build_query_ecs_vpc_info_tool() -> Callable[..., ToolResponse]:
         instance_ids: str = "",
         include_instances: bool = True,
         include_vswitches: bool = True,
+        include_usage_metrics: bool = True,
+        metric_names: str = "CPUUtilization",
+        metric_minutes: int = 60,
+        metric_period: str = "300",
     ) -> ToolResponse:
-        """Query read-only ECS/VPC topology information from Alibaba Cloud SDK.
+        """Query read-only ECS/VPC topology and usage metrics from Alibaba Cloud SDK.
 
         Args:
             region_id: Alibaba Cloud region ID, for example cn-beijing.
@@ -30,6 +34,10 @@ def build_query_ecs_vpc_info_tool() -> Callable[..., ToolResponse]:
             instance_ids: Optional comma-separated ECS instance IDs or JSON array string.
             include_instances: Whether to include related ECS instances.
             include_vswitches: Whether to include related VSwitches.
+            include_usage_metrics: Whether to query recent ECS usage metrics from CloudMonitor.
+            metric_names: Comma-separated CloudMonitor metric names.
+            metric_minutes: Recent time window in minutes for metrics.
+            metric_period: CloudMonitor metric period in seconds.
         """
         try:
             result = await asyncio.to_thread(
@@ -40,6 +48,10 @@ def build_query_ecs_vpc_info_tool() -> Callable[..., ToolResponse]:
                 instance_ids=instance_ids,
                 include_instances=include_instances,
                 include_vswitches=include_vswitches,
+                include_usage_metrics=include_usage_metrics,
+                metric_names=metric_names,
+                metric_minutes=metric_minutes,
+                metric_period=metric_period,
             )
             return json_tool_response({"status": "ok", "data": result})
         except Exception as exc:
