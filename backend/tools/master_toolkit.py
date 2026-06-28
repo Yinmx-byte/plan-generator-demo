@@ -13,6 +13,7 @@ from .context import (
     build_list_registered_skills_tool,
     build_retrieve_knowledge_tool,
 )
+from .cloud_query import build_query_ecs_vpc_info_tool
 from .document import build_get_generated_document_info_tool
 from .generation import (
     build_generate_maintenance_plan_tool,
@@ -84,6 +85,11 @@ def _build_tool_specs(session: dict[str, Any], runtime: Any) -> list[MasterToolS
             group_name="document",
             func_name="get_generated_document_info",
         ),
+        MasterToolSpec(
+            func=build_query_ecs_vpc_info_tool(),
+            group_name="cloud_query",
+            func_name="query_ecs_vpc_info",
+        ),
     ]
 
 
@@ -108,4 +114,3 @@ async def build_master_toolkit(
     toolkit.register_tool_function(toolkit.reset_equipped_tools)
     runtime.register_skills(toolkit)
     return toolkit
-

@@ -30,6 +30,14 @@ MASTER_TOOL_GROUPS: dict[str, dict[str, Any]] = {
         "active": False,
         "notes": "Use after a document has been generated or when the user asks about the generated file.",
     },
+    "cloud_query": {
+        "description": "Read-only Alibaba Cloud ECS/VPC resource queries.",
+        "active": False,
+        "notes": (
+            "Use only for read-only cloud resource lookup such as ECS VPC, VSwitch "
+            "or instance topology. Never perform cloud mutations."
+        ),
+    },
 }
 
 DEFAULT_MASTER_TOOL_GROUPS = tuple(MASTER_TOOL_GROUPS.keys())
@@ -47,4 +55,3 @@ def get_enabled_master_tool_groups() -> set[str]:
     if unknown:
         raise ValueError(f"Unknown MASTER_AGENT_TOOL_GROUPS values: {', '.join(sorted(unknown))}")
     return requested
-

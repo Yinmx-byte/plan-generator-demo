@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from rag import get_knowledge_base
 from api.admin_routes import router as admin_router
+from api.cloud_routes import router as cloud_router
 from agents.master_agent import (
     MasterAgentRuntime,
     get_simple_direct_reply,
@@ -181,6 +182,7 @@ async def execute_page_agent_task(request: PageAgentTaskRequest):
 
 
 app.include_router(admin_router)
+app.include_router(cloud_router)
 
 
 @app.post("/api/dev/plan-test")
