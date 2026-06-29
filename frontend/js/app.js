@@ -69,11 +69,131 @@ function scrollToBottom(el) {
   if (el) el.scrollTop = el.scrollHeight;
 }
 
+function shouldRenderMarkdown(role) {
+  return role === 'assistant';
+}
+
+function renderInlineMarkdown(value) {
+  let html = escapeHtml(value);
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  return html;
+}
+
+function splitMarkdownTableRow(line) {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+function isMarkdownTableSeparator(line) {
+  const cells = splitMarkdownTableRow(line);
+  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function renderMarkdownTable(lines) {
+  const headers = splitMarkdownTableRow(lines[0]);
+  const rows = lines.slice(2).map(splitMarkdownTableRow);
+  const headHtml = headers.map((cell) => `<th>${renderInlineMarkdown(cell)}</th>`).join('');
+  const bodyHtml = rows
+    .map((row) => `<tr>${row.map((cell) => `<td>${renderInlineMarkdown(cell)}</td>`).join('')}</tr>`)
+    .join('');
+  return `<div class="md-table-wrap"><table><thead><tr>${headHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`;
+}
+
+function renderMarkdown(text) {
+  const source = String(text || '').replace(/\r\n/g, '\n');
+  if (!source.trim()) return '';
+
+  const codeBlocks = [];
+  const protectedSource = source.replace(/```[^\n]*\n?([\s\S]*?)```/g, (_match, code) => {
+    const index = codeBlocks.push(`<pre class="md-code"><code>${escapeHtml(code.trimEnd())}</code></pre>`) - 1;
+    return `\u0000CODE${index}\u0000`;
+  });
+
+  const lines = protectedSource.split('\n');
+  const html = [];
+  let paragraph = [];
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    html.push(`<p>${paragraph.map(renderInlineMarkdown).join('<br>')}</p>`);
+    paragraph = [];
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    const codeMatch = trimmed.match(/^\u0000CODE(\d+)\u0000$/);
+    if (codeMatch) {
+      flushParagraph();
+      html.push(codeBlocks[Number(codeMatch[1])] || '');
+      continue;
+    }
+
+    if (!trimmed) {
+      flushParagraph();
+      continue;
+    }
+
+    if (line.includes('|') && lines[i + 1] && isMarkdownTableSeparator(lines[i + 1])) {
+      flushParagraph();
+      const tableLines = [line, lines[i + 1]];
+      i += 2;
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+        tableLines.push(lines[i]);
+        i += 1;
+      }
+      i -= 1;
+      html.push(renderMarkdownTable(tableLines));
+      continue;
+    }
+
+    const unordered = trimmed.match(/^[-*]\s+(.+)$/);
+    const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/);
+    if (unordered || ordered) {
+      flushParagraph();
+      const orderedList = Boolean(ordered);
+      const tag = orderedList ? 'ol' : 'ul';
+      const items = [];
+      while (i < lines.length) {
+        const candidate = lines[i].trim();
+        const match = orderedList ? candidate.match(/^\d+[.)]\s+(.+)$/) : candidate.match(/^[-*]\s+(.+)$/);
+        if (!match) break;
+        items.push(`<li>${renderInlineMarkdown(match[1])}</li>`);
+        i += 1;
+      }
+      i -= 1;
+      html.push(`<${tag}>${items.join('')}</${tag}>`);
+      continue;
+    }
+
+    paragraph.push(line);
+  }
+
+  flushParagraph();
+  return html.join('');
+}
+
+function setMessageContent(el, text) {
+  if (!el) return;
+  if (el.classList.contains('markdown-body')) {
+    el.innerHTML = renderMarkdown(text);
+  } else {
+    el.textContent = text;
+  }
+}
+
 function addMessage(container, role, text, extraHtml = '') {
   if (!container) return null;
   const div = document.createElement('div');
   div.className = 'msg ' + role;
-  div.textContent = text;
+  if (shouldRenderMarkdown(role)) div.classList.add('markdown-body');
+  setMessageContent(div, text);
   if (extraHtml) {
     const wrap = document.createElement('div');
     wrap.innerHTML = extraHtml;
@@ -104,10 +224,12 @@ function addTraceMessage(container, text) {
 }
 
 async function typeInto(el, text) {
-  el.textContent = '';
+  let current = '';
+  setMessageContent(el, '');
   const step = Math.max(1, Math.ceil(text.length / 90));
   for (let i = 0; i < text.length; i += step) {
-    el.textContent += text.slice(i, i + step);
+    current += text.slice(i, i + step);
+    setMessageContent(el, current);
     scrollToBottom(el.parentElement);
     await new Promise((resolve) => setTimeout(resolve, 8));
   }
