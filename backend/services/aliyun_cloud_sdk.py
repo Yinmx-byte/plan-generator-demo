@@ -601,26 +601,8 @@ def search_resource_center_resources(
     return resources
 
 
-def query_resource_group_products(
-    *,
-    resource_group_id: str = "",
-    region_id: str | None = None,
-    max_results: int | None = None,
-    max_pages: int | None = None,
-) -> dict[str, Any]:
-    """Count product categories in accessible Resource Center resources."""
-    defaults = get_catalog_defaults()
-    effective_region_id = (
-        region_id
-        or os.getenv("ALIYUN_RESOURCE_CENTER_REGION_ID")
-        or defaults.get("resource_center_region_id", "cn-hangzhou")
-    )
-    resources = search_resource_center_resources(
-        resource_group_id=resource_group_id,
-        region_id=effective_region_id,
-        max_results=max_results,
-        max_pages=max_pages,
-    )
+def summarize_resource_center_products(resources: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize Resource Center resources by product code."""
     product_counts: dict[str, dict[str, Any]] = {}
     resource_group_counts: dict[str, int] = {}
     for resource in resources:
@@ -646,13 +628,39 @@ def query_resource_group_products(
         key=lambda item: (-int(item["resource_count"]), str(item["product_code"])),
     )
     return {
-        "query_type": "resource_group_products",
-        "region_id": effective_region_id,
-        "resource_group_id": resource_group_id,
         "product_count": len(products),
         "total_resource_count": len(resources),
         "products": products,
         "resource_group_counts": resource_group_counts,
+    }
+
+
+def query_resource_group_products(
+    *,
+    resource_group_id: str = "",
+    region_id: str | None = None,
+    max_results: int | None = None,
+    max_pages: int | None = None,
+) -> dict[str, Any]:
+    """Count product categories in accessible Resource Center resources."""
+    defaults = get_catalog_defaults()
+    effective_region_id = (
+        region_id
+        or os.getenv("ALIYUN_RESOURCE_CENTER_REGION_ID")
+        or defaults.get("resource_center_region_id", "cn-hangzhou")
+    )
+    resources = search_resource_center_resources(
+        resource_group_id=resource_group_id,
+        region_id=effective_region_id,
+        max_results=max_results,
+        max_pages=max_pages,
+    )
+    summary = summarize_resource_center_products(resources)
+    return {
+        "query_type": "resource_group_products",
+        "region_id": effective_region_id,
+        "resource_group_id": resource_group_id,
+        **summary,
         "sample_resources": resources[:10],
         "limits": {
             "max_results": int(max_results or defaults.get("resource_center_max_results", 100)),

@@ -132,6 +132,7 @@ ALLOW_FALLBACK_PLAN=true
 - `GET /api/cloud/metrics`：通过配置化指标 key 查询 ECS CPU、内存、磁盘、网络等 CloudMonitor 指标。
 - `GET /api/cloud/resource-products`：通过 Resource Center 统计当前账号或指定资源组可访问资源涉及的产品类别。
 - `GET /api/cloud/ecs-vpc-info`：旧版兼容入口，仍可查询 ECS/VPC/VSwitch/实例归属和使用率信息。
+- `GET /api/dev/cloud-query-test`：开发验证接口，默认验证产品/指标映射、缺参追问和资源产品聚合；设置 `run_live=true` 后会在当前环境有 AK/SK 时执行真实只读云查询。
 
 ### 管理接口
 

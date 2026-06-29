@@ -13,6 +13,7 @@ from services.aliyun_cloud_sdk import (
     query_ecs_vpc_info,
     query_resource_group_products,
 )
+from services.cloud_query_test import run_cloud_query_test_suite
 
 router = APIRouter()
 
@@ -127,3 +128,19 @@ async def get_resource_group_products(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {"status": "ok", "data": data}
+
+
+@router.get("/api/dev/cloud-query-test")
+async def run_dev_cloud_query_test(
+    run_live: bool = Query(default=False, description="Whether to run live read-only Alibaba Cloud API calls"),
+    region_id: str = Query(default="cn-beijing", description="Alibaba Cloud region for live inventory/metric checks"),
+    instance_ids: str = Query(default="", description="Optional comma-separated ECS instance IDs for live metric checks"),
+    resource_group_id: str = Query(default="", description="Optional resource group ID for live Resource Center checks"),
+):
+    """Run cloud-query mapping checks and optional live read-only query scenarios."""
+    return run_cloud_query_test_suite(
+        run_live=run_live,
+        region_id=region_id,
+        instance_ids=instance_ids,
+        resource_group_id=resource_group_id,
+    )
