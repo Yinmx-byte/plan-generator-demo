@@ -26,6 +26,7 @@ let sessionId = planSessionState.sessionId || null;
 let currentPage = 'plan';
 let messagesEl = null;
 let pageAgentMessagesEl = null;
+let showToolTrace = Boolean(planSessionState.showToolTrace);
 let currentDocumentFileId = planSessionState.fileId || null;
 let currentDocumentDownloadUrl = planSessionState.downloadUrl || '';
 let currentDocumentFilename = planSessionState.filename || '';
@@ -46,6 +47,7 @@ function persistPlanState() {
   planSessionState = {
     sessionId,
     messagesHtml: messagesEl?.innerHTML || planSessionState.messagesHtml || '',
+    showToolTrace,
     fileId: currentDocumentFileId,
     downloadUrl: currentDocumentDownloadUrl,
     filename: currentDocumentFilename,
@@ -67,6 +69,10 @@ function bindStoredDocumentActions(container = messagesEl) {
 
 function scrollToBottom(el) {
   if (el) el.scrollTop = el.scrollHeight;
+}
+
+function applyTraceVisibility(container = messagesEl) {
+  container?.classList.toggle('hide-trace', !showToolTrace);
 }
 
 function shouldRenderMarkdown(role) {
@@ -236,12 +242,14 @@ function addCopyButton(div) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'copy-message-btn';
-  button.title = div.classList.contains('user') ? '复制问题' : '复制回答';
+  const label = div.classList.contains('user') ? '复制问题' : '复制回答';
+  button.title = label;
   button.setAttribute('aria-label', button.title);
-  button.textContent = '复制';
+  button.dataset.label = label;
+  button.textContent = label;
   button.addEventListener('click', async (event) => {
     event.stopPropagation();
-    const originalText = button.textContent;
+    const originalText = button.dataset.label || button.textContent;
     try {
       await copyTextToClipboard(deriveMessageText(div));
       button.textContent = '已复制';
@@ -322,6 +330,7 @@ function addTraceMessage(container, text) {
   details.appendChild(summary);
   details.appendChild(pre);
   container.appendChild(details);
+  applyTraceVisibility(container);
   scrollToBottom(container);
   if (container === messagesEl) persistPlanState();
   return details;
@@ -967,6 +976,7 @@ function initPlanPage() {
   const inputEl = document.getElementById('messageInput');
   const sendBtn = document.getElementById('sendBtn');
   const executeValidationInput = document.getElementById('executeValidationInput');
+  const showToolTraceInput = document.getElementById('showToolTraceInput');
   documentJsonEditor = document.getElementById('documentJsonEditor');
   documentPreview = document.getElementById('documentPreview');
   documentOutline = document.getElementById('documentOutline');
@@ -977,10 +987,20 @@ function initPlanPage() {
   documentDialog = document.getElementById('documentDialog');
   const formatDocumentJsonBtn = document.getElementById('formatDocumentJsonBtn');
   const saveDocumentBtn = document.getElementById('saveDocumentBtn');
+  if (showToolTraceInput) {
+    showToolTraceInput.checked = showToolTrace;
+    showToolTraceInput.addEventListener('change', () => {
+      showToolTrace = showToolTraceInput.checked;
+      applyTraceVisibility(messagesEl);
+      persistPlanState();
+    });
+  }
+  applyTraceVisibility(messagesEl);
   if (planSessionState.messagesHtml) {
     messagesEl.innerHTML = planSessionState.messagesHtml;
     upgradeStoredMessages(messagesEl);
     bindStoredDocumentActions();
+    applyTraceVisibility(messagesEl);
     scrollToBottom(messagesEl);
   } else {
     addMessage(messagesEl, 'assistant', '请粘贴检修需求描述或需求文档。我会逐步抽取信息、追问缺失项，并在信息齐全后生成 Word 检修方案。');
@@ -1061,7 +1081,7 @@ function initPlanPage() {
       return;
     }
     if (event === 'trace') {
-      addTraceMessage(messagesEl, data.message || 'Agent 执行中...');
+      if (showToolTrace) addTraceMessage(messagesEl, data.message || 'Agent 执行中...');
       return;
     }
     if (event === 'evidence') {

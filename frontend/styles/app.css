@@ -293,7 +293,7 @@ input:focus {
 }
 .msg.user,
 .msg.assistant {
-  padding-right: 62px;
+  padding-right: 92px;
 }
 .msg-content {
   min-width: 0;
@@ -419,7 +419,7 @@ input:focus {
   color: #2b4058;
   font-size: 12px;
   font-weight: 700;
-  opacity: 0;
+  opacity: 0.64;
   transform: translateY(-2px);
   box-shadow: none;
 }
@@ -492,6 +492,9 @@ input:focus {
 }
 .msg.trace.trace-collapsible::before {
   content: none;
+}
+.messages.hide-trace .msg.trace {
+  display: none;
 }
 .msg.error { background: var(--red-soft); border: 1px solid #efb9b3; color: var(--red); }
 .download {
