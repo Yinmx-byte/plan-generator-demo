@@ -58,7 +58,7 @@ def build_query_cloud_inventory_tool() -> Callable[..., ToolResponse]:
 def build_query_cloud_metrics_tool() -> Callable[..., ToolResponse]:
     async def query_cloud_metrics_tool(
         product: str = "ecs",
-        metric: str = "cpu_usage",
+        metric: str = "all",
         region_id: str = "cn-beijing",
         instance_ids: str = "",
         metric_minutes: int = 60,
@@ -70,6 +70,7 @@ def build_query_cloud_metrics_tool() -> Callable[..., ToolResponse]:
         Args:
             product: Product key or alias, currently ecs is implemented.
             metric: Metric key or alias, for example cpu_usage, 内存使用率, 磁盘使用率.
+                Use all/overview/资源占用 when the user asks for all available usage metrics.
             region_id: Alibaba Cloud region ID, for example cn-beijing.
             instance_ids: Required comma-separated ECS instance IDs or JSON array string.
             metric_minutes: Recent time window in minutes.

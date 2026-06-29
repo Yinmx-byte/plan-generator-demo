@@ -308,6 +308,22 @@ input:focus {
   font-weight: 800;
   color: #111827;
 }
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  margin: 14px 0 8px;
+  color: #122033;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+.markdown-body h2:first-child,
+.markdown-body h3:first-child,
+.markdown-body h4:first-child {
+  margin-top: 0;
+}
+.markdown-body h2 { font-size: 16px; }
+.markdown-body h3 { font-size: 15px; }
+.markdown-body h4 { font-size: 14px; }
 .markdown-body code {
   padding: 1px 5px;
   border: 1px solid #d7dee8;

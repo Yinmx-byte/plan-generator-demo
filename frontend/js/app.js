@@ -90,8 +90,7 @@ function splitMarkdownTableRow(line) {
 }
 
 function isMarkdownTableSeparator(line) {
-  const cells = splitMarkdownTableRow(line);
-  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+  return /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$/.test(line.trim());
 }
 
 function renderMarkdownTable(lines) {
@@ -140,7 +139,15 @@ function renderMarkdown(text) {
       continue;
     }
 
-    if (line.includes('|') && lines[i + 1] && isMarkdownTableSeparator(lines[i + 1])) {
+    const heading = trimmed.match(/^(#{2,4})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      const level = Math.min(heading[1].length, 4);
+      html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+      continue;
+    }
+
+    if (splitMarkdownTableRow(line).length > 1 && lines[i + 1] && isMarkdownTableSeparator(lines[i + 1])) {
       flushParagraph();
       const tableLines = [line, lines[i + 1]];
       i += 2;

@@ -20,6 +20,18 @@ products:
     resource_type_prefixes:
       - ACS::ECS::
     inventory_provider: ecs
+    default_metric_set:
+      - cpu_usage
+      - public_network_in
+      - public_network_out
+      - disk_read_bps
+      - disk_write_bps
+      - disk_read_iops
+      - disk_write_iops
+      - disk_bps_usage
+      - disk_iops_usage
+      - memory_usage
+      - disk_usage
     metrics:
       cpu_usage:
         display_name: CPU 使用率
@@ -66,6 +78,74 @@ products:
         default_minutes: 60
         default_period: "300"
         notes: 查询磁盘使用率时通常需要补充设备名或挂载点，例如 /dev/vda1。
+      disk_read_bps:
+        display_name: 磁盘读取 BPS
+        aliases:
+          - 磁盘读取BPS
+          - 磁盘读带宽
+          - 磁盘读取带宽
+        namespace: acs_ecs_dashboard
+        metric_name: DiskReadBPS
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
+      disk_write_bps:
+        display_name: 磁盘写入 BPS
+        aliases:
+          - 磁盘写入BPS
+          - 磁盘写带宽
+          - 磁盘写入带宽
+        namespace: acs_ecs_dashboard
+        metric_name: DiskWriteBPS
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
+      disk_read_iops:
+        display_name: 磁盘读 IOPS
+        aliases:
+          - 磁盘读IOPS
+          - 磁盘读取次数
+        namespace: acs_ecs_dashboard
+        metric_name: DiskReadIOPS
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
+      disk_write_iops:
+        display_name: 磁盘写 IOPS
+        aliases:
+          - 磁盘写IOPS
+          - 磁盘写入次数
+        namespace: acs_ecs_dashboard
+        metric_name: DiskWriteIOPS
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
+      disk_bps_usage:
+        display_name: 磁盘读写 BPS 使用率
+        aliases:
+          - 磁盘读写带宽使用率
+          - 磁盘BPS使用率
+        namespace: acs_ecs_dashboard
+        metric_name: DiskReadWriteBPSUtilization
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
+      disk_iops_usage:
+        display_name: 磁盘读写 IOPS 使用率
+        aliases:
+          - 磁盘读写IOPS使用率
+          - 磁盘IOPS使用率
+        namespace: acs_ecs_dashboard
+        metric_name: DiskReadWriteIOPSUtilization
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
       public_network_in:
         display_name: 公网入方向带宽
         aliases:

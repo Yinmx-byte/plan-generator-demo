@@ -147,6 +147,7 @@ def _compact_metric(data: dict[str, Any]) -> dict[str, Any]:
                 "status": item.get("status"),
                 "missing_dimensions": item.get("missing_dimensions"),
                 "summary": summary,
+                "diagnosis": item.get("diagnosis"),
                 "notes": item.get("notes", ""),
             }
         )

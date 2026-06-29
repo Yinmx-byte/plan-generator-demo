@@ -171,6 +171,21 @@ def _parse_metric_names(metric_names: str | list[str] | None) -> list[str]:
     return [item.strip() for item in metric_names.split(",") if item.strip()]
 
 
+def _is_metric_overview_request(metric: str | None) -> bool:
+    normalized = (metric or "").strip().lower().replace(" ", "").replace("_", "").replace("-", "")
+    return normalized in {
+        "",
+        "all",
+        "overview",
+        "usageoverview",
+        "resourceusage",
+        "资源占用",
+        "全部",
+        "全部指标",
+        "所有指标",
+    }
+
+
 def _metric_value(point: dict[str, Any]) -> float | None:
     for key in ("Average", "Value", "Maximum", "Minimum"):
         value = point.get(key)
@@ -199,6 +214,39 @@ def _summarize_datapoints(datapoints: list[dict[str, Any]]) -> dict[str, Any]:
         "maximum": max(values) if values else None,
         "minimum": min(values) if values else None,
         "recent_points": sorted_points[-5:],
+    }
+
+
+def _build_metric_no_data_diagnosis(
+    *,
+    metric_key: str,
+    metric_config: dict[str, Any],
+    dimensions: dict[str, Any],
+    window_minutes: int,
+) -> dict[str, Any]:
+    display_name = metric_config.get("display_name") or metric_key
+    possible_causes = [
+        f"云监控在最近 {window_minutes} 分钟内未返回 {display_name} 采样点",
+        "实例 ID、地域或账号权限与实际资源不匹配",
+        "该指标在当前实例、镜像或监控命名空间下暂未上报",
+    ]
+    next_steps = [
+        "确认实例地域、实例 ID 和当前后端 AK/SK 所属账号是否一致",
+        "扩大查询时间范围后重试，例如最近 6 小时或 24 小时",
+    ]
+    if metric_key == "memory_usage":
+        possible_causes.append("内存指标通常依赖云监控插件或增强监控采集，插件未运行时可能无数据")
+        next_steps.append("在 ECS 控制台或云监控控制台确认云监控插件/增强监控状态")
+    if metric_key == "disk_usage":
+        possible_causes.append("磁盘指标需要 device 维度，device 值与实例实际设备名不一致时会返回空")
+        next_steps.append("确认实例内实际设备名或挂载点，例如 /dev/vda1、/dev/vdb1")
+    if dimensions.get("device"):
+        next_steps.append(f"当前查询使用 device={dimensions['device']}，可换成实例实际设备名重试")
+    return {
+        "code": "no_datapoints",
+        "message": "CloudMonitor 接口返回成功，但没有返回该指标的采样点，不能据此得出实际使用率。",
+        "possible_causes": possible_causes,
+        "next_steps": next_steps,
     }
 
 
@@ -377,7 +425,9 @@ def describe_configured_instance_metric(
         return {
             "instance_id": instance_id,
             "metric_key": metric_key,
+            "display_name": metric_config.get("display_name", metric_key),
             "metric_name": metric_config.get("metric_name"),
+            "namespace": metric_config.get("namespace", "acs_ecs_dashboard"),
             "status": "need_more",
             "missing_dimensions": missing_dimensions,
             "message": "Metric requires additional dimensions.",
@@ -398,6 +448,19 @@ def describe_configured_instance_metric(
         start_time_ms=start_time_ms,
         end_time_ms=end_time_ms,
     )
+    summary = _summarize_datapoints(datapoints)
+    diagnosis = None
+    status = "ok"
+    message = ""
+    if not summary.get("available"):
+        status = "no_data"
+        diagnosis = _build_metric_no_data_diagnosis(
+            metric_key=metric_key,
+            metric_config=metric_config,
+            dimensions=dimensions,
+            window_minutes=effective_minutes,
+        )
+        message = diagnosis["message"]
     return {
         "instance_id": instance_id,
         "metric_key": metric_key,
@@ -408,8 +471,10 @@ def describe_configured_instance_metric(
         "period": effective_period,
         "window_minutes": effective_minutes,
         "notes": metric_config.get("notes", ""),
-        "status": "ok",
-        "summary": _summarize_datapoints(datapoints),
+        "status": status,
+        "message": message,
+        "summary": summary,
+        "diagnosis": diagnosis,
     }
 
 
@@ -505,7 +570,7 @@ def query_cloud_inventory(
 def query_cloud_metrics(
     *,
     product: str = "ecs",
-    metric: str = "cpu_usage",
+    metric: str = "all",
     region_id: str | None = None,
     instance_ids: str | list[str] | None = None,
     metric_minutes: int | None = None,
@@ -522,20 +587,42 @@ def query_cloud_metrics(
     if not parsed_instance_ids:
         raise ValueError("instance_ids is required for ECS metric queries")
 
-    metric_key, metric_config = resolve_metric(product_key, metric)
+    if _is_metric_overview_request(metric):
+        metric_keys = list(product_config.get("default_metric_set") or ["cpu_usage"])
+        metric_config = {
+            "display_name": "资源占用概览",
+            "metric_name": "overview",
+            "namespace": "acs_ecs_dashboard",
+        }
+    else:
+        metric_key, metric_config = resolve_metric(product_key, metric)
+        metric_keys = [metric_key]
+
     results = []
-    for instance_id in parsed_instance_ids:
-        results.append(
-            describe_configured_instance_metric(
-                region_id=effective_region_id,
-                instance_id=instance_id,
-                product=product_key,
-                metric=metric_key,
-                metric_minutes=metric_minutes,
-                period=metric_period,
-                extra_dimensions=extra_dimensions,
-            )
+    resolved_metrics = []
+    for metric_key in metric_keys:
+        _resolved_key, current_metric_config = resolve_metric(product_key, metric_key)
+        resolved_metrics.append(
+            {
+                "key": _resolved_key,
+                "display_name": current_metric_config.get("display_name"),
+                "metric_name": current_metric_config.get("metric_name"),
+                "namespace": current_metric_config.get("namespace"),
+                "notes": current_metric_config.get("notes", ""),
+            }
         )
+        for instance_id in parsed_instance_ids:
+            results.append(
+                describe_configured_instance_metric(
+                    region_id=effective_region_id,
+                    instance_id=instance_id,
+                    product=product_key,
+                    metric=_resolved_key,
+                    metric_minutes=metric_minutes,
+                    period=metric_period,
+                    extra_dimensions=extra_dimensions,
+                )
+            )
     return {
         "query_type": "metric",
         "region_id": effective_region_id,
@@ -545,16 +632,17 @@ def query_cloud_metrics(
             "name": product_config.get("product_name"),
         },
         "metric": {
-            "key": metric_key,
+            "key": "overview" if len(metric_keys) > 1 else resolved_metrics[0]["key"],
             "display_name": metric_config.get("display_name"),
             "metric_name": metric_config.get("metric_name"),
             "namespace": metric_config.get("namespace"),
             "notes": metric_config.get("notes", ""),
+            "resolved_metrics": resolved_metrics,
         },
         "filters": {
             "instance_ids": parsed_instance_ids,
-            "metric_minutes": metric_minutes or metric_config.get("default_minutes") or defaults.get("metric_minutes"),
-            "metric_period": str(metric_period or metric_config.get("default_period") or defaults.get("metric_period")),
+            "metric_minutes": metric_minutes or defaults.get("metric_minutes"),
+            "metric_period": str(metric_period or defaults.get("metric_period")),
             "extra_dimensions": extra_dimensions or {},
         },
         "metrics": results,
