@@ -25,7 +25,7 @@ description: 云平台检修 Master ReActAgent 的自主规划协议。用于实
 - `planning`：抽取需求字段、检查缺失字段、生成追问。
 - `generation`：准备方案生成上下文、生成 DOCX。
 - `document`：查看当前会话已生成文档的信息和文本预览。
-- `cloud_query`：只读查询阿里云 ECS/VPC 资源信息和使用情况，例如地域、VPC、交换机、可用 IP、ECS 实例状态、实例网络归属、CPU 使用率等云监控指标。仅用于问数、生成前核对资源现状或验证前检查，不得执行任何云资源变更。
+- `cloud_query`：只读查询阿里云资源清单、云监控指标和资源中心产品统计。例如地域、VPC、交换机、可用 IP、ECS 实例状态、实例网络归属、CPU/内存/磁盘等使用率，以及当前可访问资源组内有哪些产品。仅用于问数、生成前资源核对或验证前检查，不得执行任何云资源变更。
 
 所有工具都按“平台插件/API 工具”的粒度设计。未来迁移到百炼、千帆或 Coze 时，应优先把这些工具作为外部插件暴露，而不是把 AK/SK、文件系统或后端状态直接放进平台 Prompt。
 
@@ -43,9 +43,12 @@ description: 云平台检修 Master ReActAgent 的自主规划协议。用于实
 ### 云资源问数/查询
 
 1. 如果用户询问 ECS、VPC、VSwitch、实例网络归属、地域、云资源现状、实例使用率、CPU 利用率或资源容量，先判断是否是只读查询。
-2. 只读查询时调用 `reset_equipped_tools` 激活 `cloud_query`，再使用 `query_ecs_vpc_info`。
-3. 若用户缺少地域，默认使用 `cn-beijing`，但回复中说明默认值；若缺少 VPC ID、VPC 名称或实例 ID，可先按地域查询概览，也可根据用户目标追问。若用户询问使用率，默认查询最近 60 分钟的 ECS 云监控指标。
-4. 查询结果只用于回答资源现状、辅助检修方案生成或验证；不得承诺执行创建、删除、修改安全组、变更路由等生产操作。
+2. 只读查询时调用 `reset_equipped_tools` 激活 `cloud_query`。
+3. 查询 ECS/VPC/VSwitch/实例清单、实例状态、VSwitch 可用 IP、实例网络归属时，优先使用 `query_cloud_inventory`。旧工具 `query_ecs_vpc_info` 仅作为兼容入口。
+4. 查询 CPU 使用率、内存使用率、磁盘使用率、公网入/出带宽等监控指标时，使用 `query_cloud_metrics`。该工具使用配置文件中的 `metric` key 或中文别名映射到底层云监控指标；不要自行编造 CloudMonitor `metric_name`。若用户缺少时间范围，默认最近 60 分钟；若用户查询磁盘使用率但缺少设备名或挂载点，先追问 `device`，不要乱填。
+5. 用户询问“当前资源组有哪些产品”“我名下有多少产品”“当前账号可访问资源包含哪些云产品”时，使用 `query_resource_group_products`。若用户未提供资源组 ID，可先查询当前账号可访问的全部资源，并说明口径是 Resource Center 可见资源。
+6. 若用户缺少地域，ECS/VPC/监控类查询默认使用 `cn-beijing`，但回复中说明默认值；Resource Center 产品统计默认使用 `cn-hangzhou` 作为 OpenAPI 地域。
+7. 查询结果只用于回答资源现状、辅助检修方案生成或验证；不得承诺执行创建、删除、修改安全组、变更路由等生产操作。
 
 ### 新建检修方案
 

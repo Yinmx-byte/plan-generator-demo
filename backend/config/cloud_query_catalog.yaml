@@ -1,0 +1,139 @@
+defaults:
+  region_id: cn-beijing
+  metric_minutes: 60
+  metric_period: "300"
+  inventory_page_size: 50
+  resource_center_region_id: cn-hangzhou
+  resource_center_max_results: 100
+  resource_center_max_pages: 20
+
+products:
+  ecs:
+    product_code: ECS
+    product_name: 云服务器 ECS
+    aliases:
+      - ecs
+      - ECS
+      - 云服务器
+      - 云主机
+      - 实例
+    resource_type_prefixes:
+      - ACS::ECS::
+    inventory_provider: ecs
+    metrics:
+      cpu_usage:
+        display_name: CPU 使用率
+        aliases:
+          - CPU使用率
+          - CPU利用率
+          - cpu
+          - 处理器使用率
+        namespace: acs_ecs_dashboard
+        metric_name: CPUUtilization
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
+      memory_usage:
+        display_name: 内存使用率
+        aliases:
+          - 内存使用率
+          - 内存利用率
+          - memory
+          - RAM使用率
+        namespace: acs_ecs_dashboard
+        metric_name: memory_usedutilization
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
+        notes: 依赖 ECS 云监控插件或增强监控采集，部分实例可能无数据。
+      disk_usage:
+        display_name: 磁盘使用率
+        aliases:
+          - 磁盘使用率
+          - 磁盘利用率
+          - 系统盘使用率
+          - 数据盘使用率
+          - disk
+        namespace: acs_ecs_dashboard
+        metric_name: diskusage_utilization
+        dimensions:
+          - instanceId
+          - device
+        required_user_dimensions:
+          - device
+        default_minutes: 60
+        default_period: "300"
+        notes: 查询磁盘使用率时通常需要补充设备名或挂载点，例如 /dev/vda1。
+      public_network_in:
+        display_name: 公网入方向带宽
+        aliases:
+          - 公网入带宽
+          - 公网流入
+          - 网络入方向
+        namespace: acs_ecs_dashboard
+        metric_name: InternetInRate
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
+      public_network_out:
+        display_name: 公网出方向带宽
+        aliases:
+          - 公网出带宽
+          - 公网流出
+          - 网络出方向
+        namespace: acs_ecs_dashboard
+        metric_name: InternetOutRate
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
+
+  vpc:
+    product_code: VPC
+    product_name: 专有网络 VPC
+    aliases:
+      - vpc
+      - VPC
+      - 专有网络
+      - 交换机
+      - VSwitch
+    resource_type_prefixes:
+      - ACS::VPC::
+    inventory_provider: vpc
+
+  slb:
+    product_code: SLB
+    product_name: 负载均衡 SLB
+    aliases:
+      - slb
+      - SLB
+      - 负载均衡
+      - 监听
+    resource_type_prefixes:
+      - ACS::SLB::
+      - ACS::ALB::
+      - ACS::NLB::
+
+  oss:
+    product_code: OSS
+    product_name: 对象存储 OSS
+    aliases:
+      - oss
+      - OSS
+      - 对象存储
+      - Bucket
+    resource_type_prefixes:
+      - ACS::OSS::
+
+  rds:
+    product_code: RDS
+    product_name: 云数据库 RDS
+    aliases:
+      - rds
+      - RDS
+      - 云数据库
+    resource_type_prefixes:
+      - ACS::RDS::

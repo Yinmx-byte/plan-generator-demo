@@ -10,3 +10,4 @@ alibabacloud-bailian20231229==2.12.0
 alibabacloud-ecs20140526>=7.0.0
 alibabacloud-vpc20160428>=6.0.0
 alibabacloud-cms20190101>=4.0.0
+alibabacloud-resourcecenter20221201>=1.6.1

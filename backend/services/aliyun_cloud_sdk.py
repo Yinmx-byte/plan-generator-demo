@@ -7,6 +7,14 @@ import os
 import time
 from typing import Any
 
+from services.cloud_query_catalog import (
+    get_catalog_defaults,
+    product_code_from_resource_type,
+    product_name_for_code,
+    resolve_metric,
+    resolve_product,
+)
+
 
 class AliyunCloudSDKError(RuntimeError):
     """Raised when an Alibaba Cloud SDK call fails."""
@@ -56,6 +64,10 @@ def _cms_endpoint(region_id: str) -> str:
     return os.getenv("ALIYUN_CMS_ENDPOINT") or f"metrics.{region_id}.aliyuncs.com"
 
 
+def _resource_center_endpoint() -> str:
+    return os.getenv("ALIYUN_RESOURCE_CENTER_ENDPOINT") or "resourcecenter.aliyuncs.com"
+
+
 def _ecs_client(region_id: str):
     try:
         from alibabacloud_ecs20140526.client import Client
@@ -84,6 +96,16 @@ def _cms_client(region_id: str):
             "缺少 alibabacloud-cms20190101，请在 backend 环境执行 pip install -r requirements.txt"
         ) from exc
     return Client(_build_config(_cms_endpoint(region_id), region_id))
+
+
+def _resource_center_client(region_id: str):
+    try:
+        from alibabacloud_resourcecenter20221201.client import Client
+    except ModuleNotFoundError as exc:
+        raise AliyunCloudSDKError(
+            "缺少 alibabacloud-resourcecenter20221201，请在 backend 环境执行 pip install -r requirements.txt"
+        ) from exc
+    return Client(_build_config(_resource_center_endpoint(), region_id))
 
 
 def _body_to_dict(response: Any) -> dict[str, Any]:
@@ -335,6 +357,62 @@ def describe_instance_usage_metrics(
     }
 
 
+def describe_configured_instance_metric(
+    *,
+    region_id: str,
+    instance_id: str,
+    product: str = "ecs",
+    metric: str = "cpu_usage",
+    metric_minutes: int | None = None,
+    period: str | None = None,
+    extra_dimensions: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metric_key, metric_config = resolve_metric(product, metric)
+    dimensions = {"instanceId": instance_id}
+    dimensions.update(extra_dimensions or {})
+    missing_dimensions = [
+        item for item in (metric_config.get("required_user_dimensions") or []) if not dimensions.get(item)
+    ]
+    if missing_dimensions:
+        return {
+            "instance_id": instance_id,
+            "metric_key": metric_key,
+            "metric_name": metric_config.get("metric_name"),
+            "status": "need_more",
+            "missing_dimensions": missing_dimensions,
+            "message": "Metric requires additional dimensions.",
+            "notes": metric_config.get("notes", ""),
+        }
+
+    defaults = get_catalog_defaults()
+    effective_minutes = int(metric_minutes or metric_config.get("default_minutes") or defaults.get("metric_minutes", 60))
+    effective_period = str(period or metric_config.get("default_period") or defaults.get("metric_period", "300"))
+    end_time_ms = int(time.time() * 1000)
+    start_time_ms = end_time_ms - max(effective_minutes, 1) * 60 * 1000
+    datapoints = describe_metric_list(
+        region_id=region_id,
+        metric_name=str(metric_config["metric_name"]),
+        dimensions=dimensions,
+        namespace=str(metric_config.get("namespace", "acs_ecs_dashboard")),
+        period=effective_period,
+        start_time_ms=start_time_ms,
+        end_time_ms=end_time_ms,
+    )
+    return {
+        "instance_id": instance_id,
+        "metric_key": metric_key,
+        "display_name": metric_config.get("display_name", metric_key),
+        "metric_name": metric_config.get("metric_name"),
+        "namespace": metric_config.get("namespace", "acs_ecs_dashboard"),
+        "dimensions": dimensions,
+        "period": effective_period,
+        "window_minutes": effective_minutes,
+        "notes": metric_config.get("notes", ""),
+        "status": "ok",
+        "summary": _summarize_datapoints(datapoints),
+    }
+
+
 def build_usage_summary(
     *,
     vpcs: list[dict[str, Any]],
@@ -385,6 +463,205 @@ def build_usage_summary(
             "total_available_ip_address_count": total_available_ip,
             "vswitch_usage": vswitch_usage,
         },
+    }
+
+
+def query_cloud_inventory(
+    *,
+    product: str = "ecs",
+    region_id: str | None = None,
+    vpc_id: str = "",
+    vpc_name: str = "",
+    instance_ids: str | list[str] | None = None,
+    include_instances: bool = True,
+    include_vswitches: bool = True,
+) -> dict[str, Any]:
+    """Query product inventory. Currently ECS/VPC inventory is backed by ECS and VPC SDKs."""
+    defaults = get_catalog_defaults()
+    product_key, product_config = resolve_product(product)
+    effective_region_id = region_id or defaults.get("region_id", "cn-beijing")
+    if product_key not in {"ecs", "vpc"}:
+        raise AliyunCloudSDKError(
+            f"{product_config.get('product_name', product_key)} inventory is not implemented yet"
+        )
+    data = query_ecs_vpc_info(
+        region_id=effective_region_id,
+        vpc_id=vpc_id,
+        vpc_name=vpc_name,
+        instance_ids=instance_ids,
+        include_instances=include_instances,
+        include_vswitches=include_vswitches,
+        include_usage_metrics=False,
+    )
+    data["query_type"] = "inventory"
+    data["product"] = {
+        "key": product_key,
+        "code": product_config.get("product_code"),
+        "name": product_config.get("product_name"),
+    }
+    return data
+
+
+def query_cloud_metrics(
+    *,
+    product: str = "ecs",
+    metric: str = "cpu_usage",
+    region_id: str | None = None,
+    instance_ids: str | list[str] | None = None,
+    metric_minutes: int | None = None,
+    metric_period: str | None = None,
+    extra_dimensions: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Query metrics by stable product and metric keys resolved from the catalog."""
+    defaults = get_catalog_defaults()
+    product_key, product_config = resolve_product(product)
+    if product_key != "ecs":
+        raise AliyunCloudSDKError("Only ECS metrics are implemented in the current SDK adapter")
+    effective_region_id = region_id or defaults.get("region_id", "cn-beijing")
+    parsed_instance_ids = _parse_instance_ids(instance_ids)
+    if not parsed_instance_ids:
+        raise ValueError("instance_ids is required for ECS metric queries")
+
+    metric_key, metric_config = resolve_metric(product_key, metric)
+    results = []
+    for instance_id in parsed_instance_ids:
+        results.append(
+            describe_configured_instance_metric(
+                region_id=effective_region_id,
+                instance_id=instance_id,
+                product=product_key,
+                metric=metric_key,
+                metric_minutes=metric_minutes,
+                period=metric_period,
+                extra_dimensions=extra_dimensions,
+            )
+        )
+    return {
+        "query_type": "metric",
+        "region_id": effective_region_id,
+        "product": {
+            "key": product_key,
+            "code": product_config.get("product_code"),
+            "name": product_config.get("product_name"),
+        },
+        "metric": {
+            "key": metric_key,
+            "display_name": metric_config.get("display_name"),
+            "metric_name": metric_config.get("metric_name"),
+            "namespace": metric_config.get("namespace"),
+            "notes": metric_config.get("notes", ""),
+        },
+        "filters": {
+            "instance_ids": parsed_instance_ids,
+            "metric_minutes": metric_minutes or metric_config.get("default_minutes") or defaults.get("metric_minutes"),
+            "metric_period": str(metric_period or metric_config.get("default_period") or defaults.get("metric_period")),
+            "extra_dimensions": extra_dimensions or {},
+        },
+        "metrics": results,
+    }
+
+
+def search_resource_center_resources(
+    *,
+    resource_group_id: str = "",
+    region_id: str | None = None,
+    max_results: int | None = None,
+    max_pages: int | None = None,
+) -> list[dict[str, Any]]:
+    """Search Resource Center resources accessible to the current account."""
+    from alibabacloud_resourcecenter20221201 import models as rc_models
+
+    defaults = get_catalog_defaults()
+    effective_region_id = (
+        region_id
+        or os.getenv("ALIYUN_RESOURCE_CENTER_REGION_ID")
+        or defaults.get("resource_center_region_id", "cn-hangzhou")
+    )
+    page_size = int(max_results or defaults.get("resource_center_max_results", 100))
+    page_limit = int(max_pages or defaults.get("resource_center_max_pages", 20))
+    client = _resource_center_client(effective_region_id)
+    resources: list[dict[str, Any]] = []
+    next_token = ""
+    for _page in range(max(page_limit, 1)):
+        request = rc_models.SearchResourcesRequest(
+            max_results=page_size,
+            next_token=next_token or None,
+            resource_group_id=resource_group_id or None,
+            include_deleted_resources=False,
+        )
+        payload = _call_client(
+            client,
+            ("search_resources", "search_resources_with_options"),
+            request,
+        )
+        resources.extend(_as_list(payload.get("Resources"), "Resource"))
+        next_token = payload.get("NextToken") or payload.get("next_token") or ""
+        if not next_token:
+            break
+    return resources
+
+
+def query_resource_group_products(
+    *,
+    resource_group_id: str = "",
+    region_id: str | None = None,
+    max_results: int | None = None,
+    max_pages: int | None = None,
+) -> dict[str, Any]:
+    """Count product categories in accessible Resource Center resources."""
+    defaults = get_catalog_defaults()
+    effective_region_id = (
+        region_id
+        or os.getenv("ALIYUN_RESOURCE_CENTER_REGION_ID")
+        or defaults.get("resource_center_region_id", "cn-hangzhou")
+    )
+    resources = search_resource_center_resources(
+        resource_group_id=resource_group_id,
+        region_id=effective_region_id,
+        max_results=max_results,
+        max_pages=max_pages,
+    )
+    product_counts: dict[str, dict[str, Any]] = {}
+    resource_group_counts: dict[str, int] = {}
+    for resource in resources:
+        resource_type = str(resource.get("ResourceType") or "")
+        product_code = product_code_from_resource_type(resource_type)
+        item = product_counts.setdefault(
+            product_code,
+            {
+                "product_code": product_code,
+                "product_name": product_name_for_code(product_code),
+                "resource_count": 0,
+                "resource_types": {},
+            },
+        )
+        item["resource_count"] += 1
+        item["resource_types"][resource_type] = item["resource_types"].get(resource_type, 0) + 1
+        current_resource_group_id = str(resource.get("ResourceGroupId") or "")
+        if current_resource_group_id:
+            resource_group_counts[current_resource_group_id] = resource_group_counts.get(current_resource_group_id, 0) + 1
+
+    products = sorted(
+        product_counts.values(),
+        key=lambda item: (-int(item["resource_count"]), str(item["product_code"])),
+    )
+    return {
+        "query_type": "resource_group_products",
+        "region_id": effective_region_id,
+        "resource_group_id": resource_group_id,
+        "product_count": len(products),
+        "total_resource_count": len(resources),
+        "products": products,
+        "resource_group_counts": resource_group_counts,
+        "sample_resources": resources[:10],
+        "limits": {
+            "max_results": int(max_results or defaults.get("resource_center_max_results", 100)),
+            "max_pages": int(max_pages or defaults.get("resource_center_max_pages", 20)),
+        },
+        "sdk": {
+            "resourcecenter": "alibabacloud-resourcecenter20221201",
+        },
+        "notes": "Resource Center returns resources that are visible to the current account and supported by Resource Center.",
     }
 
 

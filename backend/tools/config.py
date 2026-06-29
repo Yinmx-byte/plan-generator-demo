@@ -31,11 +31,11 @@ MASTER_TOOL_GROUPS: dict[str, dict[str, Any]] = {
         "notes": "Use after a document has been generated or when the user asks about the generated file.",
     },
     "cloud_query": {
-        "description": "Read-only Alibaba Cloud ECS/VPC resource queries.",
+        "description": "Read-only Alibaba Cloud inventory, metric, and resource-product queries.",
         "active": False,
         "notes": (
-            "Use only for read-only cloud resource lookup such as ECS VPC, VSwitch "
-            "or instance topology. Never perform cloud mutations."
+            "Use only for read-only cloud inventory, usage metrics, and Resource Center "
+            "product counts. Never perform cloud mutations."
         ),
     },
 }
