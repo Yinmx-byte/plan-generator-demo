@@ -223,6 +223,8 @@ def _build_metric_no_data_diagnosis(
     metric_config: dict[str, Any],
     dimensions: dict[str, Any],
     window_minutes: int,
+    attempted_metric_names: list[str] | None = None,
+    attempted_dimensions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     display_name = metric_config.get("display_name") or metric_key
     possible_causes = [
@@ -242,6 +244,12 @@ def _build_metric_no_data_diagnosis(
         next_steps.append("确认实例内实际设备名或挂载点，例如 /dev/vda1、/dev/vdb1")
     if dimensions.get("device"):
         next_steps.append(f"当前查询使用 device={dimensions['device']}，可换成实例实际设备名重试")
+    if attempted_metric_names:
+        next_steps.append(f"本次已尝试指标：{', '.join(attempted_metric_names)}")
+    if attempted_dimensions:
+        devices = [str(item.get("device")) for item in attempted_dimensions if item.get("device")]
+        if devices:
+            next_steps.append(f"本次已尝试设备维度：{', '.join(dict.fromkeys(devices))}")
     return {
         "code": "no_datapoints",
         "message": "CloudMonitor 接口返回成功，但没有返回该指标的采样点，不能据此得出实际使用率。",
@@ -340,6 +348,42 @@ def describe_instances(
     return _as_list(payload.get("Instances"), "Instance")
 
 
+def describe_disks(
+    *,
+    region_id: str,
+    instance_id: str = "",
+    page_size: int = 50,
+) -> list[dict[str, Any]]:
+    from alibabacloud_ecs20140526 import models as ecs_models
+
+    request = ecs_models.DescribeDisksRequest(
+        region_id=region_id,
+        instance_id=instance_id or None,
+        page_number=1,
+        page_size=page_size,
+    )
+    payload = _call_client(
+        _ecs_client(region_id),
+        ("describe_disks", "describe_disks_with_options"),
+        request,
+    )
+    return _as_list(payload.get("Disks"), "Disk")
+
+
+def _disk_device_candidates(disks: list[dict[str, Any]]) -> list[str]:
+    candidates: list[str] = []
+    for disk in disks:
+        attachments = _as_list((disk.get("Attachments") or {}), "Attachment")
+        for device in [disk.get("Device"), *[item.get("Device") for item in attachments]]:
+            if not device:
+                continue
+            value = str(device)
+            candidates.append(value)
+            if value.startswith("/dev/") and not value[-1:].isdigit():
+                candidates.append(f"{value}1")
+    return list(dict.fromkeys(candidates))
+
+
 def describe_metric_list(
     *,
     region_id: str,
@@ -421,6 +465,14 @@ def describe_configured_instance_metric(
     missing_dimensions = [
         item for item in (metric_config.get("required_user_dimensions") or []) if not dimensions.get(item)
     ]
+    auto_dimensions: list[dict[str, Any]] = []
+    if missing_dimensions == ["device"] and metric_key == "disk_usage":
+        for device in _disk_device_candidates(describe_disks(region_id=region_id, instance_id=instance_id)):
+            candidate = dict(dimensions)
+            candidate["device"] = device
+            auto_dimensions.append(candidate)
+        if auto_dimensions:
+            missing_dimensions = []
     if missing_dimensions:
         return {
             "instance_id": instance_id,
@@ -439,16 +491,38 @@ def describe_configured_instance_metric(
     effective_period = str(period or metric_config.get("default_period") or defaults.get("metric_period", "300"))
     end_time_ms = int(time.time() * 1000)
     start_time_ms = end_time_ms - max(effective_minutes, 1) * 60 * 1000
-    datapoints = describe_metric_list(
-        region_id=region_id,
-        metric_name=str(metric_config["metric_name"]),
-        dimensions=dimensions,
-        namespace=str(metric_config.get("namespace", "acs_ecs_dashboard")),
-        period=effective_period,
-        start_time_ms=start_time_ms,
-        end_time_ms=end_time_ms,
-    )
-    summary = _summarize_datapoints(datapoints)
+    metric_names = [
+        str(metric_config["metric_name"]),
+        *[str(item) for item in metric_config.get("fallback_metric_names", [])],
+    ]
+    metric_names = list(dict.fromkeys(metric_names))
+    dimension_candidates = auto_dimensions or [dimensions]
+    attempts = []
+    selected_attempt: dict[str, Any] | None = None
+    for metric_name in metric_names:
+        for candidate_dimensions in dimension_candidates:
+            datapoints = describe_metric_list(
+                region_id=region_id,
+                metric_name=metric_name,
+                dimensions=candidate_dimensions,
+                namespace=str(metric_config.get("namespace", "acs_ecs_dashboard")),
+                period=effective_period,
+                start_time_ms=start_time_ms,
+                end_time_ms=end_time_ms,
+            )
+            summary = _summarize_datapoints(datapoints)
+            attempt = {
+                "metric_name": metric_name,
+                "dimensions": candidate_dimensions,
+                "summary": summary,
+            }
+            attempts.append(attempt)
+            if summary.get("available") and selected_attempt is None:
+                selected_attempt = attempt
+    selected_attempt = selected_attempt or (attempts[0] if attempts else None)
+    summary = dict((selected_attempt or {}).get("summary") or _summarize_datapoints([]))
+    selected_dimensions = dict((selected_attempt or {}).get("dimensions") or dimensions)
+    selected_metric_name = str((selected_attempt or {}).get("metric_name") or metric_config["metric_name"])
     diagnosis = None
     status = "ok"
     message = ""
@@ -457,17 +531,29 @@ def describe_configured_instance_metric(
         diagnosis = _build_metric_no_data_diagnosis(
             metric_key=metric_key,
             metric_config=metric_config,
-            dimensions=dimensions,
+            dimensions=selected_dimensions,
             window_minutes=effective_minutes,
+            attempted_metric_names=metric_names,
+            attempted_dimensions=[dict(item["dimensions"]) for item in attempts],
         )
         message = diagnosis["message"]
     return {
         "instance_id": instance_id,
         "metric_key": metric_key,
         "display_name": metric_config.get("display_name", metric_key),
-        "metric_name": metric_config.get("metric_name"),
+        "metric_name": selected_metric_name,
+        "configured_metric_name": metric_config.get("metric_name"),
         "namespace": metric_config.get("namespace", "acs_ecs_dashboard"),
-        "dimensions": dimensions,
+        "dimensions": selected_dimensions,
+        "attempts": [
+            {
+                "metric_name": item["metric_name"],
+                "dimensions": item["dimensions"],
+                "available": item["summary"].get("available"),
+                "count": item["summary"].get("count"),
+            }
+            for item in attempts
+        ],
         "period": effective_period,
         "window_minutes": effective_minutes,
         "notes": metric_config.get("notes", ""),

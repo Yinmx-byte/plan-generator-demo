@@ -82,7 +82,7 @@ async def get_cloud_inventory(
 @router.get("/api/cloud/metrics")
 async def get_cloud_metrics(
     product: str = Query(default="ecs", description="Product key or alias"),
-    metric: str = Query(default="cpu_usage", description="Metric key or alias"),
+    metric: str = Query(default="all", description="Metric key or alias"),
     region_id: str = Query(default="cn-beijing", description="Alibaba Cloud region ID"),
     instance_ids: str = Query(default="", description="Comma-separated ECS instance IDs"),
     metric_minutes: int = Query(default=60, ge=1, le=1440),
