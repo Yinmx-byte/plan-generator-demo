@@ -64,8 +64,11 @@ def format_agent_trace(
             output = get_response_text(block.get("output", ""))
             traces.append(f"工具返回：{block.get('name', 'unknown')}\n{output[:800]}")
         elif block_type == "thinking":
-            traces.append(f"模型思考：{str(block.get('thinking', ''))[:800]}")
+            if os.getenv("SHOW_AGENT_THINKING_TRACE", "").strip().lower() in {"1", "true", "yes", "on"}:
+                traces.append(f"模型思考：{str(block.get('thinking', ''))[:800]}")
         elif block_type == "text":
+            if os.getenv("SHOW_AGENT_TEXT_TRACE", "").strip().lower() not in {"1", "true", "yes", "on"}:
+                continue
             text = str(block.get("text", "")).strip()
             if text:
                 label = "模型输出完成" if last else "模型输出中"

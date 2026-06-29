@@ -16,7 +16,6 @@ from .context import (
 from .cloud_query import (
     build_query_cloud_inventory_tool,
     build_query_cloud_metrics_tool,
-    build_query_ecs_vpc_info_tool,
     build_query_resource_group_products_tool,
 )
 from .document import build_get_generated_document_info_tool
@@ -89,11 +88,6 @@ def _build_tool_specs(session: dict[str, Any], runtime: Any) -> list[MasterToolS
             func=build_get_generated_document_info_tool(session),
             group_name="document",
             func_name="get_generated_document_info",
-        ),
-        MasterToolSpec(
-            func=build_query_ecs_vpc_info_tool(),
-            group_name="cloud_query",
-            func_name="query_ecs_vpc_info",
         ),
         MasterToolSpec(
             func=build_query_cloud_inventory_tool(),
