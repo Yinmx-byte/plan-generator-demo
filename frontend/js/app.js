@@ -139,6 +139,12 @@ function renderMarkdown(text) {
       continue;
     }
 
+    if (/^-{3,}$/.test(trimmed)) {
+      flushParagraph();
+      html.push('<hr>');
+      continue;
+    }
+
     const heading = trimmed.match(/^(#{2,4})\s+(.+)$/);
     if (heading) {
       flushParagraph();
@@ -186,13 +192,100 @@ function renderMarkdown(text) {
   return html.join('');
 }
 
+function getMessageContentEl(el) {
+  return el?.querySelector?.(':scope > .msg-content') || el;
+}
+
 function setMessageContent(el, text) {
   if (!el) return;
+  el.dataset.rawText = text || '';
+  const contentEl = getMessageContentEl(el);
   if (el.classList.contains('markdown-body')) {
-    el.innerHTML = renderMarkdown(text);
+    contentEl.innerHTML = renderMarkdown(text);
   } else {
-    el.textContent = text;
+    contentEl.textContent = text;
   }
+}
+
+function deriveMessageText(div) {
+  if (div.dataset.rawText) return div.dataset.rawText;
+  const clone = div.cloneNode(true);
+  clone.querySelectorAll('.copy-message-btn, .document-message-actions').forEach((node) => node.remove());
+  return clone.innerText.trim();
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
+}
+
+function addCopyButton(div) {
+  if (!div || div.querySelector(':scope > .copy-message-btn')) return;
+  if (!div.classList.contains('assistant') && !div.classList.contains('user')) return;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'copy-message-btn';
+  button.title = div.classList.contains('user') ? '复制问题' : '复制回答';
+  button.setAttribute('aria-label', button.title);
+  button.textContent = '复制';
+  button.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const originalText = button.textContent;
+    try {
+      await copyTextToClipboard(deriveMessageText(div));
+      button.textContent = '已复制';
+      button.classList.add('copied');
+      setTimeout(() => {
+        button.textContent = originalText;
+        button.classList.remove('copied');
+      }, 1100);
+    } catch (_err) {
+      button.textContent = '失败';
+      setTimeout(() => {
+        button.textContent = originalText;
+      }, 1100);
+    }
+  });
+  div.appendChild(button);
+}
+
+function ensureMessageContentShell(div, rawText = null) {
+  if (!div || div.querySelector(':scope > .msg-content')) return;
+  const content = document.createElement('div');
+  content.className = 'msg-content';
+  const movable = [...div.childNodes].filter((node) => {
+    if (node.nodeType !== Node.ELEMENT_NODE) return true;
+    return !node.classList.contains('copy-message-btn') && !node.classList.contains('document-message-actions');
+  });
+  movable.forEach((node) => content.appendChild(node));
+  div.insertBefore(content, div.firstChild);
+  if (rawText !== null) div.dataset.rawText = rawText;
+}
+
+function upgradeStoredMessages(container = messagesEl) {
+  container?.querySelectorAll('.msg.user, .msg.assistant').forEach((div) => {
+    const rawText = deriveMessageText(div);
+    ensureMessageContentShell(div, rawText);
+    if (div.classList.contains('assistant')) {
+      div.classList.add('markdown-body');
+      setMessageContent(div, rawText);
+    } else {
+      setMessageContent(div, rawText);
+    }
+    addCopyButton(div);
+  });
+  if (container === messagesEl) persistPlanState();
 }
 
 function addMessage(container, role, text, extraHtml = '') {
@@ -200,12 +293,16 @@ function addMessage(container, role, text, extraHtml = '') {
   const div = document.createElement('div');
   div.className = 'msg ' + role;
   if (shouldRenderMarkdown(role)) div.classList.add('markdown-body');
+  const content = document.createElement('div');
+  content.className = 'msg-content';
+  div.appendChild(content);
   setMessageContent(div, text);
   if (extraHtml) {
     const wrap = document.createElement('div');
     wrap.innerHTML = extraHtml;
     div.appendChild(wrap);
   }
+  addCopyButton(div);
   container.appendChild(div);
   scrollToBottom(container);
   if (container === messagesEl) persistPlanState();
@@ -882,6 +979,7 @@ function initPlanPage() {
   const saveDocumentBtn = document.getElementById('saveDocumentBtn');
   if (planSessionState.messagesHtml) {
     messagesEl.innerHTML = planSessionState.messagesHtml;
+    upgradeStoredMessages(messagesEl);
     bindStoredDocumentActions();
     scrollToBottom(messagesEl);
   } else {

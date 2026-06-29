@@ -281,6 +281,7 @@ input:focus {
   background-size: auto, 26px 26px;
 }
 .msg {
+  position: relative;
   max-width: min(780px, 84%);
   margin-bottom: 14px;
   padding: 12px 14px;
@@ -289,6 +290,13 @@ input:focus {
   line-height: 1.6;
   font-size: 14px;
   box-shadow: 0 5px 18px rgba(20, 31, 45, 0.06);
+}
+.msg.user,
+.msg.assistant {
+  padding-right: 62px;
+}
+.msg-content {
+  min-width: 0;
 }
 .msg.assistant { background: #fff; border: 1px solid var(--line); }
 .msg.markdown-body {
@@ -324,6 +332,12 @@ input:focus {
 .markdown-body h2 { font-size: 16px; }
 .markdown-body h3 { font-size: 15px; }
 .markdown-body h4 { font-size: 14px; }
+.markdown-body hr {
+  height: 1px;
+  margin: 14px 0;
+  border: 0;
+  background: var(--line);
+}
 .markdown-body code {
   padding: 1px 5px;
   border: 1px solid #d7dee8;
@@ -393,6 +407,37 @@ input:focus {
   margin-left: auto;
   background: #eaf2f8;
   border: 1px solid #c9dcea;
+}
+.copy-message-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  min-height: 26px;
+  padding: 4px 8px;
+  border-color: #c8d5e2;
+  background: rgba(255, 255, 255, 0.88);
+  color: #2b4058;
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0;
+  transform: translateY(-2px);
+  box-shadow: none;
+}
+.msg:hover .copy-message-btn,
+.copy-message-btn:focus-visible,
+.copy-message-btn.copied {
+  opacity: 1;
+  transform: translateY(0);
+}
+.copy-message-btn:hover {
+  border-color: #9fb7ce;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(20, 31, 45, 0.08);
+}
+.copy-message-btn.copied {
+  border-color: #b9d8ca;
+  background: #edf8f2;
+  color: var(--green);
 }
 .msg.status { background: var(--amber-soft); border: 1px solid #e6c57f; color: #70460a; }
 .msg.trace {
