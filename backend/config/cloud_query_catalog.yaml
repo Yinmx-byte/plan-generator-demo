@@ -18,8 +18,15 @@ products:
       - 云主机
       - 实例
     resource_type_prefixes:
-      - ACS::ECS::
-    inventory_provider: ecs
+      - "ACS::ECS::"
+    inventory:
+      provider: ecs_vpc
+      api:
+        product: ECS
+        action: DescribeInstances
+        sdk_package: alibabacloud-ecs20140526
+        resource_id_field: InstanceId
+      fallback_provider: resource_center
     default_metric_set:
       - cpu_usage
       - public_network_in
@@ -188,8 +195,19 @@ products:
       - 交换机
       - VSwitch
     resource_type_prefixes:
-      - ACS::VPC::
-    inventory_provider: vpc
+      - "ACS::VPC::"
+    inventory:
+      provider: ecs_vpc
+      apis:
+        - product: VPC
+          action: DescribeVpcs
+          sdk_package: alibabacloud-vpc20160428
+          resource_id_field: VpcId
+        - product: VPC
+          action: DescribeVSwitches
+          sdk_package: alibabacloud-vpc20160428
+          resource_id_field: VSwitchId
+      fallback_provider: resource_center
 
   slb:
     product_code: SLB
@@ -200,9 +218,18 @@ products:
       - 负载均衡
       - 监听
     resource_type_prefixes:
-      - ACS::SLB::
-      - ACS::ALB::
-      - ACS::NLB::
+      - "ACS::SLB::"
+      - "ACS::ALB::"
+      - "ACS::NLB::"
+    inventory:
+      provider: resource_center
+      api:
+        product: SLB
+        action: DescribeLoadBalancers
+        sdk_package: alibabacloud-slb20140515
+        resource_id_field: LoadBalancerId
+        adapter_status: pending
+      fallback_provider: resource_center
 
   oss:
     product_code: OSS
@@ -213,7 +240,100 @@ products:
       - 对象存储
       - Bucket
     resource_type_prefixes:
-      - ACS::OSS::
+      - "ACS::OSS::"
+    inventory:
+      provider: resource_center
+      apis:
+        - product: OSS
+          action: ListBuckets
+          sdk_package: oss2
+          resource_id_field: Name
+          adapter_status: pending
+        - product: OSS
+          action: GetBucketInfo
+          sdk_package: oss2
+          resource_id_field: Name
+          adapter_status: pending
+      fallback_provider: resource_center
+    default_metric_set:
+      - storage_size
+      - request_count
+      - internet_in
+      - internet_out
+    metrics:
+      storage_size:
+        display_name: 存储量
+        aliases:
+          - 存储量
+          - Bucket大小
+          - 容量
+          - storage
+        namespace: acs_oss_dashboard
+        metric_name: MeteringStorageUtilization
+        resource_id_dimension: BucketName
+        dimensions:
+          - BucketName
+          - region
+          - storageType
+        default_dimensions:
+          region: cn-beijing
+          storageType: Standard
+        default_minutes: 60
+        default_period: "3600"
+      request_count:
+        display_name: 请求数
+        aliases:
+          - 请求数
+          - 访问次数
+          - request
+          - qps
+        namespace: acs_oss_dashboard
+        metric_name: SuccessCount
+        fallback_metric_names:
+          - GetObjectCount
+          - PutObjectCount
+        resource_id_dimension: BucketName
+        dimensions:
+          - BucketName
+        default_minutes: 60
+        default_period: "3600"
+      internet_out:
+        display_name: 公网流出流量
+        aliases:
+          - 公网流出
+          - 出流量
+          - 流量
+          - internet out
+        namespace: acs_oss_dashboard
+        metric_name: MeteringInternetTX
+        resource_id_dimension: BucketName
+        dimensions:
+          - BucketName
+          - region
+          - storageType
+        default_dimensions:
+          region: cn-beijing
+          storageType: Standard
+        default_minutes: 60
+        default_period: "3600"
+      internet_in:
+        display_name: 公网流入流量
+        aliases:
+          - 公网流入
+          - 入流量
+          - internet in
+        namespace: acs_oss_dashboard
+        metric_name: MeteringInternetRX
+        resource_id_dimension: BucketName
+        dimensions:
+          - BucketName
+          - region
+          - storageType
+        default_dimensions:
+          region: cn-beijing
+          storageType: Standard
+        default_minutes: 60
+        default_period: "3600"
 
   rds:
     product_code: RDS
@@ -223,4 +343,116 @@ products:
       - RDS
       - 云数据库
     resource_type_prefixes:
-      - ACS::RDS::
+      - "ACS::RDS::"
+    inventory:
+      provider: resource_center
+      api:
+        product: RDS
+        action: DescribeDBInstances
+        sdk_package: alibabacloud-rds20140815
+        resource_id_field: DBInstanceId
+        adapter_status: pending
+      fallback_provider: resource_center
+    default_metric_set:
+      - cpu_usage
+      - memory_usage
+      - disk_usage
+      - connection_usage
+      - iops_usage
+    metrics:
+      cpu_usage:
+        display_name: CPU 使用率
+        aliases:
+          - CPU使用率
+          - CPU利用率
+          - cpu
+        namespace: acs_rds_dashboard
+        metric_name: CpuUsage
+        fallback_metric_names:
+          - CPUUsage
+        resource_id_dimension: instanceId
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
+      memory_usage:
+        display_name: 内存使用率
+        aliases:
+          - 内存使用率
+          - 内存利用率
+          - memory
+        namespace: acs_rds_dashboard
+        metric_name: MemoryUsage
+        fallback_metric_names:
+          - MemUsage
+        resource_id_dimension: instanceId
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
+      disk_usage:
+        display_name: 磁盘使用率
+        aliases:
+          - 磁盘使用率
+          - 存储使用率
+          - disk
+        namespace: acs_rds_dashboard
+        metric_name: DiskUsage
+        fallback_metric_names:
+          - DiskUsed
+        resource_id_dimension: instanceId
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
+      connection_usage:
+        display_name: 连接数使用率
+        aliases:
+          - 连接数
+          - 连接使用率
+          - connections
+        namespace: acs_rds_dashboard
+        metric_name: ConnectionUsage
+        fallback_metric_names:
+          - MySQL_ConnectionUsage
+        resource_id_dimension: instanceId
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
+      iops_usage:
+        display_name: IOPS 使用率
+        aliases:
+          - IOPS
+          - iops
+          - 磁盘IO
+        namespace: acs_rds_dashboard
+        metric_name: IOPSUsage
+        fallback_metric_names:
+          - MySQL_IOPS
+        resource_id_dimension: instanceId
+        dimensions:
+          - instanceId
+        default_minutes: 60
+        default_period: "300"
+
+  redis:
+    product_code: KVSTORE
+    product_name: Redis
+    aliases:
+      - redis
+      - Redis
+      - KVStore
+      - 缓存
+    resource_type_prefixes:
+      - "ACS::KVSTORE::"
+      - "ACS::REDIS::"
+    inventory:
+      provider: resource_center
+      api:
+        product: Redis
+        action: DescribeInstances
+        sdk_package: alibabacloud-r-kvstore20150101
+        resource_id_field: InstanceId
+        adapter_status: pending
+      fallback_provider: resource_center

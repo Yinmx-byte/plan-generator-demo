@@ -258,6 +258,82 @@ def _build_metric_no_data_diagnosis(
     }
 
 
+def _resource_matches_product(resource: dict[str, Any], product_config: dict[str, Any]) -> bool:
+    resource_type = str(resource.get("ResourceType") or "")
+    prefixes = [str(item) for item in product_config.get("resource_type_prefixes", []) if item]
+    if prefixes:
+        return any(resource_type.startswith(prefix) for prefix in prefixes)
+    product_code = str(product_config.get("product_code") or "").upper()
+    return bool(product_code and f"::{product_code}::" in resource_type.upper())
+
+
+def _resource_matches_region(resource: dict[str, Any], region_id: str) -> bool:
+    resource_region = str(resource.get("RegionId") or "")
+    return not resource_region or not region_id or resource_region == region_id
+
+
+def _generic_inventory_summary(resources: list[dict[str, Any]]) -> dict[str, Any]:
+    by_region: dict[str, int] = {}
+    by_resource_type: dict[str, int] = {}
+    by_status: dict[str, int] = {}
+    by_resource_group: dict[str, int] = {}
+    for resource in resources:
+        region = str(resource.get("RegionId") or "unknown")
+        resource_type = str(resource.get("ResourceType") or "unknown")
+        status = str(resource.get("ResourceStatus") or resource.get("Status") or "unknown")
+        resource_group_id = str(resource.get("ResourceGroupId") or "unknown")
+        by_region[region] = by_region.get(region, 0) + 1
+        by_resource_type[resource_type] = by_resource_type.get(resource_type, 0) + 1
+        by_status[status] = by_status.get(status, 0) + 1
+        by_resource_group[resource_group_id] = by_resource_group.get(resource_group_id, 0) + 1
+    return {
+        "total_resources": len(resources),
+        "by_region": by_region,
+        "by_resource_type": by_resource_type,
+        "by_status": by_status,
+        "by_resource_group": by_resource_group,
+    }
+
+
+def query_generic_product_inventory(
+    *,
+    product_key: str,
+    product_config: dict[str, Any],
+    region_id: str,
+    resource_ids: str | list[str] | None = None,
+) -> dict[str, Any]:
+    """Query product resources through Resource Center for products without a dedicated adapter."""
+    wanted_ids = set(_parse_instance_ids(resource_ids))
+    resources = [
+        resource
+        for resource in search_resource_center_resources()
+        if _resource_matches_product(resource, product_config)
+        and _resource_matches_region(resource, region_id)
+    ]
+    if wanted_ids:
+        resources = [
+            resource
+            for resource in resources
+            if str(resource.get("ResourceId") or "") in wanted_ids
+            or str(resource.get("ResourceName") or "") in wanted_ids
+        ]
+    return {
+        "query_type": "inventory",
+        "region_id": region_id,
+        "inventory_provider": "resource_center",
+        "product": {
+            "key": product_key,
+            "code": product_config.get("product_code"),
+            "name": product_config.get("product_name"),
+        },
+        "filters": {"resource_ids": sorted(wanted_ids)},
+        "resources": resources,
+        "summary": _generic_inventory_summary(resources),
+        "sdk": {"resourcecenter": "alibabacloud-resourcecenter20221201"},
+        "notes": "Resource Center inventory is generic and read-only; detailed product attributes depend on Resource Center visibility.",
+    }
+
+
 def describe_regions(region_id: str) -> list[dict[str, Any]]:
     from alibabacloud_ecs20140526 import models as ecs_models
 
@@ -460,13 +536,16 @@ def describe_configured_instance_metric(
     extra_dimensions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     metric_key, metric_config = resolve_metric(product, metric)
-    dimensions = {"instanceId": instance_id}
+    dimension_names = [str(item) for item in metric_config.get("dimensions", []) if item]
+    resource_dimension = str(metric_config.get("resource_id_dimension") or (dimension_names[0] if dimension_names else "instanceId"))
+    dimensions = {resource_dimension: instance_id}
+    dimensions.update(metric_config.get("default_dimensions") or {})
     dimensions.update(extra_dimensions or {})
     missing_dimensions = [
         item for item in (metric_config.get("required_user_dimensions") or []) if not dimensions.get(item)
     ]
     auto_dimensions: list[dict[str, Any]] = []
-    if missing_dimensions == ["device"] and metric_key == "disk_usage":
+    if product == "ecs" and missing_dimensions == ["device"] and metric_key == "disk_usage":
         for device in _disk_device_candidates(describe_disks(region_id=region_id, instance_id=instance_id)):
             candidate = dict(dimensions)
             candidate["device"] = device
@@ -501,24 +580,33 @@ def describe_configured_instance_metric(
     selected_attempt: dict[str, Any] | None = None
     for metric_name in metric_names:
         for candidate_dimensions in dimension_candidates:
-            datapoints = describe_metric_list(
-                region_id=region_id,
-                metric_name=metric_name,
-                dimensions=candidate_dimensions,
-                namespace=str(metric_config.get("namespace", "acs_ecs_dashboard")),
-                period=effective_period,
-                start_time_ms=start_time_ms,
-                end_time_ms=end_time_ms,
-            )
-            summary = _summarize_datapoints(datapoints)
+            error = ""
+            try:
+                datapoints = describe_metric_list(
+                    region_id=region_id,
+                    metric_name=metric_name,
+                    dimensions=candidate_dimensions,
+                    namespace=str(metric_config.get("namespace", "acs_ecs_dashboard")),
+                    period=effective_period,
+                    start_time_ms=start_time_ms,
+                    end_time_ms=end_time_ms,
+                )
+                summary = _summarize_datapoints(datapoints)
+            except Exception as exc:
+                error = str(exc)
+                summary = _summarize_datapoints([])
             attempt = {
                 "metric_name": metric_name,
                 "dimensions": candidate_dimensions,
                 "summary": summary,
+                "error": error,
             }
             attempts.append(attempt)
             if summary.get("available") and selected_attempt is None:
                 selected_attempt = attempt
+                break
+        if selected_attempt is not None:
+            break
     selected_attempt = selected_attempt or (attempts[0] if attempts else None)
     summary = dict((selected_attempt or {}).get("summary") or _summarize_datapoints([]))
     selected_dimensions = dict((selected_attempt or {}).get("dimensions") or dimensions)
@@ -551,6 +639,7 @@ def describe_configured_instance_metric(
                 "dimensions": item["dimensions"],
                 "available": item["summary"].get("available"),
                 "count": item["summary"].get("count"),
+                "error": item.get("error", ""),
             }
             for item in attempts
         ],
@@ -627,13 +716,24 @@ def query_cloud_inventory(
     include_instances: bool = True,
     include_vswitches: bool = True,
 ) -> dict[str, Any]:
-    """Query product inventory. Currently ECS/VPC inventory is backed by ECS and VPC SDKs."""
+    """Query product inventory through a configured adapter or Resource Center fallback."""
     defaults = get_catalog_defaults()
     product_key, product_config = resolve_product(product)
     effective_region_id = region_id or defaults.get("region_id", "cn-beijing")
-    if product_key not in {"ecs", "vpc"}:
+    inventory_config = product_config.get("inventory") or {}
+    provider = inventory_config.get("provider") or product_config.get("inventory_provider")
+    if not provider:
+        provider = "ecs_vpc" if product_key in {"ecs", "vpc"} else "resource_center"
+    if provider == "resource_center":
+        return query_generic_product_inventory(
+            product_key=product_key,
+            product_config=product_config,
+            region_id=effective_region_id,
+            resource_ids=instance_ids,
+        )
+    if provider not in {"ecs", "vpc", "ecs_vpc"}:
         raise AliyunCloudSDKError(
-            f"{product_config.get('product_name', product_key)} inventory is not implemented yet"
+            f"Inventory provider is configured but no adapter is registered: {provider}"
         )
     data = query_ecs_vpc_info(
         region_id=effective_region_id,
@@ -666,19 +766,32 @@ def query_cloud_metrics(
     """Query metrics by stable product and metric keys resolved from the catalog."""
     defaults = get_catalog_defaults()
     product_key, product_config = resolve_product(product)
-    if product_key != "ecs":
-        raise AliyunCloudSDKError("Only ECS metrics are implemented in the current SDK adapter")
     effective_region_id = region_id or defaults.get("region_id", "cn-beijing")
-    parsed_instance_ids = _parse_instance_ids(instance_ids)
-    if not parsed_instance_ids:
-        raise ValueError("instance_ids is required for ECS metric queries")
+    parsed_resource_ids = _parse_instance_ids(instance_ids)
+    if not parsed_resource_ids:
+        if product_key == "ecs":
+            raise ValueError("instance_ids is required for ECS metric queries")
+        inventory = query_generic_product_inventory(
+            product_key=product_key,
+            product_config=product_config,
+            region_id=effective_region_id,
+        )
+        parsed_resource_ids = [
+            str(resource.get("ResourceId") or resource.get("ResourceName") or "")
+            for resource in inventory.get("resources", [])
+            if str(resource.get("ResourceId") or resource.get("ResourceName") or "").strip()
+        ]
+    if not parsed_resource_ids:
+        raise ValueError(f"resource ids are required or discoverable for {product_key} metric queries")
 
     if _is_metric_overview_request(metric):
-        metric_keys = list(product_config.get("default_metric_set") or ["cpu_usage"])
+        metric_keys = list(product_config.get("default_metric_set") or [])
+        if not metric_keys:
+            raise AliyunCloudSDKError(f"No default metrics configured for product: {product_key}")
         metric_config = {
             "display_name": "资源占用概览",
             "metric_name": "overview",
-            "namespace": "acs_ecs_dashboard",
+            "namespace": "",
         }
     else:
         metric_key, metric_config = resolve_metric(product_key, metric)
@@ -697,11 +810,11 @@ def query_cloud_metrics(
                 "notes": current_metric_config.get("notes", ""),
             }
         )
-        for instance_id in parsed_instance_ids:
+        for resource_id in parsed_resource_ids:
             results.append(
                 describe_configured_instance_metric(
                     region_id=effective_region_id,
-                    instance_id=instance_id,
+                    instance_id=resource_id,
                     product=product_key,
                     metric=_resolved_key,
                     metric_minutes=metric_minutes,
@@ -726,7 +839,8 @@ def query_cloud_metrics(
             "resolved_metrics": resolved_metrics,
         },
         "filters": {
-            "instance_ids": parsed_instance_ids,
+            "instance_ids": parsed_resource_ids,
+            "resource_ids": parsed_resource_ids,
             "metric_minutes": metric_minutes or defaults.get("metric_minutes"),
             "metric_period": str(metric_period or defaults.get("metric_period")),
             "extra_dimensions": extra_dimensions or {},
