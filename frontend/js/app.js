@@ -40,7 +40,48 @@ let documentTitleEl = null;
 let documentDownloadLink = null;
 let documentEditStatus = null;
 let documentDialog = null;
+let documentEvalReferenceDir = null;
+let documentEvalSkillSelect = null;
+let documentEvaluationResult = null;
 let documentVisualDirty = false;
+
+const iteratorStateFields = [
+  { key: 'background', label: '检修背景/检修事项', type: 'textarea', required: true },
+  { key: 'maintenance_type', label: '检修类型', type: 'select', required: true, options: ['配置变更', '组件升级', '组件扩缩容', '数据库变更', '日常维护（原硬件设备）', '其他'] },
+  { key: 'network', label: '网络环境', type: 'select', required: true, options: ['内网', '外网', '内、外网'] },
+  { key: 'location', label: '实施地点', type: 'input', required: true },
+  { key: 'instances', label: '涉及实例/组织/资源集', type: 'textarea', required: true },
+  { key: 'schedule_year', label: '计划年度', type: 'input' },
+  { key: 'schedule_start', label: '检修开始时间', type: 'input', required: true },
+  { key: 'schedule_end', label: '检修结束时间', type: 'input', required: true },
+  { key: 'provider', label: '方案提供人', type: 'input', required: true },
+  { key: 'executor', label: '检修执行人', type: 'input', required: true },
+  { key: 'reviewer', label: '检修复核人', type: 'input', required: true },
+  { key: 'security_officer', label: '安全责任人', type: 'input', required: true },
+  { key: 'ascm_account', label: 'ASCM 授权账号', type: 'input', required: true },
+  { key: 'bastion_account', label: '堡垒机账号', type: 'input', required: true },
+  { key: 'tech_params', label: '技术参数', type: 'textarea' },
+  { key: 'ops_detail', label: '补充要求/操作约束', type: 'textarea' },
+];
+
+const iteratorSampleState = {
+  background: '内网总部 ESB 组件因业务扩容需要新增 ECS 云服务器实例，项目组已提报问题工单，需通过本次检修完成资源创建和配置确认。',
+  maintenance_type: '配置变更',
+  network: '内网',
+  location: '国网亦庄数据中心二期运维专区',
+  instances: '内网总部 ESB 组件创建 ECS 实例 | 数字化工作部 | 总部ESB组件系统资源集',
+  schedule_year: '2026年',
+  schedule_start: '2026年5月25日 18:00',
+  schedule_end: '2026年5月25日 20:00',
+  provider: '张三',
+  executor: '李四',
+  reviewer: '王五',
+  security_officer: '赵六',
+  ascm_account: 'ascm_demo',
+  bastion_account: 'bastion_demo',
+  tech_params: '云环境：内网；实例名称：总部ESB-业务扩容-01、总部ESB-业务扩容-02；数量：2台；规格：4核16G；系统盘：100G；镜像：centos7.9-latest-v1；VPC：VPC10；交换机：总部ESB组件生产VSwitch；安全组：总部ESB组件系统生产安全组。',
+  ops_detail: '变更前后需截图留痕，创建完成后核对实例状态、规格、网络、安全组和资源集归属，不涉及业务重启。',
+};
 
 localStorage.removeItem('planGeneratorSessionId');
 
@@ -516,6 +557,20 @@ async function deleteSkill(skillName, displayName = skillName) {
   }
 }
 
+async function populateSkillSelect(selectEl, preferredPattern = /ecs/i) {
+  if (!selectEl) return [];
+  const resp = await fetch('/api/skills');
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.detail || 'Skill 加载失败');
+  const skills = data.skills || [];
+  selectEl.innerHTML = skills
+    .map((skill) => `<option value="${escapeHtml(skill.name)}">${escapeHtml(skill.display_name || skill.name)}</option>`)
+    .join('');
+  const preferred = [...selectEl.options].find((option) => preferredPattern.test(option.value) || preferredPattern.test(option.textContent));
+  if (preferred) selectEl.value = preferred.value;
+  return skills;
+}
+
 async function openSkillEditor(skillName) {
   const dialog = document.getElementById('skillEditDialog');
   const title = document.getElementById('skillEditTitle');
@@ -970,6 +1025,41 @@ async function saveAndRenderDocument() {
   }
 }
 
+async function evaluateCurrentDocument() {
+  if (!currentDocumentFileId) {
+    setDocumentEditorState('未加载', '请先生成或打开一份 DOCX。');
+    return;
+  }
+  const referenceDir = documentEvalReferenceDir?.value?.trim();
+  if (!referenceDir) {
+    setDocumentEditorState('缺少参考目录', '请填写优质文档目录。');
+    return;
+  }
+  if (documentEvaluationResult) {
+    documentEvaluationResult.innerHTML = '<div class="item-card"><div class="item-title">正在评估当前 DOCX...</div></div>';
+  }
+  setDocumentEditorState('评估中', '正在用优质历史方案评估当前文档质量...');
+  try {
+    const resp = await fetch(`/api/documents/${encodeURIComponent(currentDocumentFileId)}/evaluate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reference_dir: referenceDir,
+        skill_name: documentEvalSkillSelect?.value || '',
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(formatApiError(data.detail || data.message || '评估失败'));
+    renderDocumentEvaluationResult(documentEvaluationResult, data);
+    setDocumentEditorState('评估完成', `当前文档评分：${data.result?.score ?? '-'}，问题数：${(data.result?.findings || []).length}`);
+  } catch (err) {
+    if (documentEvaluationResult) {
+      documentEvaluationResult.innerHTML = `<div class="msg error">评估失败：${escapeHtml(err.message)}</div>`;
+    }
+    setDocumentEditorState('评估失败', err.message);
+  }
+}
+
 async function deleteRemoteFile(fileId) {
   if (!fileId) return;
   const statusEl = document.getElementById('knowledgeUploadStatus');
@@ -1063,8 +1153,17 @@ function initPlanPage() {
   documentDownloadLink = document.getElementById('documentDownloadLink');
   documentEditStatus = document.getElementById('documentEditStatus');
   documentDialog = document.getElementById('documentDialog');
+  documentEvalReferenceDir = document.getElementById('documentEvalReferenceDir');
+  documentEvalSkillSelect = document.getElementById('documentEvalSkillSelect');
+  documentEvaluationResult = document.getElementById('documentEvaluationResult');
   const formatDocumentJsonBtn = document.getElementById('formatDocumentJsonBtn');
   const saveDocumentBtn = document.getElementById('saveDocumentBtn');
+  const evaluateDocumentBtn = document.getElementById('evaluateDocumentBtn');
+  populateSkillSelect(documentEvalSkillSelect, /ecs/i).catch((err) => {
+    if (documentEvaluationResult) {
+      documentEvaluationResult.innerHTML = `<div class="msg error">Skill 加载失败：${escapeHtml(err.message)}</div>`;
+    }
+  });
   if (showToolTraceInput) {
     showToolTraceInput.checked = showToolTrace;
     showToolTraceInput.addEventListener('change', () => {
@@ -1103,6 +1202,7 @@ function initPlanPage() {
     }
   });
   saveDocumentBtn?.addEventListener('click', saveAndRenderDocument);
+  evaluateDocumentBtn?.addEventListener('click', evaluateCurrentDocument);
 
   const setBusy = (busy) => {
     sendBtn.disabled = busy;
@@ -1363,35 +1463,54 @@ async function initIteratorPage() {
   const referenceInput = document.getElementById('iteratorReferenceDir');
   const messageInput = document.getElementById('iteratorMessage');
   const stateInput = document.getElementById('iteratorStateJson');
+  const stateFieldsEl = document.getElementById('iteratorStateFields');
   const allowPartialInput = document.getElementById('iteratorAllowPartial');
   const runBtn = document.getElementById('runIteratorBtn');
+  const preflightBtn = document.getElementById('runIteratorPreflightBtn');
+  const clearStateBtn = document.getElementById('clearIteratorStateBtn');
+  const fillSampleBtn = document.getElementById('fillIteratorSampleBtn');
   const statusEl = document.getElementById('iteratorStatus');
   const modeEl = document.getElementById('iteratorMode');
   const resultsEl = document.getElementById('iteratorResults');
   if (!skillSelect || !runBtn) return;
 
+  renderIteratorStateFields(stateFieldsEl);
+  stateFieldsEl?.addEventListener('input', () => updateIteratorStateJson(stateFieldsEl, stateInput));
+  stateFieldsEl?.addEventListener('change', () => updateIteratorStateJson(stateFieldsEl, stateInput));
+  clearStateBtn?.addEventListener('click', () => {
+    fillIteratorState(stateFieldsEl, {});
+    updateIteratorStateJson(stateFieldsEl, stateInput);
+  });
+  fillSampleBtn?.addEventListener('click', () => {
+    fillIteratorState(stateFieldsEl, iteratorSampleState);
+    updateIteratorStateJson(stateFieldsEl, stateInput);
+  });
+
   try {
-    const resp = await fetch('/api/skills');
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.detail || 'Skill 加载失败');
-    skillSelect.innerHTML = (data.skills || [])
-      .map((skill) => `<option value="${escapeHtml(skill.name)}">${escapeHtml(skill.display_name || skill.name)}</option>`)
-      .join('');
-    const ecsOption = [...skillSelect.options].find((option) => /ecs/i.test(option.value));
-    if (ecsOption) skillSelect.value = ecsOption.value;
+    await populateSkillSelect(skillSelect, /ecs/i);
   } catch (err) {
     statusEl.textContent = 'Skill 加载失败：' + err.message;
   }
 
-  runBtn.addEventListener('click', async () => {
+  async function runIterator({ preflight = false } = {}) {
     const skillName = skillSelect.value;
     const referenceDir = referenceInput.value.trim();
     if (!skillName || !referenceDir) {
       statusEl.textContent = '请选择 Skill 并填写优质文档目录';
       return;
     }
+    const state = updateIteratorStateJson(stateFieldsEl, stateInput);
+    const message = messageInput.value.trim();
+    if (!preflight) {
+      const validationMessage = validateIteratorGenerationInput(message, state);
+      if (validationMessage) {
+        statusEl.textContent = validationMessage;
+        return;
+      }
+    }
     runBtn.disabled = true;
-    statusEl.textContent = '正在运行自迭代评估...';
+    if (preflightBtn) preflightBtn.disabled = true;
+    statusEl.textContent = preflight ? '正在进行 Skill 静态预检...' : '正在生成候选文档并评估...';
     modeEl.textContent = '运行中';
     resultsEl.innerHTML = '<div class="item-card"><div class="item-title">正在生成/评估，请稍候...</div></div>';
     try {
@@ -1401,8 +1520,8 @@ async function initIteratorPage() {
         body: JSON.stringify({
           skill_name: skillName,
           reference_dir: referenceDir,
-          message: messageInput.value.trim(),
-          state_json: stateInput.value.trim(),
+          message: preflight ? '' : message,
+          state_json: preflight ? '' : stateInput.value.trim(),
           allow_partial: allowPartialInput.checked,
         }),
       });
@@ -1417,13 +1536,80 @@ async function initIteratorPage() {
       resultsEl.innerHTML = `<div class="msg error">评估失败：${escapeHtml(err.message)}</div>`;
     } finally {
       runBtn.disabled = false;
+      if (preflightBtn) preflightBtn.disabled = false;
     }
-  });
+  }
+
+  runBtn.addEventListener('click', () => runIterator({ preflight: false }));
+  preflightBtn?.addEventListener('click', () => runIterator({ preflight: true }));
 }
 
 function formatApiError(detail) {
   if (typeof detail === 'string') return detail;
   return JSON.stringify(detail, null, 2);
+}
+
+function renderIteratorStateFields(container) {
+  if (!container) return;
+  container.innerHTML = iteratorStateFields.map((field) => {
+    const marker = field.required ? '<b>*</b>' : '';
+    if (field.type === 'select') {
+      return `
+        <label class="state-field">
+          <span>${escapeHtml(field.label)}${marker}</span>
+          <select data-state-key="${escapeHtml(field.key)}">
+            <option value="">请选择</option>
+            ${(field.options || []).map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join('')}
+          </select>
+        </label>
+      `;
+    }
+    if (field.type === 'textarea') {
+      return `
+        <label class="state-field state-field-wide">
+          <span>${escapeHtml(field.label)}${marker}</span>
+          <textarea data-state-key="${escapeHtml(field.key)}"></textarea>
+        </label>
+      `;
+    }
+    return `
+      <label class="state-field">
+        <span>${escapeHtml(field.label)}${marker}</span>
+        <input data-state-key="${escapeHtml(field.key)}" type="text">
+      </label>
+    `;
+  }).join('');
+}
+
+function collectStateFromFields(container) {
+  const state = {};
+  container?.querySelectorAll('[data-state-key]').forEach((input) => {
+    const value = input.value.trim();
+    if (value) state[input.dataset.stateKey] = value;
+  });
+  return state;
+}
+
+function fillIteratorState(container, state) {
+  container?.querySelectorAll('[data-state-key]').forEach((input) => {
+    input.value = state[input.dataset.stateKey] || '';
+  });
+}
+
+function updateIteratorStateJson(container, stateInput) {
+  if (!stateInput) return {};
+  const state = collectStateFromFields(container);
+  stateInput.value = Object.keys(state).length ? JSON.stringify(state, null, 2) : '';
+  return state;
+}
+
+function validateIteratorGenerationInput(message, state) {
+  if (message.trim()) return '';
+  const missing = iteratorStateFields
+    .filter((field) => field.required && !state[field.key])
+    .map((field) => field.label);
+  if (missing.length) return '请填写测试需求，或补齐结构化参数：' + missing.slice(0, 4).join('、');
+  return '';
 }
 
 function renderIteratorResult(container, payload) {
@@ -1480,6 +1666,11 @@ function renderIteratorResult(container, payload) {
       <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
     </details>
   `;
+}
+
+function renderDocumentEvaluationResult(container, payload) {
+  if (!container) return;
+  renderIteratorResult(container, payload);
 }
 
 function renderRetrieveResults(container, nodes) {

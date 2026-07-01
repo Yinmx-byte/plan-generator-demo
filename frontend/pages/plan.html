@@ -59,6 +59,24 @@
         <textarea id="documentJsonEditor" class="document-json-editor" spellcheck="false" placeholder="需要精确修改结构时，可在这里编辑文档 JSON。"></textarea>
       </details>
 
+      <details class="document-evaluation-pane">
+        <summary>文档质量评估</summary>
+        <div class="document-evaluation-controls">
+          <label>
+            <span class="field-label">优质文档目录</span>
+            <input id="documentEvalReferenceDir" type="text" value="D:\个人工作\2026\微创项目\整理后文档\检修方案-整理">
+          </label>
+          <label>
+            <span class="field-label">对标 Skill</span>
+            <select id="documentEvalSkillSelect"></select>
+          </label>
+          <button id="evaluateDocumentBtn" type="button">评估当前文档</button>
+        </div>
+        <div class="document-evaluation-result" id="documentEvaluationResult">
+          <div class="status-text">生成或打开 DOCX 后，可在这里评估当前文档质量。</div>
+        </div>
+      </details>
+
       <div class="document-actions">
         <button id="formatDocumentJsonBtn" type="button">格式化</button>
         <button id="saveDocumentBtn" type="button">保存并重新渲染</button>

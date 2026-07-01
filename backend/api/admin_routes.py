@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from rag import get_knowledge_base, reset_knowledge_base
 from rag import bailian_admin
 from runtime import ROOT, SKILLS_ROOT, get_skill_registry, reset_skill_runtime
+from services.plan_generation import get_generated_file
 
 router = APIRouter()
 
@@ -31,6 +32,11 @@ class SkillIteratorRequest(BaseModel):
     state_json: str = ""
     allow_partial: bool = False
     api_url: str = ""
+
+
+class GeneratedDocumentEvaluationRequest(BaseModel):
+    reference_dir: str
+    skill_name: str = ""
 
 
 class BailianIndexCreateRequest(BaseModel):
@@ -334,6 +340,52 @@ async def run_skill_iterator(request_body: SkillIteratorRequest, request: Reques
         "status": "ok",
         "mode": "generated_docx" if has_generation_input else "skill_static_preflight",
         "skill": skill_payload(skill),
+        "reference_dir": str(reference_dir),
+        "resolved_reference_dir": str(resolved_reference_dir),
+        "result": result,
+    }
+
+
+@router.post("/api/documents/{file_id}/evaluate")
+async def evaluate_generated_document(file_id: str, request_body: GeneratedDocumentEvaluationRequest):
+    candidate_docx = get_generated_file(file_id)
+    if candidate_docx is None:
+        raise HTTPException(status_code=404, detail="生成文档不存在或已过期")
+    reference_dir = Path(request_body.reference_dir)
+    if not reference_dir.exists() or not reference_dir.is_dir():
+        raise HTTPException(status_code=400, detail="优质文档路径不存在或不是目录")
+
+    source_skill = None
+    skill_payload_data = None
+    if request_body.skill_name.strip():
+        skill = get_skill_or_404(request_body.skill_name.strip())
+        source_skill_path = skill.path / "SKILL.md"
+        ensure_within_directory(SKILLS_ROOT, source_skill_path)
+        source_skill = str(source_skill_path)
+        skill_payload_data = skill_payload(skill)
+
+    resolved_reference_dir = resolve_iterator_reference_dir(
+        reference_dir,
+        request_body.skill_name.strip(),
+    )
+    script = iterator_script_path("evaluate_plan_quality.py")
+    command = [
+        sys.executable,
+        str(script),
+        "--reference-dir",
+        str(resolved_reference_dir),
+        "--candidate-docx",
+        str(candidate_docx),
+    ]
+    if source_skill:
+        command.extend(["--source-skill", source_skill])
+    result = await run_blocking(run_iterator_subprocess, command)
+    return {
+        "status": "ok",
+        "mode": "generated_docx",
+        "file_id": file_id,
+        "candidate_docx": str(candidate_docx),
+        "skill": skill_payload_data,
         "reference_dir": str(reference_dir),
         "resolved_reference_dir": str(resolved_reference_dir),
         "result": result,

@@ -837,7 +837,9 @@ button.ghost {
   border-radius: 8px;
   background: #fff;
 }
-.iterator-json-pane summary {
+.iterator-json-pane summary,
+.iterator-state-panel summary,
+.document-evaluation-pane summary {
   cursor: pointer;
   font-size: 13px;
   font-weight: 800;
@@ -847,6 +849,44 @@ button.ghost {
   min-height: 120px;
   font-family: "Cascadia Mono", "Consolas", "Microsoft YaHei UI", monospace;
   font-size: 12px;
+}
+.iterator-state-panel,
+.document-evaluation-pane {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.iterator-state-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.state-field {
+  display: grid;
+  gap: 5px;
+}
+.state-field span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 800;
+}
+.state-field b {
+  margin-left: 3px;
+  color: var(--red);
+}
+.state-field-wide {
+  grid-column: 1 / -1;
+}
+.state-field textarea {
+  min-height: 86px;
+}
+.iterator-state-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .iterator-output {
   min-height: 0;
@@ -1402,6 +1442,29 @@ button.danger:hover {
   line-height: 1.55;
   tab-size: 2;
 }
+.document-evaluation-pane {
+  min-height: 0;
+}
+.document-evaluation-controls {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: minmax(280px, 1.2fr) minmax(180px, 0.8fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+.document-evaluation-result {
+  max-height: 360px;
+  margin-top: 12px;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+}
+.document-evaluation-result .iterator-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.document-evaluation-result .iterator-json-pane {
+  display: none;
+}
 .document-actions {
   display: flex;
   align-items: center;
@@ -1432,6 +1495,10 @@ button.danger:hover {
     grid-template-rows: auto auto auto;
   }
   .document-reader-grid {
+    grid-template-columns: 1fr;
+  }
+  .document-evaluation-controls,
+  .iterator-state-grid {
     grid-template-columns: 1fr;
   }
   .document-preview {
