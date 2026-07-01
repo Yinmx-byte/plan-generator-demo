@@ -1,9 +1,11 @@
 """Page Agent MCP integration helpers."""
 
+import asyncio
 import inspect
+import json
 import os
 import uuid
-from typing import Any
+from typing import Any, AsyncIterator
 
 from fastapi import HTTPException
 from agentscope.agent import ReActAgent
@@ -60,6 +62,122 @@ def tool_response_text(response: ToolResponse) -> str:
         if text:
             parts.append(str(text))
     return "\n".join(parts).strip()
+
+
+def _compact_text(value: Any, limit: int = 1800) -> str:
+    if isinstance(value, str):
+        text = value
+    else:
+        text = json.dumps(value, ensure_ascii=False, indent=2)
+    return text if len(text) <= limit else text[:limit] + "\n..."
+
+
+def format_page_agent_trace(trace: dict[str, Any]) -> str:
+    event = trace.get("event", "trace")
+    data = trace.get("data")
+    if event == "status":
+        status = (data or {}).get("status") if isinstance(data, dict) else data
+        return f"Page Agent 状态：{status}"
+    if event == "task":
+        task = (data or {}).get("task") if isinstance(data, dict) else data
+        return f"Page Agent 任务：{task}"
+    if event == "activity":
+        return "Page Agent 活动：\n" + _compact_text(data)
+    if event == "history" and isinstance(data, dict):
+        item = data.get("event")
+        index = data.get("index")
+        if isinstance(item, dict):
+            parts = [f"Page Agent 步骤 {int(index) + 1 if isinstance(index, int) else index}"]
+            action = item.get("action")
+            if isinstance(action, dict):
+                if action.get("name"):
+                    parts.append(f"动作：{action['name']}")
+                if action.get("input") is not None:
+                    parts.append("输入：" + _compact_text(action.get("input"), 600))
+                if action.get("output"):
+                    parts.append("输出：" + _compact_text(action.get("output"), 800))
+            for key, label in (
+                ("evaluation_previous_goal", "上步评估"),
+                ("memory", "记忆"),
+                ("next_goal", "下一目标"),
+            ):
+                if item.get(key):
+                    parts.append(f"{label}：{item[key]}")
+            if len(parts) > 1:
+                return "\n".join(parts)
+        return "Page Agent 历史事件：\n" + _compact_text(data)
+    return f"Page Agent 事件 {event}：\n" + _compact_text(data)
+
+
+async def call_page_agent_tool(tool_name: str, payload: dict[str, Any] | None = None) -> str:
+    toolkit = await get_toolkit()
+    if tool_name not in toolkit.tools:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Page Agent MCP 工具 {tool_name} 未注册，请重启后端并确认 page-agent MCP 已更新。",
+        )
+    tool_call = {
+        "type": "tool_use",
+        "id": uuid.uuid4().hex,
+        "name": tool_name,
+        "input": payload or {},
+    }
+    result = ""
+    tool_result = toolkit.call_tool_function(tool_call)
+    if inspect.isawaitable(tool_result):
+        tool_result = await tool_result
+    async for chunk in tool_result:
+        result = tool_response_text(chunk) or result
+    return result
+
+
+async def run_page_agent_task_events(task: str) -> AsyncIterator[dict[str, Any]]:
+    task = task.strip()
+    if not task:
+        raise HTTPException(status_code=400, detail="请输入 Page Agent 测试指令")
+    start_text = await call_page_agent_tool("execute_task_async", {"task": task})
+    if start_text.startswith("Error:"):
+        yield {"type": "error", "message": start_text}
+        return
+    try:
+        started = json.loads(start_text)
+    except json.JSONDecodeError:
+        yield {"type": "error", "message": start_text}
+        return
+    task_id = started.get("task_id")
+    if not task_id:
+        yield {"type": "error", "message": f"Page Agent 未返回 task_id：{start_text}"}
+        return
+
+    cursor = int(started.get("cursor") or 0)
+    yield {"type": "status", "message": f"Page Agent 任务已启动：{task_id}"}
+    while True:
+        await asyncio.sleep(0.8)
+        text = await call_page_agent_tool("get_task_events", {"task_id": task_id, "cursor": cursor})
+        if text.startswith("Error:"):
+            yield {"type": "error", "message": text}
+            return
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            yield {"type": "error", "message": text}
+            return
+        cursor = int(data.get("next_cursor") or cursor)
+        for trace in data.get("events") or []:
+            yield {"type": "trace", "message": format_page_agent_trace(trace), "raw": trace}
+        status = data.get("status")
+        if status in {"completed", "failed", "error"}:
+            result = data.get("result") or {}
+            if status == "completed":
+                yield {"type": "done", "message": result.get("data") or "Page Agent 执行完成"}
+            elif result:
+                yield {
+                    "type": "error",
+                    "message": result.get("data") or f"Page Agent 执行失败：{status}",
+                }
+            else:
+                yield {"type": "error", "message": data.get("error") or f"Page Agent 执行失败：{status}"}
+            return
 
 
 async def run_page_agent_task(task: str) -> str:

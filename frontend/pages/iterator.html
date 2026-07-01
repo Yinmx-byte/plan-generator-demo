@@ -1,0 +1,47 @@
+<section class="iterator-layout">
+  <div class="tool-card iterator-control">
+    <p class="eyebrow">Skill Quality Loop</p>
+    <h3>检修 Skill 质量迭代</h3>
+    <p>选择一个已有 Skill，并指定高质量历史检修方案目录。填写测试需求后会先生成 DOCX 再评估；不填写时只做 Skill 静态预检。</p>
+
+    <label class="field-label" for="iteratorReferenceDir">优质文档目录</label>
+    <input id="iteratorReferenceDir" type="text" value="D:\个人工作\2026\微创项目\整理后文档\检修方案-整理">
+
+    <label class="field-label" for="iteratorSkillSelect">待评估 Skill</label>
+    <select id="iteratorSkillSelect"></select>
+
+    <label class="field-label" for="iteratorMessage">测试需求（可选）</label>
+    <textarea id="iteratorMessage" placeholder="填写后调用 /api/dev/plan-test 生成候选 DOCX，再和优质文档对比。留空则只检查 Skill 规则覆盖。"></textarea>
+
+    <details class="iterator-json-pane">
+      <summary>高级：直接填写 state JSON</summary>
+      <textarea id="iteratorStateJson" spellcheck="false" placeholder='{"background":"...","maintenance_type":"配置变更", "...":"..."}'></textarea>
+    </details>
+
+    <label class="check-option">
+      <input id="iteratorAllowPartial" type="checkbox">
+      <span>允许字段不完整时生成候选文档</span>
+    </label>
+
+    <div class="card-actions">
+      <button class="primary" id="runIteratorBtn" type="button">开始评估</button>
+    </div>
+    <div class="status-text" id="iteratorStatus">选择 Skill 后即可运行轻量评估。</div>
+  </div>
+
+  <div class="conversation-panel iterator-output">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Evaluation Report</p>
+        <h3>迭代报告</h3>
+      </div>
+      <span class="pill" id="iteratorMode">未运行</span>
+    </div>
+    <div class="iterator-results" id="iteratorResults">
+      <div class="empty-document">
+        <strong>等待评估结果</strong>
+        <span>报告会展示评分、主要问题、建议写回到 Skill 的规则。</span>
+      </div>
+    </div>
+  </div>
+</section>

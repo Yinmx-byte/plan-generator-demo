@@ -47,7 +47,11 @@ from services.plan_generation import (
     render_docx,
     update_generated_document,
 )
-from services.page_agent import run_page_agent_task, run_plan_validation_agent
+from services.page_agent import (
+    run_page_agent_task,
+    run_page_agent_task_events,
+    run_plan_validation_agent,
+)
 from services.requirements import (
     build_missing_question,
     default_form_state,
@@ -278,6 +282,53 @@ def sse_event(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def describe_intent_hint(message: str) -> str:
+    """Coarse UI hint only; routing is still handled by Master ReActAgent."""
+    text = message.lower()
+    if any(word in text for word in ("cpu", "内存", "磁盘", "资源组", "实例", "vpc", "ecs", "使用率", "资源占用", "有多少")):
+        if not any(word in text for word in ("检修方案", "生成方案", "方案生成", "写一份", "出一份")):
+            return "云资源问数"
+    if any(word in text for word in ("page agent", "浏览器", "控制台", "验证文档", "执行验证")):
+        return "浏览器验证"
+    if any(word in text for word in ("检修方案", "生成方案", "方案生成", "修改方案", "重新生成", "检修窗口")):
+        return "检修方案生成/修订"
+    return "普通聊天或待模型进一步判断"
+
+
+async def stream_page_agent_task(request: PageAgentTaskRequest):
+    try:
+        yield sse_event("status", {"message": "Page Agent 流式任务启动中..."})
+        async for item in run_page_agent_task_events(request.task):
+            item_type = item.get("type", "trace")
+            if item_type == "status":
+                yield sse_event("status", {"message": item.get("message", "")})
+            elif item_type == "trace":
+                yield sse_event(
+                    "trace",
+                    {
+                        "message": item.get("message", ""),
+                        "raw": item.get("raw"),
+                    },
+                )
+            elif item_type == "done":
+                yield sse_event("done", {"message": item.get("message", "")})
+                return
+            elif item_type == "error":
+                yield sse_event("error", {"message": item.get("message", "")})
+                return
+    except Exception as exc:
+        yield sse_event("error", {"message": f"Page Agent 流式执行失败：{exc}"})
+
+
+@app.post("/api/page-agent/task/stream")
+async def execute_page_agent_task_stream(request: PageAgentTaskRequest):
+    return StreamingResponse(
+        stream_page_agent_task(request),
+        media_type="text/event-stream; charset=utf-8",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 async def stream_master_agent_response(request: ChatRequest, startup_message: str):
     """Shared SSE stream for the planner-first Master ReActAgent chain."""
     session_id = request.session_id or uuid.uuid4().hex
@@ -322,6 +373,24 @@ async def stream_master_agent_response(request: ChatRequest, startup_message: st
             {
                 "session_id": session_id,
                 "message": startup_message,
+            },
+        )
+        yield sse_event(
+            "trace",
+            {
+                "session_id": session_id,
+                "message": (
+                    "大步骤：意图识别\n"
+                    f"初步意图：{describe_intent_hint(message)}。"
+                    "后续由 Master ReActAgent 结合主控工作流 Skill 和工具调用继续确认。"
+                ),
+            },
+        )
+        yield sse_event(
+            "trace",
+            {
+                "session_id": session_id,
+                "message": "大步骤：自主规划\nMaster ReActAgent 会按需要调用需求抽取、Skill/RAG 准备、云资源查询、文档生成或浏览器验证工具。",
             },
         )
         trace_queue: asyncio.Queue = asyncio.Queue()

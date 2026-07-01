@@ -7,10 +7,11 @@ const refreshAllBtn = document.getElementById('refreshAllBtn');
 const planSessionStorageKey = 'planGeneratorTabState';
 
 const pageMeta = {
-  plan: { title: '方案生成', eyebrow: 'Conversation' },
+  plan: { title: '智能对话', eyebrow: 'Conversation' },
   skills: { title: 'Skill 管理', eyebrow: 'AgentScope' },
   knowledge: { title: '知识库', eyebrow: 'RAG' },
   'page-agent': { title: 'Page Agent', eyebrow: 'MCP' },
+  iterator: { title: '质量迭代', eyebrow: 'Skill Loop' },
 };
 
 function readPlanSessionState() {
@@ -320,20 +321,77 @@ function addMessage(container, role, text, extraHtml = '') {
 function addTraceMessage(container, text) {
   if (!container || !text) return null;
   if (/read_file/i.test(text)) return null;
+  const meta = classifyTraceMessage(text);
   const details = document.createElement('details');
-  details.className = 'msg trace trace-collapsible';
+  details.className = `msg trace trace-collapsible trace-${meta.tone}`;
   const summary = document.createElement('summary');
-  const firstLine = text.split('\n')[0] || 'Agent 执行细节';
-  summary.textContent = firstLine.replace(/^调用工具：/, '调用工具 · ').replace(/^工具返回：/, '工具返回 · ');
+  summary.innerHTML = `
+    <span class="trace-stage">${escapeHtml(meta.stage)}</span>
+    <span class="trace-detail">${escapeHtml(meta.detail)}</span>
+  `;
   const pre = document.createElement('pre');
   pre.textContent = text;
   details.appendChild(summary);
   details.appendChild(pre);
   container.appendChild(details);
-  applyTraceVisibility(container);
+  if (container === messagesEl) applyTraceVisibility(container);
   scrollToBottom(container);
   if (container === messagesEl) persistPlanState();
   return details;
+}
+
+function classifyTraceMessage(text) {
+  const firstLine = text.split('\n')[0] || 'Agent 执行细节';
+  const toolMatch = text.match(/^(调用工具|工具返回)：([^\n]+)/);
+  const toolName = toolMatch?.[2]?.trim() || '';
+  if (text.startsWith('大步骤：')) {
+    const lines = text.split('\n');
+    return {
+      stage: lines[0].replace('大步骤：', '').trim() || '工作流',
+      detail: lines[1] || 'Master Agent 正在规划任务',
+      tone: 'intent',
+    };
+  }
+  if (/query_cloud|资源|云监控|Resource Center/i.test(toolName + text)) {
+    return {
+      stage: '云资源问数',
+      detail: toolMatch ? `${toolMatch[1]} · ${toolName}` : firstLine,
+      tone: 'query',
+    };
+  }
+  if (/update_requirements|check_missing_requirements|get_session_snapshot/.test(toolName)) {
+    return {
+      stage: '需求理解',
+      detail: toolMatch ? `${toolMatch[1]} · ${toolName}` : firstLine,
+      tone: 'intent',
+    };
+  }
+  if (/list_registered_skills|retrieve_knowledge|prepare_plan_context/.test(toolName)) {
+    return {
+      stage: '依据准备',
+      detail: toolMatch ? `${toolMatch[1]} · ${toolName}` : firstLine,
+      tone: 'context',
+    };
+  }
+  if (/generate_maintenance_plan|get_generated_document_info/.test(toolName)) {
+    return {
+      stage: '文档生成',
+      detail: toolMatch ? `${toolMatch[1]} · ${toolName}` : firstLine,
+      tone: 'generate',
+    };
+  }
+  if (/Page Agent|history|activity|browser|execute_task/i.test(toolName + text)) {
+    return {
+      stage: '浏览器验证',
+      detail: firstLine,
+      tone: 'browser',
+    };
+  }
+  return {
+    stage: '工具调用',
+    detail: firstLine.replace(/^调用工具：/, '调用工具 · ').replace(/^工具返回：/, '工具返回 · '),
+    tone: 'neutral',
+  };
 }
 
 async function typeInto(el, text) {
@@ -366,6 +424,7 @@ async function loadPage(page) {
   if (page === 'skills') initSkillsPage();
   if (page === 'knowledge') initKnowledgePage();
   if (page === 'page-agent') initPageAgentPage();
+  if (page === 'iterator') initIteratorPage();
 }
 
 function renderItemGrid(container, items, emptyText, render) {
@@ -421,20 +480,39 @@ async function loadSkills() {
     renderItemGrid(listEl, skills, '暂无 Skill', (skill) => {
       const item = document.createElement('div');
       item.className = 'item-card';
+      const displayName = skill.display_name || skill.name;
       item.innerHTML = `
         <div>
-          <div class="item-title">${escapeHtml(skill.name)}</div>
+          <div class="item-title">${escapeHtml(displayName)}</div>
+          <div class="item-alias">${escapeHtml(skill.name)}</div>
         </div>
         <div class="item-meta">${escapeHtml(skill.description || '未填写描述')}</div>
         <div class="card-actions">
-          <button class="icon-action" type="button" title="编辑 SKILL.md" aria-label="编辑 ${escapeHtml(skill.name)}">编辑</button>
+          <button class="icon-action" data-action="edit" type="button" title="编辑 SKILL.md" aria-label="编辑 ${escapeHtml(displayName)}">编辑</button>
+          <button class="icon-action danger" data-action="delete" type="button" title="删除 Skill" aria-label="删除 ${escapeHtml(displayName)}">删除</button>
         </div>
       `;
-      item.querySelector('.icon-action').addEventListener('click', () => openSkillEditor(skill.name));
+      item.querySelector('[data-action="edit"]').addEventListener('click', () => openSkillEditor(skill.name));
+      item.querySelector('[data-action="delete"]').addEventListener('click', () => deleteSkill(skill.name, displayName));
       return item;
     });
   } catch (err) {
     listEl.innerHTML = `<div class="msg error">Skill 加载失败：${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function deleteSkill(skillName, displayName = skillName) {
+  const uploadStatus = document.getElementById('uploadStatus');
+  if (!confirm(`确认删除 Skill「${displayName}」？该操作会删除后台对应目录。`)) return;
+  if (uploadStatus) uploadStatus.textContent = `正在删除 ${displayName}...`;
+  try {
+    const resp = await fetch(`/api/skills/${encodeURIComponent(skillName)}`, { method: 'DELETE' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '删除失败');
+    if (uploadStatus) uploadStatus.textContent = `已删除 ${displayName}，Skill 已刷新`;
+    await loadSkills();
+  } catch (err) {
+    if (uploadStatus) uploadStatus.textContent = '删除失败：' + err.message;
   }
 }
 
@@ -1003,7 +1081,7 @@ function initPlanPage() {
     applyTraceVisibility(messagesEl);
     scrollToBottom(messagesEl);
   } else {
-    addMessage(messagesEl, 'assistant', '请粘贴检修需求描述或需求文档。我会逐步抽取信息、追问缺失项，并在信息齐全后生成 Word 检修方案。');
+    addMessage(messagesEl, 'assistant', '你好，我可以协助生成检修方案、查询阿里云资源与监控指标、管理知识库依据，并通过 Page Agent 做浏览器侧验证。你可以直接描述问题或粘贴需求文档。');
   }
   setDocumentDownload(currentDocumentDownloadUrl, currentDocumentFilename);
   setDocumentEditorState(currentDocumentFileId ? '可编辑' : '未加载', currentDocumentFileId ? '已保留上一份生成文档。' : '未生成文档。');
@@ -1280,6 +1358,130 @@ function initKnowledgePage() {
   });
 }
 
+async function initIteratorPage() {
+  const skillSelect = document.getElementById('iteratorSkillSelect');
+  const referenceInput = document.getElementById('iteratorReferenceDir');
+  const messageInput = document.getElementById('iteratorMessage');
+  const stateInput = document.getElementById('iteratorStateJson');
+  const allowPartialInput = document.getElementById('iteratorAllowPartial');
+  const runBtn = document.getElementById('runIteratorBtn');
+  const statusEl = document.getElementById('iteratorStatus');
+  const modeEl = document.getElementById('iteratorMode');
+  const resultsEl = document.getElementById('iteratorResults');
+  if (!skillSelect || !runBtn) return;
+
+  try {
+    const resp = await fetch('/api/skills');
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Skill 加载失败');
+    skillSelect.innerHTML = (data.skills || [])
+      .map((skill) => `<option value="${escapeHtml(skill.name)}">${escapeHtml(skill.display_name || skill.name)}</option>`)
+      .join('');
+    const ecsOption = [...skillSelect.options].find((option) => /ecs/i.test(option.value));
+    if (ecsOption) skillSelect.value = ecsOption.value;
+  } catch (err) {
+    statusEl.textContent = 'Skill 加载失败：' + err.message;
+  }
+
+  runBtn.addEventListener('click', async () => {
+    const skillName = skillSelect.value;
+    const referenceDir = referenceInput.value.trim();
+    if (!skillName || !referenceDir) {
+      statusEl.textContent = '请选择 Skill 并填写优质文档目录';
+      return;
+    }
+    runBtn.disabled = true;
+    statusEl.textContent = '正在运行自迭代评估...';
+    modeEl.textContent = '运行中';
+    resultsEl.innerHTML = '<div class="item-card"><div class="item-title">正在生成/评估，请稍候...</div></div>';
+    try {
+      const resp = await fetch('/api/skill-iterator/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          skill_name: skillName,
+          reference_dir: referenceDir,
+          message: messageInput.value.trim(),
+          state_json: stateInput.value.trim(),
+          allow_partial: allowPartialInput.checked,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(formatApiError(data.detail || data.message || '评估失败'));
+      modeEl.textContent = data.mode === 'generated_docx' ? '生成结果评估' : '静态预检';
+      statusEl.textContent = '评估完成';
+      renderIteratorResult(resultsEl, data);
+    } catch (err) {
+      statusEl.textContent = '评估失败：' + err.message;
+      modeEl.textContent = '失败';
+      resultsEl.innerHTML = `<div class="msg error">评估失败：${escapeHtml(err.message)}</div>`;
+    } finally {
+      runBtn.disabled = false;
+    }
+  });
+}
+
+function formatApiError(detail) {
+  if (typeof detail === 'string') return detail;
+  return JSON.stringify(detail, null, 2);
+}
+
+function renderIteratorResult(container, payload) {
+  const result = payload.result || {};
+  const evaluation = result.evaluation || result;
+  const findings = evaluation.findings || [];
+  const scores = evaluation.dimension_scores || {};
+  const candidateDocx = result.candidate_docx || evaluation.candidate?.path || '';
+  container.innerHTML = `
+    <div class="iterator-summary">
+      <div class="score-tile">
+        <span>总分</span>
+        <strong>${escapeHtml(evaluation.score ?? '-')}</strong>
+      </div>
+      <div class="score-tile">
+        <span>模式</span>
+        <strong>${escapeHtml(payload.mode === 'generated_docx' ? '生成结果评估' : '静态预检')}</strong>
+      </div>
+      <div class="score-tile">
+        <span>问题数</span>
+        <strong>${findings.length}</strong>
+      </div>
+    </div>
+    <div class="iterator-section">
+      <h4>维度评分</h4>
+      <div class="dimension-grid">
+        ${Object.entries(scores).map(([key, value]) => `
+          <div><span>${escapeHtml(key)}</span><strong>${escapeHtml(value)}</strong></div>
+        `).join('') || '<p>暂无维度评分</p>'}
+      </div>
+    </div>
+    <div class="iterator-section">
+      <h4>主要发现</h4>
+      <div class="finding-list">
+        ${findings.map((finding) => `
+          <div class="finding-card finding-${escapeHtml(finding.severity || 'medium')}">
+            <div class="item-card-head">
+              <strong>${escapeHtml(finding.category || 'finding')}</strong>
+              <span class="status-pill">${escapeHtml(finding.severity || '-')}</span>
+            </div>
+            <p>${escapeHtml(finding.message || '')}</p>
+            <small>${escapeHtml(finding.suggested_skill_change || '')}</small>
+          </div>
+        `).join('') || '<p>未发现明显问题。</p>'}
+      </div>
+    </div>
+    <div class="iterator-section">
+      <h4>建议</h4>
+      <p>${escapeHtml(evaluation.recommended_patch_summary || '暂无建议')}</p>
+      ${candidateDocx ? `<p class="status-text">候选文档：${escapeHtml(candidateDocx)}</p>` : ''}
+    </div>
+    <details class="iterator-json-pane" open>
+      <summary>原始 JSON</summary>
+      <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+    </details>
+  `;
+}
+
 function renderRetrieveResults(container, nodes) {
   container.innerHTML = '';
   if (!nodes.length) {
@@ -1323,7 +1525,8 @@ function initPageAgentPage() {
     }
   });
 
-  runBtn.addEventListener('click', async () => {
+  runBtn.addEventListener('click', async (event) => {
+    event.stopImmediatePropagation();
     const task = taskInput.value.trim();
     if (!task) {
       statusEl.textContent = '请输入一条 Page Agent 测试指令';
@@ -1333,23 +1536,45 @@ function initPageAgentPage() {
     runBtn.disabled = true;
     statusEl.textContent = 'Page Agent 正在执行测试指令...';
     try {
-      const resp = await fetch('/api/page-agent/task', {
+      const resp = await fetch('/api/page-agent/task/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task }),
       });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || data.message || '执行失败');
-      statusEl.textContent = 'Page Agent 执行完成';
+      if (!resp.ok || !resp.body) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.detail || data.message || 'Page Agent 执行失败');
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalMessage = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer = parseSseChunk(buffer + decoder.decode(value, { stream: true }), (sseEvent, data) => {
+          if (sseEvent === 'status') {
+            statusEl.textContent = data.message || 'Page Agent 正在执行...';
+            addMessage(pageAgentMessagesEl, 'status', data.message || 'Page Agent 正在执行...');
+          } else if (sseEvent === 'trace') {
+            addTraceMessage(pageAgentMessagesEl, data.message || 'Page Agent 执行中...');
+          } else if (sseEvent === 'done') {
+            finalMessage = data.message || 'Page Agent 执行完成';
+            statusEl.textContent = 'Page Agent 执行完成';
+          } else if (sseEvent === 'error') {
+            throw new Error(data.message || 'Page Agent 执行失败');
+          }
+        });
+      }
       const msg = addMessage(pageAgentMessagesEl, 'assistant', '');
-      await typeInto(msg, data.result || '无返回内容');
+      await typeInto(msg, finalMessage || '无返回内容');
     } catch (err) {
       statusEl.textContent = 'Page Agent 执行失败：' + err.message;
       addMessage(pageAgentMessagesEl, 'error', 'Page Agent 执行失败：' + err.message);
     } finally {
       runBtn.disabled = false;
     }
-  });
+  }, { capture: true });
 }
 
 function parseSseChunk(buffer, onEvent) {

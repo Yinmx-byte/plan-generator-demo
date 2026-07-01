@@ -2,16 +2,20 @@
 
 import os
 import re
+import json
+import shutil
+import subprocess
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
 from rag import get_knowledge_base, reset_knowledge_base
 from rag import bailian_admin
-from runtime import SKILLS_ROOT, get_skill_registry, reset_skill_runtime
+from runtime import ROOT, SKILLS_ROOT, get_skill_registry, reset_skill_runtime
 
 router = APIRouter()
 
@@ -20,23 +24,54 @@ class SkillUpdateRequest(BaseModel):
     content: str
 
 
+class SkillIteratorRequest(BaseModel):
+    skill_name: str
+    reference_dir: str
+    message: str = ""
+    state_json: str = ""
+    allow_partial: bool = False
+    api_url: str = ""
+
+
 class BailianIndexCreateRequest(BaseModel):
     category_name: str = ""
     index_name: str = ""
+
+
+SKILL_DISPLAY_NAMES = {
+    "cloud-maintenance-master-workflow": "云平台主控工作流",
+    "maintenance-plan-composer": "检修方案通用编排",
+    "ecs-lifecycle-maintenance": "ECS 生命周期检修",
+    "slb-maintenance-plan": "负载均衡 SLB 检修",
+    "oss-maintenance-plan": "对象存储 OSS 检修",
+    "rds-maintenance-plan": "RDS 数据库检修",
+    "redis-maintenance-plan": "Redis 检修",
+    "mq-maintenance-plan": "消息队列 MQ 检修",
+    "polardb-maintenance-plan": "PolarDB 数据库检修",
+    "database-maintenance-plan": "数据库通用检修",
+    "component-scaling-plan": "组件扩缩容检修",
+    "restart-maintenance-plan": "重启类检修",
+    "k8s-worker-maintenance": "K8s Worker 检修",
+    "generic-maintenance-plan": "通用兜底检修",
+    "docx-document-editor": "DOCX 文档修订",
+}
+
+
+def skill_payload(skill) -> dict:
+    display_name = skill.metadata.get("display_name") or SKILL_DISPLAY_NAMES.get(skill.name) or skill.name
+    return {
+        "name": skill.name,
+        "display_name": display_name,
+        "description": skill.description,
+        "path": str(skill.path),
+    }
 
 
 @router.get("/api/skills")
 async def list_skills():
     registry = get_skill_registry()
     return {
-        "skills": [
-            {
-                "name": skill.name,
-                "description": skill.description,
-                "path": str(skill.path),
-            }
-            for skill in registry.skills
-        ]
+        "skills": [skill_payload(skill) for skill in registry.skills]
     }
 
 
@@ -120,14 +155,7 @@ async def upload_skill(
     await reset_skill_runtime()
     return {
         "status": "ok",
-        "skills": [
-            {
-                "name": skill.name,
-                "description": skill.description,
-                "path": str(skill.path),
-            }
-            for skill in get_skill_registry().skills
-        ],
+        "skills": [skill_payload(skill) for skill in get_skill_registry().skills],
     }
 
 
@@ -140,6 +168,7 @@ async def get_skill_detail(skill_name: str):
         raise HTTPException(status_code=404, detail="未找到 SKILL.md")
     return {
         "name": skill.name,
+        "display_name": skill_payload(skill)["display_name"],
         "description": skill.description,
         "path": str(skill.path),
         "content": skill_file.read_text(encoding="utf-8"),
@@ -164,8 +193,150 @@ async def update_skill_detail(skill_name: str, request: SkillUpdateRequest):
     return {
         "status": "ok",
         "name": updated.name,
+        "display_name": skill_payload(updated)["display_name"],
         "description": updated.description,
         "path": str(updated.path),
+    }
+
+
+@router.delete("/api/skills/{skill_name}")
+async def delete_skill(skill_name: str):
+    skill = get_skill_or_404(skill_name)
+    ensure_within_directory(SKILLS_ROOT, skill.path)
+    if skill.path == SKILLS_ROOT:
+        raise HTTPException(status_code=400, detail="不能删除 Skill 根目录")
+    shutil.rmtree(skill.path)
+    await reset_skill_runtime()
+    return {
+        "status": "ok",
+        "deleted": skill.name,
+        "skills": [skill_payload(item) for item in get_skill_registry().skills],
+    }
+
+
+def iterator_script_path(name: str) -> Path:
+    script = Path.home() / ".codex" / "skills" / "maintenance-skill-iterator" / "scripts" / name
+    if not script.exists():
+        raise HTTPException(status_code=500, detail=f"未找到自迭代脚本：{script}")
+    return script
+
+
+def run_iterator_subprocess(command: list[str], timeout: int = 420) -> dict:
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    process = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        env=env,
+    )
+    if process.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "自迭代脚本执行失败",
+                "returncode": process.returncode,
+                "stdout": process.stdout[-4000:],
+                "stderr": process.stderr[-4000:],
+            },
+        )
+    try:
+        return json.loads(process.stdout)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "自迭代脚本输出不是合法 JSON",
+                "stdout": process.stdout[-4000:],
+            },
+        ) from exc
+
+
+def skill_product_hint(skill_name: str) -> str:
+    lowered = skill_name.lower()
+    for product in ("ecs", "slb", "oss", "rds", "redis", "mq", "polardb", "k8s"):
+        if product in lowered:
+            return product
+    return ""
+
+
+def resolve_iterator_reference_dir(reference_dir: Path, skill_name: str) -> Path:
+    if any(path.suffix.lower() == ".docx" and not path.name.startswith("~$") for path in reference_dir.iterdir()):
+        return reference_dir
+    product = skill_product_hint(skill_name)
+    doc_dirs = sorted(
+        {
+            path.parent
+            for path in reference_dir.rglob("*.docx")
+            if not path.name.startswith("~$")
+        },
+        key=lambda item: (len(item.parts), str(item)),
+    )
+    if not doc_dirs:
+        raise HTTPException(status_code=400, detail="优质文档路径下未找到可评估的 docx 文件")
+    if product:
+        for path in doc_dirs:
+            if product.lower() in str(path).lower():
+                return path
+    return doc_dirs[0]
+
+
+@router.post("/api/skill-iterator/run")
+async def run_skill_iterator(request_body: SkillIteratorRequest, request: Request):
+    skill = get_skill_or_404(request_body.skill_name)
+    reference_dir = Path(request_body.reference_dir)
+    if not reference_dir.exists() or not reference_dir.is_dir():
+        raise HTTPException(status_code=400, detail="优质文档路径不存在或不是目录")
+    resolved_reference_dir = resolve_iterator_reference_dir(reference_dir, skill.name)
+    source_skill = skill.path / "SKILL.md"
+    ensure_within_directory(SKILLS_ROOT, source_skill)
+    output_dir = ROOT.parent / "docs" / "iterator-output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    has_generation_input = bool(request_body.message.strip() or request_body.state_json.strip())
+    if has_generation_input:
+        script = iterator_script_path("generate_and_evaluate_plan.py")
+        api_url = request_body.api_url.strip() or str(request.base_url).rstrip("/") + "/api/dev/plan-test"
+        command = [
+            sys.executable,
+            str(script),
+            "--api-url",
+            api_url,
+            "--reference-dir",
+            str(resolved_reference_dir),
+            "--source-skill",
+            str(source_skill),
+            "--output-dir",
+            str(output_dir),
+        ]
+        if request_body.message.strip():
+            command.extend(["--message", request_body.message.strip()])
+        if request_body.state_json.strip():
+            command.extend(["--state-json", request_body.state_json.strip()])
+        if request_body.allow_partial:
+            command.append("--allow-partial")
+    else:
+        script = iterator_script_path("evaluate_plan_quality.py")
+        command = [
+            sys.executable,
+            str(script),
+            "--reference-dir",
+            str(resolved_reference_dir),
+            "--candidate-skill",
+            str(source_skill),
+        ]
+
+    result = await run_blocking(run_iterator_subprocess, command)
+    return {
+        "status": "ok",
+        "mode": "generated_docx" if has_generation_input else "skill_static_preflight",
+        "skill": skill_payload(skill),
+        "reference_dir": str(reference_dir),
+        "resolved_reference_dir": str(resolved_reference_dir),
+        "result": result,
     }
 
 
