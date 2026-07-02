@@ -21,6 +21,7 @@ backend/.env
 uvicorn.*.log
 .agentscope_rag/
 backend/.agentscope_rag/
+backend/skill_versions/
 
 # Generated documents
 *.docx

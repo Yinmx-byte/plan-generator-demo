@@ -2,15 +2,17 @@ const pageHost = document.getElementById('pageHost');
 const pageTitle = document.getElementById('pageTitle');
 const pageEyebrow = document.getElementById('pageEyebrow');
 const navItems = [...document.querySelectorAll('.nav-item')];
+const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
 const resetBtn = document.getElementById('resetBtn');
 const refreshAllBtn = document.getElementById('refreshAllBtn');
 const planSessionStorageKey = 'planGeneratorTabState';
 
 const pageMeta = {
-  plan: { title: '方案生成', eyebrow: 'Conversation' },
+  plan: { title: '智能对话', eyebrow: 'Conversation' },
   skills: { title: 'Skill 管理', eyebrow: 'AgentScope' },
   knowledge: { title: '知识库', eyebrow: 'RAG' },
   'page-agent': { title: 'Page Agent', eyebrow: 'MCP' },
+  iterator: { title: '质量迭代', eyebrow: 'Skill Loop' },
 };
 
 function readPlanSessionState() {
@@ -26,6 +28,7 @@ let sessionId = planSessionState.sessionId || null;
 let currentPage = 'plan';
 let messagesEl = null;
 let pageAgentMessagesEl = null;
+let showToolTrace = Boolean(planSessionState.showToolTrace);
 let currentDocumentFileId = planSessionState.fileId || null;
 let currentDocumentDownloadUrl = planSessionState.downloadUrl || '';
 let currentDocumentFilename = planSessionState.filename || '';
@@ -38,7 +41,48 @@ let documentTitleEl = null;
 let documentDownloadLink = null;
 let documentEditStatus = null;
 let documentDialog = null;
+let documentEvalReferenceDir = null;
+let documentEvalSkillSelect = null;
+let documentEvaluationResult = null;
 let documentVisualDirty = false;
+
+const iteratorStateFields = [
+  { key: 'background', label: '检修背景/检修事项', type: 'textarea', required: true },
+  { key: 'maintenance_type', label: '检修类型', type: 'select', required: true, options: ['配置变更', '组件升级', '组件扩缩容', '数据库变更', '日常维护（原硬件设备）', '其他'] },
+  { key: 'network', label: '网络环境', type: 'select', required: true, options: ['内网', '外网', '内、外网'] },
+  { key: 'location', label: '实施地点', type: 'input', required: true },
+  { key: 'instances', label: '涉及实例/组织/资源集', type: 'textarea', required: true },
+  { key: 'schedule_year', label: '计划年度', type: 'input' },
+  { key: 'schedule_start', label: '检修开始时间', type: 'input', required: true },
+  { key: 'schedule_end', label: '检修结束时间', type: 'input', required: true },
+  { key: 'provider', label: '方案提供人', type: 'input', required: true },
+  { key: 'executor', label: '检修执行人', type: 'input', required: true },
+  { key: 'reviewer', label: '检修复核人', type: 'input', required: true },
+  { key: 'security_officer', label: '安全责任人', type: 'input', required: true },
+  { key: 'ascm_account', label: 'ASCM 授权账号', type: 'input', required: true },
+  { key: 'bastion_account', label: '堡垒机账号', type: 'input', required: true },
+  { key: 'tech_params', label: '技术参数', type: 'textarea' },
+  { key: 'ops_detail', label: '补充要求/操作约束', type: 'textarea' },
+];
+
+const iteratorSampleState = {
+  background: '内网总部 ESB 组件因业务扩容需要新增 ECS 云服务器实例，项目组已提报问题工单，需通过本次检修完成资源创建和配置确认。',
+  maintenance_type: '配置变更',
+  network: '内网',
+  location: '国网亦庄数据中心二期运维专区',
+  instances: '内网总部 ESB 组件创建 ECS 实例 | 数字化工作部 | 总部ESB组件系统资源集',
+  schedule_year: '2026年',
+  schedule_start: '2026年5月25日 18:00',
+  schedule_end: '2026年5月25日 20:00',
+  provider: '张三',
+  executor: '李四',
+  reviewer: '王五',
+  security_officer: '赵六',
+  ascm_account: 'ascm_demo',
+  bastion_account: 'bastion_demo',
+  tech_params: '云环境：内网；实例名称：总部ESB-业务扩容-01、总部ESB-业务扩容-02；数量：2台；规格：4核16G；系统盘：100G；镜像：centos7.9-latest-v1；VPC：VPC10；交换机：总部ESB组件生产VSwitch；安全组：总部ESB组件系统生产安全组。',
+  ops_detail: '变更前后需截图留痕，创建完成后核对实例状态、规格、网络、安全组和资源集归属，不涉及业务重启。',
+};
 
 localStorage.removeItem('planGeneratorSessionId');
 
@@ -46,6 +90,7 @@ function persistPlanState() {
   planSessionState = {
     sessionId,
     messagesHtml: messagesEl?.innerHTML || planSessionState.messagesHtml || '',
+    showToolTrace,
     fileId: currentDocumentFileId,
     downloadUrl: currentDocumentDownloadUrl,
     filename: currentDocumentFilename,
@@ -69,16 +114,246 @@ function scrollToBottom(el) {
   if (el) el.scrollTop = el.scrollHeight;
 }
 
+function applyTraceVisibility(container = messagesEl) {
+  container?.classList.toggle('hide-trace', !showToolTrace);
+}
+
+function shouldRenderMarkdown(role) {
+  return role === 'assistant';
+}
+
+function renderInlineMarkdown(value) {
+  let html = escapeHtml(value);
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  return html;
+}
+
+function splitMarkdownTableRow(line) {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+function isMarkdownTableSeparator(line) {
+  return /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$/.test(line.trim());
+}
+
+function renderMarkdownTable(lines) {
+  const headers = splitMarkdownTableRow(lines[0]);
+  const rows = lines.slice(2).map(splitMarkdownTableRow);
+  const headHtml = headers.map((cell) => `<th>${renderInlineMarkdown(cell)}</th>`).join('');
+  const bodyHtml = rows
+    .map((row) => `<tr>${row.map((cell) => `<td>${renderInlineMarkdown(cell)}</td>`).join('')}</tr>`)
+    .join('');
+  return `<div class="md-table-wrap"><table><thead><tr>${headHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`;
+}
+
+function renderMarkdown(text) {
+  const source = String(text || '').replace(/\r\n/g, '\n');
+  if (!source.trim()) return '';
+
+  const codeBlocks = [];
+  const protectedSource = source.replace(/```[^\n]*\n?([\s\S]*?)```/g, (_match, code) => {
+    const index = codeBlocks.push(`<pre class="md-code"><code>${escapeHtml(code.trimEnd())}</code></pre>`) - 1;
+    return `\u0000CODE${index}\u0000`;
+  });
+
+  const lines = protectedSource.split('\n');
+  const html = [];
+  let paragraph = [];
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    html.push(`<p>${paragraph.map(renderInlineMarkdown).join('<br>')}</p>`);
+    paragraph = [];
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    const codeMatch = trimmed.match(/^\u0000CODE(\d+)\u0000$/);
+    if (codeMatch) {
+      flushParagraph();
+      html.push(codeBlocks[Number(codeMatch[1])] || '');
+      continue;
+    }
+
+    if (!trimmed) {
+      flushParagraph();
+      continue;
+    }
+
+    if (/^-{3,}$/.test(trimmed)) {
+      flushParagraph();
+      html.push('<hr>');
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{2,4})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      const level = Math.min(heading[1].length, 4);
+      html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+      continue;
+    }
+
+    if (splitMarkdownTableRow(line).length > 1 && lines[i + 1] && isMarkdownTableSeparator(lines[i + 1])) {
+      flushParagraph();
+      const tableLines = [line, lines[i + 1]];
+      i += 2;
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+        tableLines.push(lines[i]);
+        i += 1;
+      }
+      i -= 1;
+      html.push(renderMarkdownTable(tableLines));
+      continue;
+    }
+
+    const unordered = trimmed.match(/^[-*]\s+(.+)$/);
+    const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/);
+    if (unordered || ordered) {
+      flushParagraph();
+      const orderedList = Boolean(ordered);
+      const tag = orderedList ? 'ol' : 'ul';
+      const items = [];
+      while (i < lines.length) {
+        const candidate = lines[i].trim();
+        const match = orderedList ? candidate.match(/^\d+[.)]\s+(.+)$/) : candidate.match(/^[-*]\s+(.+)$/);
+        if (!match) break;
+        items.push(`<li>${renderInlineMarkdown(match[1])}</li>`);
+        i += 1;
+      }
+      i -= 1;
+      html.push(`<${tag}>${items.join('')}</${tag}>`);
+      continue;
+    }
+
+    paragraph.push(line);
+  }
+
+  flushParagraph();
+  return html.join('');
+}
+
+function getMessageContentEl(el) {
+  return el?.querySelector?.(':scope > .msg-content') || el;
+}
+
+function setMessageContent(el, text) {
+  if (!el) return;
+  el.dataset.rawText = text || '';
+  const contentEl = getMessageContentEl(el);
+  if (el.classList.contains('markdown-body')) {
+    contentEl.innerHTML = renderMarkdown(text);
+  } else {
+    contentEl.textContent = text;
+  }
+}
+
+function deriveMessageText(div) {
+  if (div.dataset.rawText) return div.dataset.rawText;
+  const clone = div.cloneNode(true);
+  clone.querySelectorAll('.copy-message-btn, .document-message-actions').forEach((node) => node.remove());
+  return clone.innerText.trim();
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
+}
+
+function addCopyButton(div) {
+  if (!div || div.querySelector(':scope > .copy-message-btn')) return;
+  if (!div.classList.contains('assistant') && !div.classList.contains('user')) return;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'copy-message-btn';
+  const label = div.classList.contains('user') ? '复制问题' : '复制回答';
+  button.title = label;
+  button.setAttribute('aria-label', button.title);
+  button.dataset.label = label;
+  button.textContent = label;
+  button.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const originalText = button.dataset.label || button.textContent;
+    try {
+      await copyTextToClipboard(deriveMessageText(div));
+      button.textContent = '已复制';
+      button.classList.add('copied');
+      setTimeout(() => {
+        button.textContent = originalText;
+        button.classList.remove('copied');
+      }, 1100);
+    } catch (_err) {
+      button.textContent = '失败';
+      setTimeout(() => {
+        button.textContent = originalText;
+      }, 1100);
+    }
+  });
+  div.appendChild(button);
+}
+
+function ensureMessageContentShell(div, rawText = null) {
+  if (!div || div.querySelector(':scope > .msg-content')) return;
+  const content = document.createElement('div');
+  content.className = 'msg-content';
+  const movable = [...div.childNodes].filter((node) => {
+    if (node.nodeType !== Node.ELEMENT_NODE) return true;
+    return !node.classList.contains('copy-message-btn') && !node.classList.contains('document-message-actions');
+  });
+  movable.forEach((node) => content.appendChild(node));
+  div.insertBefore(content, div.firstChild);
+  if (rawText !== null) div.dataset.rawText = rawText;
+}
+
+function upgradeStoredMessages(container = messagesEl) {
+  container?.querySelectorAll('.msg.user, .msg.assistant').forEach((div) => {
+    const rawText = deriveMessageText(div);
+    ensureMessageContentShell(div, rawText);
+    if (div.classList.contains('assistant')) {
+      div.classList.add('markdown-body');
+      setMessageContent(div, rawText);
+    } else {
+      setMessageContent(div, rawText);
+    }
+    addCopyButton(div);
+  });
+  if (container === messagesEl) persistPlanState();
+}
+
 function addMessage(container, role, text, extraHtml = '') {
   if (!container) return null;
   const div = document.createElement('div');
   div.className = 'msg ' + role;
-  div.textContent = text;
+  if (shouldRenderMarkdown(role)) div.classList.add('markdown-body');
+  const content = document.createElement('div');
+  content.className = 'msg-content';
+  div.appendChild(content);
+  setMessageContent(div, text);
   if (extraHtml) {
     const wrap = document.createElement('div');
     wrap.innerHTML = extraHtml;
     div.appendChild(wrap);
   }
+  addCopyButton(div);
   container.appendChild(div);
   scrollToBottom(container);
   if (container === messagesEl) persistPlanState();
@@ -88,26 +363,86 @@ function addMessage(container, role, text, extraHtml = '') {
 function addTraceMessage(container, text) {
   if (!container || !text) return null;
   if (/read_file/i.test(text)) return null;
+  const meta = classifyTraceMessage(text);
   const details = document.createElement('details');
-  details.className = 'msg trace trace-collapsible';
+  details.className = `msg trace trace-collapsible trace-${meta.tone}`;
   const summary = document.createElement('summary');
-  const firstLine = text.split('\n')[0] || 'Agent 执行细节';
-  summary.textContent = firstLine.replace(/^调用工具：/, '调用工具 · ').replace(/^工具返回：/, '工具返回 · ');
+  summary.innerHTML = `
+    <span class="trace-stage">${escapeHtml(meta.stage)}</span>
+    <span class="trace-detail">${escapeHtml(meta.detail)}</span>
+  `;
   const pre = document.createElement('pre');
   pre.textContent = text;
   details.appendChild(summary);
   details.appendChild(pre);
   container.appendChild(details);
+  if (container === messagesEl) applyTraceVisibility(container);
   scrollToBottom(container);
   if (container === messagesEl) persistPlanState();
   return details;
 }
 
+function classifyTraceMessage(text) {
+  const firstLine = text.split('\n')[0] || 'Agent 执行细节';
+  const toolMatch = text.match(/^(调用工具|工具返回)：([^\n]+)/);
+  const toolName = toolMatch?.[2]?.trim() || '';
+  if (text.startsWith('大步骤：')) {
+    const lines = text.split('\n');
+    return {
+      stage: lines[0].replace('大步骤：', '').trim() || '工作流',
+      detail: lines[1] || 'Master Agent 正在规划任务',
+      tone: 'intent',
+    };
+  }
+  if (/query_cloud|资源|云监控|Resource Center/i.test(toolName + text)) {
+    return {
+      stage: '云资源问数',
+      detail: toolMatch ? `${toolMatch[1]} · ${toolName}` : firstLine,
+      tone: 'query',
+    };
+  }
+  if (/update_requirements|check_missing_requirements|get_session_snapshot/.test(toolName)) {
+    return {
+      stage: '需求理解',
+      detail: toolMatch ? `${toolMatch[1]} · ${toolName}` : firstLine,
+      tone: 'intent',
+    };
+  }
+  if (/list_registered_skills|retrieve_knowledge|prepare_plan_context/.test(toolName)) {
+    return {
+      stage: '依据准备',
+      detail: toolMatch ? `${toolMatch[1]} · ${toolName}` : firstLine,
+      tone: 'context',
+    };
+  }
+  if (/generate_maintenance_plan|get_generated_document_info/.test(toolName)) {
+    return {
+      stage: '文档生成',
+      detail: toolMatch ? `${toolMatch[1]} · ${toolName}` : firstLine,
+      tone: 'generate',
+    };
+  }
+  if (/Page Agent|history|activity|browser|execute_task/i.test(toolName + text)) {
+    return {
+      stage: '浏览器验证',
+      detail: firstLine,
+      tone: 'browser',
+    };
+  }
+  return {
+    stage: '工具调用',
+    detail: firstLine.replace(/^调用工具：/, '调用工具 · ').replace(/^工具返回：/, '工具返回 · '),
+    tone: 'neutral',
+  };
+}
+
 async function typeInto(el, text) {
-  el.textContent = '';
+  let current = '';
+  setMessageContent(el, '');
   const step = Math.max(1, Math.ceil(text.length / 90));
   for (let i = 0; i < text.length; i += step) {
-    el.textContent += text.slice(i, i + step);
+    current += text.slice(i, i + step);
+    setMessageContent(el, current);
     scrollToBottom(el.parentElement);
     await new Promise((resolve) => setTimeout(resolve, 8));
   }
@@ -116,6 +451,15 @@ async function typeInto(el, text) {
 
 function setActiveNav(page) {
   navItems.forEach((item) => item.classList.toggle('active', item.dataset.page === page));
+}
+
+function setSidebarCollapsed(collapsed) {
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  if (sidebarToggleBtn) {
+    sidebarToggleBtn.setAttribute('aria-expanded', String(!collapsed));
+    sidebarToggleBtn.querySelector('span').textContent = collapsed ? '›' : '‹';
+  }
+  localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
 }
 
 async function loadPage(page) {
@@ -131,6 +475,7 @@ async function loadPage(page) {
   if (page === 'skills') initSkillsPage();
   if (page === 'knowledge') initKnowledgePage();
   if (page === 'page-agent') initPageAgentPage();
+  if (page === 'iterator') initIteratorPage();
 }
 
 function renderItemGrid(container, items, emptyText, render) {
@@ -178,7 +523,7 @@ async function loadSkills() {
   const countEl = document.getElementById('skillCount');
   if (!listEl) return;
   try {
-    const resp = await fetch('/api/skills');
+    const resp = await fetch('/api/skills?scope=maintenance');
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || '加载失败');
     const skills = data.skills || [];
@@ -186,21 +531,62 @@ async function loadSkills() {
     renderItemGrid(listEl, skills, '暂无 Skill', (skill) => {
       const item = document.createElement('div');
       item.className = 'item-card';
+      const displayName = skill.display_name || skill.name;
+      const versionText = skill.version ? `v${skill.version}` : '未标版本';
       item.innerHTML = `
         <div>
-          <div class="item-title">${escapeHtml(skill.name)}</div>
+          <div class="item-title-row">
+            <div class="item-title">${escapeHtml(displayName)}</div>
+            <span class="status-pill skill-version-pill">${escapeHtml(versionText)}</span>
+          </div>
+          <div class="item-alias">${escapeHtml(skill.name)}</div>
         </div>
         <div class="item-meta">${escapeHtml(skill.description || '未填写描述')}</div>
         <div class="card-actions">
-          <button class="icon-action" type="button" title="编辑 SKILL.md" aria-label="编辑 ${escapeHtml(skill.name)}">编辑</button>
+          <button class="icon-action" data-action="edit" type="button" title="编辑 SKILL.md" aria-label="编辑 ${escapeHtml(displayName)}">编辑</button>
+          <button class="icon-action danger" data-action="delete" type="button" title="删除 Skill" aria-label="删除 ${escapeHtml(displayName)}">删除</button>
         </div>
       `;
-      item.querySelector('.icon-action').addEventListener('click', () => openSkillEditor(skill.name));
+      item.querySelector('[data-action="edit"]').addEventListener('click', () => openSkillEditor(skill.name));
+      item.querySelector('[data-action="delete"]').addEventListener('click', () => deleteSkill(skill.name, displayName));
       return item;
     });
   } catch (err) {
     listEl.innerHTML = `<div class="msg error">Skill 加载失败：${escapeHtml(err.message)}</div>`;
   }
+}
+
+async function deleteSkill(skillName, displayName = skillName) {
+  const uploadStatus = document.getElementById('uploadStatus');
+  if (!confirm(`确认删除 Skill「${displayName}」？该操作会删除后台对应目录。`)) return;
+  if (uploadStatus) uploadStatus.textContent = `正在删除 ${displayName}...`;
+  try {
+    const resp = await fetch(`/api/skills/${encodeURIComponent(skillName)}`, { method: 'DELETE' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '删除失败');
+    if (uploadStatus) uploadStatus.textContent = `已删除 ${displayName}，Skill 已刷新`;
+    await loadSkills();
+  } catch (err) {
+    if (uploadStatus) uploadStatus.textContent = '删除失败：' + err.message;
+  }
+}
+
+async function populateSkillSelect(selectEl, preferredPattern = /ecs/i, options = {}) {
+  if (!selectEl) return [];
+  const scope = options.scope || 'maintenance';
+  const resp = await fetch(`/api/skills?scope=${encodeURIComponent(scope)}`);
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.detail || 'Skill 加载失败');
+  const skills = data.skills || [];
+  selectEl.innerHTML = skills
+    .map((skill) => {
+      const label = skill.version ? `${skill.display_name || skill.name} · v${skill.version}` : (skill.display_name || skill.name);
+      return `<option value="${escapeHtml(skill.name)}">${escapeHtml(label)}</option>`;
+    })
+    .join('');
+  const preferred = [...selectEl.options].find((option) => preferredPattern.test(option.value) || preferredPattern.test(option.textContent));
+  if (preferred) selectEl.value = preferred.value;
+  return skills;
 }
 
 async function openSkillEditor(skillName) {
@@ -210,6 +596,8 @@ async function openSkillEditor(skillName) {
   const editor = document.getElementById('skillEditor');
   const status = document.getElementById('skillEditStatus');
   const saveBtn = document.getElementById('saveSkillBtn');
+  const versionSelect = document.getElementById('skillVersionSelect');
+  const rollbackBtn = document.getElementById('rollbackSkillBtn');
   if (!dialog || !editor) return;
 
   title.textContent = `编辑 ${skillName}`;
@@ -217,6 +605,8 @@ async function openSkillEditor(skillName) {
   status.textContent = '';
   editor.value = '';
   saveBtn.disabled = true;
+  if (versionSelect) versionSelect.innerHTML = '<option value="">暂无历史版本</option>';
+  if (rollbackBtn) rollbackBtn.disabled = true;
   dialog.dataset.skillName = skillName;
   dialog.showModal();
 
@@ -225,11 +615,52 @@ async function openSkillEditor(skillName) {
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || '读取失败');
     editor.value = data.content || '';
-    meta.textContent = data.path || '';
+    meta.textContent = `${data.version ? `当前版本 v${data.version} · ` : ''}${data.path || ''}`;
     saveBtn.disabled = false;
+    await loadSkillVersions(skillName);
     editor.focus();
   } catch (err) {
     status.textContent = '读取失败：' + err.message;
+  }
+}
+
+async function loadSkillVersions(skillName) {
+  const versionSelect = document.getElementById('skillVersionSelect');
+  const rollbackBtn = document.getElementById('rollbackSkillBtn');
+  if (!versionSelect || !rollbackBtn) return [];
+  const resp = await fetch(`/api/skills/${encodeURIComponent(skillName)}/versions`);
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.detail || '版本加载失败');
+  const versions = data.versions || [];
+  versionSelect.innerHTML = versions.length
+    ? versions.map((item) => {
+        const label = `${item.created_at || item.version_id} · ${item.skill_version || '未标版本'} · ${item.reason || 'snapshot'}`;
+        return `<option value="${escapeHtml(item.version_id)}">${escapeHtml(label)}</option>`;
+      }).join('')
+    : '<option value="">暂无历史版本</option>';
+  rollbackBtn.disabled = !versions.length;
+  rollbackBtn.onclick = () => rollbackSkillVersion(skillName);
+  return versions;
+}
+
+async function rollbackSkillVersion(skillName) {
+  const versionSelect = document.getElementById('skillVersionSelect');
+  const status = document.getElementById('skillEditStatus');
+  if (!versionSelect?.value) return;
+  if (!confirm('确认回退到选中的 Skill 历史版本？当前内容会先自动保存为快照。')) return;
+  try {
+    const resp = await fetch(`/api/skills/${encodeURIComponent(skillName)}/rollback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version_id: versionSelect.value }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '回退失败');
+    if (status) status.textContent = '已回退到历史版本';
+    await openSkillEditor(skillName);
+    await loadSkills();
+  } catch (err) {
+    if (status) status.textContent = '回退失败：' + err.message;
   }
 }
 
@@ -657,6 +1088,41 @@ async function saveAndRenderDocument() {
   }
 }
 
+async function evaluateCurrentDocument() {
+  if (!currentDocumentFileId) {
+    setDocumentEditorState('未加载', '请先生成或打开一份 DOCX。');
+    return;
+  }
+  const referenceDir = documentEvalReferenceDir?.value?.trim();
+  if (!referenceDir) {
+    setDocumentEditorState('缺少参考目录', '请填写优质文档目录。');
+    return;
+  }
+  if (documentEvaluationResult) {
+    documentEvaluationResult.innerHTML = '<div class="item-card"><div class="item-title">正在评估当前 DOCX...</div></div>';
+  }
+  setDocumentEditorState('评估中', '正在用优质历史方案评估当前文档质量...');
+  try {
+    const resp = await fetch(`/api/documents/${encodeURIComponent(currentDocumentFileId)}/evaluate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reference_dir: referenceDir,
+        skill_name: documentEvalSkillSelect?.value || '',
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(formatApiError(data.detail || data.message || '评估失败'));
+    renderDocumentEvaluationResult(documentEvaluationResult, data);
+    setDocumentEditorState('评估完成', `当前文档评分：${data.result?.score ?? '-'}，问题数：${(data.result?.findings || []).length}`);
+  } catch (err) {
+    if (documentEvaluationResult) {
+      documentEvaluationResult.innerHTML = `<div class="msg error">评估失败：${escapeHtml(err.message)}</div>`;
+    }
+    setDocumentEditorState('评估失败', err.message);
+  }
+}
+
 async function deleteRemoteFile(fileId) {
   if (!fileId) return;
   const statusEl = document.getElementById('knowledgeUploadStatus');
@@ -741,6 +1207,7 @@ function initPlanPage() {
   const inputEl = document.getElementById('messageInput');
   const sendBtn = document.getElementById('sendBtn');
   const executeValidationInput = document.getElementById('executeValidationInput');
+  const showToolTraceInput = document.getElementById('showToolTraceInput');
   documentJsonEditor = document.getElementById('documentJsonEditor');
   documentPreview = document.getElementById('documentPreview');
   documentOutline = document.getElementById('documentOutline');
@@ -749,14 +1216,34 @@ function initPlanPage() {
   documentDownloadLink = document.getElementById('documentDownloadLink');
   documentEditStatus = document.getElementById('documentEditStatus');
   documentDialog = document.getElementById('documentDialog');
+  documentEvalReferenceDir = document.getElementById('documentEvalReferenceDir');
+  documentEvalSkillSelect = document.getElementById('documentEvalSkillSelect');
+  documentEvaluationResult = document.getElementById('documentEvaluationResult');
   const formatDocumentJsonBtn = document.getElementById('formatDocumentJsonBtn');
   const saveDocumentBtn = document.getElementById('saveDocumentBtn');
+  const evaluateDocumentBtn = document.getElementById('evaluateDocumentBtn');
+  populateSkillSelect(documentEvalSkillSelect, /ecs/i).catch((err) => {
+    if (documentEvaluationResult) {
+      documentEvaluationResult.innerHTML = `<div class="msg error">Skill 加载失败：${escapeHtml(err.message)}</div>`;
+    }
+  });
+  if (showToolTraceInput) {
+    showToolTraceInput.checked = showToolTrace;
+    showToolTraceInput.addEventListener('change', () => {
+      showToolTrace = showToolTraceInput.checked;
+      applyTraceVisibility(messagesEl);
+      persistPlanState();
+    });
+  }
+  applyTraceVisibility(messagesEl);
   if (planSessionState.messagesHtml) {
     messagesEl.innerHTML = planSessionState.messagesHtml;
+    upgradeStoredMessages(messagesEl);
     bindStoredDocumentActions();
+    applyTraceVisibility(messagesEl);
     scrollToBottom(messagesEl);
   } else {
-    addMessage(messagesEl, 'assistant', '请粘贴检修需求描述或需求文档。我会逐步抽取信息、追问缺失项，并在信息齐全后生成 Word 检修方案。');
+    addMessage(messagesEl, 'assistant', '你好，我可以协助生成检修方案、查询阿里云资源与监控指标、管理知识库依据，并通过 Page Agent 做浏览器侧验证。你可以直接描述问题或粘贴需求文档。');
   }
   setDocumentDownload(currentDocumentDownloadUrl, currentDocumentFilename);
   setDocumentEditorState(currentDocumentFileId ? '可编辑' : '未加载', currentDocumentFileId ? '已保留上一份生成文档。' : '未生成文档。');
@@ -778,6 +1265,7 @@ function initPlanPage() {
     }
   });
   saveDocumentBtn?.addEventListener('click', saveAndRenderDocument);
+  evaluateDocumentBtn?.addEventListener('click', evaluateCurrentDocument);
 
   const setBusy = (busy) => {
     sendBtn.disabled = busy;
@@ -834,7 +1322,7 @@ function initPlanPage() {
       return;
     }
     if (event === 'trace') {
-      addTraceMessage(messagesEl, data.message || 'Agent 执行中...');
+      if (showToolTrace) addTraceMessage(messagesEl, data.message || 'Agent 执行中...');
       return;
     }
     if (event === 'evidence') {
@@ -1033,6 +1521,276 @@ function initKnowledgePage() {
   });
 }
 
+async function initIteratorPage() {
+  const skillSelect = document.getElementById('iteratorSkillSelect');
+  const referenceInput = document.getElementById('iteratorReferenceDir');
+  const messageInput = document.getElementById('iteratorMessage');
+  const stateInput = document.getElementById('iteratorStateJson');
+  const stateFieldsEl = document.getElementById('iteratorStateFields');
+  const allowPartialInput = document.getElementById('iteratorAllowPartial');
+  const runBtn = document.getElementById('runIteratorBtn');
+  const preflightBtn = document.getElementById('runIteratorPreflightBtn');
+  const clearStateBtn = document.getElementById('clearIteratorStateBtn');
+  const fillSampleBtn = document.getElementById('fillIteratorSampleBtn');
+  const statusEl = document.getElementById('iteratorStatus');
+  const modeEl = document.getElementById('iteratorMode');
+  const resultsEl = document.getElementById('iteratorResults');
+  if (!skillSelect || !runBtn) return;
+
+  renderIteratorStateFields(stateFieldsEl);
+  stateFieldsEl?.addEventListener('input', () => updateIteratorStateJson(stateFieldsEl, stateInput));
+  stateFieldsEl?.addEventListener('change', () => updateIteratorStateJson(stateFieldsEl, stateInput));
+  clearStateBtn?.addEventListener('click', () => {
+    fillIteratorState(stateFieldsEl, {});
+    updateIteratorStateJson(stateFieldsEl, stateInput);
+  });
+  fillSampleBtn?.addEventListener('click', () => {
+    fillIteratorState(stateFieldsEl, iteratorSampleState);
+    updateIteratorStateJson(stateFieldsEl, stateInput);
+  });
+
+  try {
+    await populateSkillSelect(skillSelect, /ecs/i);
+  } catch (err) {
+    statusEl.textContent = 'Skill 加载失败：' + err.message;
+  }
+
+  async function runIterator({ preflight = false } = {}) {
+    const skillName = skillSelect.value;
+    const referenceDir = referenceInput.value.trim();
+    if (!skillName || !referenceDir) {
+      statusEl.textContent = '请选择 Skill 并填写优质文档目录';
+      return;
+    }
+    const state = updateIteratorStateJson(stateFieldsEl, stateInput);
+    const message = messageInput.value.trim();
+    if (!preflight) {
+      const validationMessage = validateIteratorGenerationInput(message, state);
+      if (validationMessage) {
+        statusEl.textContent = validationMessage;
+        return;
+      }
+    }
+    runBtn.disabled = true;
+    if (preflightBtn) preflightBtn.disabled = true;
+    statusEl.textContent = preflight ? '正在进行 Skill 静态预检...' : '正在生成候选文档并评估...';
+    modeEl.textContent = '运行中';
+    resultsEl.innerHTML = '<div class="item-card"><div class="item-title">正在生成/评估，请稍候...</div></div>';
+    try {
+      const resp = await fetch('/api/skill-iterator/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          skill_name: skillName,
+          reference_dir: referenceDir,
+          message: preflight ? '' : message,
+          state_json: preflight ? '' : stateInput.value.trim(),
+          allow_partial: allowPartialInput.checked,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(formatApiError(data.detail || data.message || '评估失败'));
+      modeEl.textContent = data.mode === 'generated_docx' ? '生成结果评估' : '静态预检';
+      statusEl.textContent = '评估完成';
+      renderIteratorResult(resultsEl, data);
+    } catch (err) {
+      statusEl.textContent = '评估失败：' + err.message;
+      modeEl.textContent = '失败';
+      resultsEl.innerHTML = `<div class="msg error">评估失败：${escapeHtml(err.message)}</div>`;
+    } finally {
+      runBtn.disabled = false;
+      if (preflightBtn) preflightBtn.disabled = false;
+    }
+  }
+
+  runBtn.addEventListener('click', () => runIterator({ preflight: false }));
+  preflightBtn?.addEventListener('click', () => runIterator({ preflight: true }));
+}
+
+function formatApiError(detail) {
+  if (typeof detail === 'string') return detail;
+  return JSON.stringify(detail, null, 2);
+}
+
+function renderIteratorStateFields(container) {
+  if (!container) return;
+  container.innerHTML = iteratorStateFields.map((field) => {
+    const marker = field.required ? '<b>*</b>' : '';
+    if (field.type === 'select') {
+      return `
+        <label class="state-field">
+          <span>${escapeHtml(field.label)}${marker}</span>
+          <select data-state-key="${escapeHtml(field.key)}">
+            <option value="">请选择</option>
+            ${(field.options || []).map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join('')}
+          </select>
+        </label>
+      `;
+    }
+    if (field.type === 'textarea') {
+      return `
+        <label class="state-field state-field-wide">
+          <span>${escapeHtml(field.label)}${marker}</span>
+          <textarea data-state-key="${escapeHtml(field.key)}"></textarea>
+        </label>
+      `;
+    }
+    return `
+      <label class="state-field">
+        <span>${escapeHtml(field.label)}${marker}</span>
+        <input data-state-key="${escapeHtml(field.key)}" type="text">
+      </label>
+    `;
+  }).join('');
+}
+
+function collectStateFromFields(container) {
+  const state = {};
+  container?.querySelectorAll('[data-state-key]').forEach((input) => {
+    const value = input.value.trim();
+    if (value) state[input.dataset.stateKey] = value;
+  });
+  return state;
+}
+
+function fillIteratorState(container, state) {
+  container?.querySelectorAll('[data-state-key]').forEach((input) => {
+    input.value = state[input.dataset.stateKey] || '';
+  });
+}
+
+function updateIteratorStateJson(container, stateInput) {
+  if (!stateInput) return {};
+  const state = collectStateFromFields(container);
+  stateInput.value = Object.keys(state).length ? JSON.stringify(state, null, 2) : '';
+  return state;
+}
+
+function validateIteratorGenerationInput(message, state) {
+  if (message.trim()) return '';
+  const missing = iteratorStateFields
+    .filter((field) => field.required && !state[field.key])
+    .map((field) => field.label);
+  if (missing.length) return '请填写测试需求，或补齐结构化参数：' + missing.slice(0, 4).join('、');
+  return '';
+}
+
+function renderIteratorResult(container, payload) {
+  const result = payload.result || {};
+  const evaluation = result.evaluation || result;
+  const findings = evaluation.findings || [];
+  const scores = evaluation.dimension_scores || {};
+  const candidateDocx = result.candidate_docx || evaluation.candidate?.path || '';
+  const draft = payload.draft || {};
+  const skillName = payload.skill?.name || '';
+  container.innerHTML = `
+    <div class="iterator-summary">
+      <div class="score-tile">
+        <span>Score</span>
+        <strong>${escapeHtml(evaluation.score ?? '-')}</strong>
+      </div>
+      <div class="score-tile">
+        <span>Mode</span>
+        <strong>${escapeHtml(payload.mode === 'generated_docx' ? 'Generated DOCX' : 'Static preflight')}</strong>
+      </div>
+      <div class="score-tile">
+        <span>Findings</span>
+        <strong>${findings.length}</strong>
+      </div>
+    </div>
+    <div class="iterator-section">
+      <h4>Dimension Scores</h4>
+      <div class="dimension-grid">
+        ${Object.entries(scores).map(([key, value]) => `
+          <div><span>${escapeHtml(key)}</span><strong>${escapeHtml(value)}</strong></div>
+        `).join('') || '<p>No dimension scores.</p>'}
+      </div>
+    </div>
+    <div class="iterator-section">
+      <h4>Findings</h4>
+      <div class="finding-list">
+        ${findings.map((finding) => `
+          <div class="finding-card finding-${escapeHtml(finding.severity || 'medium')}">
+            <div class="item-card-head">
+              <strong>${escapeHtml(finding.category || 'finding')}</strong>
+              <span class="status-pill">${escapeHtml(finding.severity || '-')}</span>
+            </div>
+            <p>${escapeHtml(finding.message || '')}</p>
+            <small>${escapeHtml(finding.suggested_skill_change || '')}</small>
+          </div>
+        `).join('') || '<p>No obvious findings.</p>'}
+      </div>
+    </div>
+    <div class="iterator-section">
+      <h4>Recommendation</h4>
+      <p>${escapeHtml(evaluation.recommended_patch_summary || 'No recommendation.')}</p>
+      ${candidateDocx ? `<p class="status-text">Candidate DOCX: ${escapeHtml(candidateDocx)}</p>` : ''}
+    </div>
+    <div class="iterator-section iterator-draft-section">
+      <div class="item-card-head">
+        <h4>Skill Candidate Update</h4>
+        <span class="status-pill">${draft.has_changes ? escapeHtml(draft.suggested_version ? `v${draft.suggested_version}` : 'pending') : 'no change'}</span>
+      </div>
+      ${draft.has_changes ? `
+        <p>The evaluation was converted into a candidate SKILL.md update. Review the diff before applying it.</p>
+        <pre class="diff-view">${escapeHtml(draft.diff || '')}</pre>
+        <div class="card-actions">
+          <button class="primary" data-action="apply-iterator-draft" type="button">Apply candidate</button>
+          <button data-action="reject-iterator-draft" type="button">Discard update</button>
+        </div>
+      ` : '<p>No write-back candidate was produced for this run.</p>'}
+    </div>
+    <details class="iterator-json-pane" open>
+      <summary>Raw JSON</summary>
+      <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+    </details>
+  `;
+  container.querySelector('[data-action="apply-iterator-draft"]')?.addEventListener('click', () => {
+    applyIteratorDraft(container, skillName, draft.content);
+  });
+  container.querySelector('[data-action="reject-iterator-draft"]')?.addEventListener('click', () => {
+    const section = container.querySelector('.iterator-draft-section');
+    if (section) {
+      section.innerHTML = '<h4>Skill Candidate Update</h4><p>This candidate was discarded. The current Skill was not changed.</p>';
+    }
+  });
+}
+
+async function applyIteratorDraft(container, skillName, content) {
+  if (!skillName || !content) return;
+  if (!confirm('Apply this candidate to the current Skill? A rollback snapshot will be created first.')) return;
+  const section = container.querySelector('.iterator-draft-section');
+  try {
+    const resp = await fetch(`/api/skills/${encodeURIComponent(skillName)}/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content,
+        reason: 'quality-iterator-apply',
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Failed to apply candidate');
+    if (section) {
+      section.innerHTML = `
+        <h4>Skill Candidate Update</h4>
+        <p>The candidate was applied. The previous version is available as a rollback snapshot.</p>
+        <p class="status-text">Current version: ${escapeHtml(data.skill?.version ? `v${data.skill.version}` : 'unversioned')}</p>
+      `;
+    }
+    await loadSkills();
+  } catch (err) {
+    if (section) {
+      section.insertAdjacentHTML('beforeend', `<div class="msg error">Apply failed: ${escapeHtml(err.message)}</div>`);
+    }
+  }
+}
+
+function renderDocumentEvaluationResult(container, payload) {
+  if (!container) return;
+  renderIteratorResult(container, payload);
+}
+
 function renderRetrieveResults(container, nodes) {
   container.innerHTML = '';
   if (!nodes.length) {
@@ -1076,7 +1834,8 @@ function initPageAgentPage() {
     }
   });
 
-  runBtn.addEventListener('click', async () => {
+  runBtn.addEventListener('click', async (event) => {
+    event.stopImmediatePropagation();
     const task = taskInput.value.trim();
     if (!task) {
       statusEl.textContent = '请输入一条 Page Agent 测试指令';
@@ -1086,23 +1845,45 @@ function initPageAgentPage() {
     runBtn.disabled = true;
     statusEl.textContent = 'Page Agent 正在执行测试指令...';
     try {
-      const resp = await fetch('/api/page-agent/task', {
+      const resp = await fetch('/api/page-agent/task/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task }),
       });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || data.message || '执行失败');
-      statusEl.textContent = 'Page Agent 执行完成';
+      if (!resp.ok || !resp.body) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.detail || data.message || 'Page Agent 执行失败');
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalMessage = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer = parseSseChunk(buffer + decoder.decode(value, { stream: true }), (sseEvent, data) => {
+          if (sseEvent === 'status') {
+            statusEl.textContent = data.message || 'Page Agent 正在执行...';
+            addMessage(pageAgentMessagesEl, 'status', data.message || 'Page Agent 正在执行...');
+          } else if (sseEvent === 'trace') {
+            addTraceMessage(pageAgentMessagesEl, data.message || 'Page Agent 执行中...');
+          } else if (sseEvent === 'done') {
+            finalMessage = data.message || 'Page Agent 执行完成';
+            statusEl.textContent = 'Page Agent 执行完成';
+          } else if (sseEvent === 'error') {
+            throw new Error(data.message || 'Page Agent 执行失败');
+          }
+        });
+      }
       const msg = addMessage(pageAgentMessagesEl, 'assistant', '');
-      await typeInto(msg, data.result || '无返回内容');
+      await typeInto(msg, finalMessage || '无返回内容');
     } catch (err) {
       statusEl.textContent = 'Page Agent 执行失败：' + err.message;
       addMessage(pageAgentMessagesEl, 'error', 'Page Agent 执行失败：' + err.message);
     } finally {
       runBtn.disabled = false;
     }
-  });
+  }, { capture: true });
 }
 
 function parseSseChunk(buffer, onEvent) {
@@ -1156,7 +1937,12 @@ navItems.forEach((item) => {
   item.addEventListener('click', () => loadPage(item.dataset.page));
 });
 
+sidebarToggleBtn?.addEventListener('click', () => {
+  setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+});
+
 resetBtn.addEventListener('click', resetChat);
 refreshAllBtn.addEventListener('click', () => loadPage(currentPage));
 
+setSidebarCollapsed(localStorage.getItem('sidebarCollapsed') === '1');
 loadPage('plan');

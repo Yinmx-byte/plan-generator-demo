@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "page": {
+    "width_cm": 21.0,
+    "height_cm": 29.7,
+    "margins_cm": {
+      "top": 3.4,
+      "bottom": 3.4,
+      "left": 2.8,
+      "right": 2.8
+    }
+  },
+  "cover": {
+    "logo_path": "assets/state_grid_logo.jpeg",
+    "logo_width_cm": 3.1,
+    "logo_alignment": "left",
+    "top_spacers": 7,
+    "middle_spacers": 5,
+    "title_style": "title",
+    "metadata_style": "cover_metadata"
+  },
+  "numbering": {
+    "level_1_numerals": ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"],
+    "level_1_suffix": "、"
+  },
+  "checkbox": {
+    "checked_symbol": "■",
+    "unchecked_symbol": "□",
+    "label_gap": "  ",
+    "extra_gap": "  ",
+    "item_separator": "    "
+  },
+  "styles": {
+    "body": {
+      "font_name": "仿宋_GB2312",
+      "font_size_pt": 16,
+      "color": "000000",
+      "bold": false,
+      "line_spacing_pt": 28,
+      "space_before_pt": 14,
+      "space_after_pt": 14,
+      "first_line_indent_chars": 2
+    },
+    "title": {
+      "extends": "body",
+      "font_name": "方正小标宋_GBK",
+      "font_size_pt": 22,
+      "bold": true,
+      "alignment": "center",
+      "space_before_pt": 0,
+      "space_after_pt": 0,
+      "first_line_indent_chars": 0
+    },
+    "cover_metadata": {
+      "extends": "body",
+      "alignment": "center",
+      "space_before_pt": 0,
+      "space_after_pt": 0,
+      "first_line_indent_chars": 0
+    },
+    "heading_1": {
+      "extends": "body",
+      "font_name": "黑体",
+      "bold": true,
+      "first_line_indent_chars": 0,
+      "left_indent_chars": 0
+    },
+    "heading_2": {
+      "extends": "body",
+      "font_name": "楷体_GB2312",
+      "bold": true,
+      "first_line_indent_chars": 0,
+      "left_indent_chars": 1
+    },
+    "heading_3": {
+      "extends": "body",
+      "font_name": "仿宋_GB2312",
+      "bold": true,
+      "first_line_indent_chars": 0,
+      "left_indent_chars": 2
+    },
+    "table": {
+      "extends": "body",
+      "font_name": "宋体",
+      "font_size_pt": 14,
+      "alignment": "center",
+      "first_line_indent_chars": 0,
+      "border": {
+        "style": "single",
+        "size": 4,
+        "color": "000000"
+      }
+    },
+    "environment_table": {
+      "extends": "table",
+      "font_size_pt": 11
+    },
+    "footer_page_number": {
+      "extends": "body",
+      "font_name": "宋体",
+      "font_size_pt": 14,
+      "alignment": "center",
+      "space_before_pt": 0,
+      "space_after_pt": 0,
+      "first_line_indent_chars": 0,
+      "prefix": "—",
+      "suffix": "—"
+    }
+  }
+}

@@ -1,24 +1,24 @@
-<section class="agent-layout">
-  <div class="tool-card agent-command">
-    <p class="eyebrow">MCP Browser Automation</p>
-    <h3>Page Agent 测试</h3>
-    <p>这里的输出和主方案生成对话分开，方便单独验证浏览器自动化效果。</p>
-    <textarea id="pageAgentTaskInput" placeholder="例如：打开 https://www.baidu.com 并告诉我页面标题"></textarea>
-    <div class="card-actions">
-      <button id="startMcpBtn" type="button">启动 Page Agent</button>
-      <button class="primary" id="runPageAgentBtn" type="button">执行测试</button>
-    </div>
-    <div class="status-text" id="mcpStatus">先启动 Page Agent，并在 Chrome 中确认扩展 Hub 已连接。</div>
-  </div>
-
-  <div class="conversation-panel agent-output">
+<section class="agent-layout agent-single">
+  <div class="conversation-panel agent-chat-panel">
     <div class="panel-head">
       <div>
-        <p class="eyebrow">Output</p>
-        <h3>Page Agent 输出</h3>
+        <p class="eyebrow">MCP Browser Automation</p>
+        <h3>Page Agent 对话</h3>
       </div>
-      <span class="pill">独立日志</span>
+      <div class="panel-actions">
+        <button id="startMcpBtn" type="button">启动 Page Agent</button>
+        <span class="pill">浏览器侧验证</span>
+      </div>
     </div>
+
     <div class="messages" id="pageAgentMessages"></div>
+
+    <section class="agent-composer">
+      <textarea id="pageAgentTaskInput" placeholder="例如：打开阿里云控制台，定位到 ECS 实例列表，检查实例创建入口和配置项"></textarea>
+      <div class="composer-actions">
+        <div class="status-text" id="mcpStatus">先启动 Page Agent，并在 Chrome 中确认扩展 Hub 已连接。</div>
+        <button class="primary" id="runPageAgentBtn" type="button">发送</button>
+      </div>
+    </section>
   </div>
 </section>

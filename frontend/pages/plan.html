@@ -2,8 +2,8 @@
   <div class="conversation-panel">
     <div class="panel-head">
       <div>
-        <p class="eyebrow">Plan Generator</p>
-        <h3>检修方案对话</h3>
+        <p class="eyebrow">Master Agent</p>
+        <h3>智能运维对话</h3>
       </div>
       <span class="pill">流式状态</span>
     </div>
@@ -11,11 +11,15 @@
   </div>
 
   <section class="composer">
-    <textarea id="messageInput" placeholder="粘贴需求描述或需求文档。可一次性包含检修窗口、人员、账号、实例、技术参数。"></textarea>
+    <textarea id="messageInput" placeholder="可以直接聊天、查询云资源使用情况，也可以粘贴检修需求描述或需求文档。生成方案时可一次性包含检修窗口、人员、账号、实例、技术参数。"></textarea>
     <div class="composer-actions">
       <label class="check-option">
         <input id="executeValidationInput" type="checkbox">
         <span>生成后执行浏览器验证</span>
+      </label>
+      <label class="check-option">
+        <input id="showToolTraceInput" type="checkbox">
+        <span>显示工具调用信息</span>
       </label>
       <button class="primary" id="sendBtn" type="button">发送</button>
     </div>
@@ -53,6 +57,24 @@
       <details class="document-json-pane">
         <summary>结构编辑 JSON</summary>
         <textarea id="documentJsonEditor" class="document-json-editor" spellcheck="false" placeholder="需要精确修改结构时，可在这里编辑文档 JSON。"></textarea>
+      </details>
+
+      <details class="document-evaluation-pane">
+        <summary>文档质量评估</summary>
+        <div class="document-evaluation-controls">
+          <label>
+            <span class="field-label">优质文档目录</span>
+            <input id="documentEvalReferenceDir" type="text" value="D:\个人工作\2026\微创项目\整理后文档\检修方案-整理">
+          </label>
+          <label>
+            <span class="field-label">对标 Skill</span>
+            <select id="documentEvalSkillSelect"></select>
+          </label>
+          <button id="evaluateDocumentBtn" type="button">评估当前文档</button>
+        </div>
+        <div class="document-evaluation-result" id="documentEvaluationResult">
+          <div class="status-text">生成或打开 DOCX 后，可在这里评估当前文档质量。</div>
+        </div>
       </details>
 
       <div class="document-actions">

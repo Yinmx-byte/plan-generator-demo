@@ -11,9 +11,9 @@ plan-generator-demo/
 │   ├── agents/                    # Master Agent 与方案生成 Agent
 │   ├── api/admin_routes.py        # Skill、百炼知识库等管理接口
 │   ├── rag/                       # 百炼知识库 Retrieve 与管理封装
-│   ├── scripts/generate_plan.py   # Word 文档渲染工具
+│   ├── scripts/generate_plan.py   # 配置驱动的 Word 文档渲染工具
 │   ├── services/                  # 需求抽取、方案生成、Page Agent 等服务
-│   ├── skills/                    # AgentScope Skill 目录
+│   ├── skills/                    # AgentScope Skill 与通用文档格式契约
 │   ├── skills_runtime/            # Skill 元数据加载与路由
 │   ├── mcp_servers.json           # 本地 MCP 接入配置
 │   └── .env.example
@@ -88,17 +88,18 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 - **Skill**：每类检修方案的稳定规则、章节结构、风险项、实施步骤约束和工具调用原则放在 `backend/skills/`。
 - **百炼 RAG**：历史检修方案、通用模板和阿里云参考资料通过百炼知识库管理，业务生成链路通过 Retrieve API 获取切片。
+- **阿里云只读资源查询**：通过阿里云官方 Python SDK 查询 ECS/VPC/VSwitch/实例归属信息、CloudMonitor 使用率指标和 Resource Center 可访问产品统计。`cloud_query` 工具组已拆分为资源清单、监控指标、资源组产品统计三类工具，指标名称和中文别名由 `backend/config/cloud_query_catalog.yaml` 统一配置，用于智能问数、生成前资源核对和验证前检查。
 - **MCP / Page Agent**：`backend/mcp_servers.json` 配置外部 MCP，当前用于 Page Agent 浏览器侧执行与验证。
 - **方案生成服务**：`services/plan_generation.py` 将写文档能力封装为 `compose_plan_json`、`validate_plan_json`、`render_docx` 三步；其中 `compose_plan_json` 内部仍使用专用 Plan ReActAgent，方便加载 Skill 和调用渲染检查工具。
-- **Word 渲染**：`scripts/generate_plan.py` 只负责将已验证的文档 JSON 渲染为 `.docx`。
+- **Word 渲染**：`scripts/generate_plan.py` 将已验证的内容 JSON 与通用格式契约合成为 `.docx`；默认格式位于 `skills/maintenance-plan-composer/references/document-style.json`，所有检修类型共用，渲染工具也支持显式传入 `style_contract`。
 - **远程知识库管理**：前端知识库页可上传/查看/删除百炼文档；上传或删除后会自动提交重建索引任务。
 
 ## Master Agent 工具组配置
 
-Master Agent 的工具实现位于 `backend/tools/`，由 `backend/tools/master_toolkit.py` 统一注册。默认注册 `context`、`planning`、`generation`、`document` 四个工具组；如需临时收窄工具面，可设置：
+Master Agent 的工具实现位于 `backend/tools/`，由 `backend/tools/master_toolkit.py` 统一注册。默认注册 `context`、`planning`、`generation`、`document`、`cloud_query` 五个工具组；如需临时收窄工具面，可设置：
 
 ```env
-MASTER_AGENT_TOOL_GROUPS=context,planning,generation,document
+MASTER_AGENT_TOOL_GROUPS=context,planning,generation,document,cloud_query
 ```
 
 设置为 `all` 或不配置时启用全部工具组，设置为 `none`、`off` 或 `disabled` 时不注册分组工具。工具执行逻辑保留在 Python 函数中，稳定规则和业务约束继续放在 Skill 中。
@@ -127,6 +128,11 @@ ALLOW_FALLBACK_PLAN=true
 - `POST /api/chat/reset`：重置会话。
 - `GET /api/download/{file_id}`：下载生成的 Word 文档。
 - `POST /api/dev/plan-test`：开发快测入口，用需求文本或 state 快速生成 DOCX。
+- `GET /api/cloud/inventory`：通过配置化工具层只读查询 ECS/VPC/VSwitch/实例归属等资源清单。
+- `GET /api/cloud/metrics`：通过配置化指标 key 查询 ECS CPU、内存、磁盘、网络等 CloudMonitor 指标。
+- `GET /api/cloud/resource-products`：通过 Resource Center 统计当前账号或指定资源组可访问资源涉及的产品类别。
+- `GET /api/cloud/ecs-vpc-info`：旧版兼容入口，仍可查询 ECS/VPC/VSwitch/实例归属和使用率信息。
+- `GET /api/dev/cloud-query-test`：开发验证接口，默认验证产品/指标映射、缺参追问和资源产品聚合；设置 `run_live=true` 后会在当前环境有 AK/SK 时执行真实只读云查询。
 
 ### 管理接口
 

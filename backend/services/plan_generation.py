@@ -84,8 +84,8 @@ def normalize_document_metadata(data: dict[str, Any]) -> dict[str, Any]:
 
     header_items = header if isinstance(header, list) else []
     normalized_header: list[Any] = [
-        {"text": department, "font_size": 16, "font_name": "仿宋_GB2312", "align": "center"},
-        {"text": date_text, "font_size": 16, "font_name": "仿宋_GB2312", "align": "center"},
+        {"text": department, "style": "cover_metadata"},
+        {"text": date_text, "style": "cover_metadata"},
     ]
     if len(header_items) > 2:
         normalized_header.extend(header_items[2:])
@@ -365,18 +365,18 @@ def build_fallback_plan_data(
         },
         "document": {
             "title": title,
-            "cover": {"logo_width_cm": 3.1, "top_spacers": 7, "middle_spacers": 5},
+            "cover": {},
             "header": [
-                {"text": DEFAULT_DEPARTMENT, "font_size": 16, "font_name": "仿宋_GB2312", "align": "center"},
-                {"text": datetime.now().strftime("%Y年%m月%d日"), "font_size": 16, "font_name": "仿宋_GB2312", "align": "center"},
+                {"text": DEFAULT_DEPARTMENT, "style": "cover_metadata"},
+                {"text": datetime.now().strftime("%Y年%m月%d日"), "style": "cover_metadata"},
             ],
             "sections": [
                 {
                     "heading": "背景",
                     "level": 1,
                     "blocks": [
-                        {"type": "paragraph", "text": state.get("background") or "根据业务运维需求，需要制定并执行本次检修方案。", "first_line_indent": 0.74},
-                        {"type": "paragraph", "text": "该事项项目组提报问题工单，需检修进行处理，实现问题工单闭环。", "first_line_indent": 0.74},
+                        {"type": "paragraph", "text": state.get("background") or "根据业务运维需求，需要制定并执行本次检修方案。"},
+                        {"type": "paragraph", "text": "该事项项目组提报问题工单，需检修进行处理，实现问题工单闭环。"},
                     ],
                 },
                 {
@@ -397,7 +397,7 @@ def build_fallback_plan_data(
                         {"type": "paragraph", "text": f"（2）实施地点：{state.get('location') or '待实施前确认'}"},
                         {"type": "paragraph", "text": "（3）专有云版本：v3.16"},
                         {"type": "paragraph", "text": "（4）涉及的组件实例信息："},
-                        {"type": "paragraph", "text": state.get("instances") or "待实施前确认", "first_line_indent": 0.74},
+                        {"type": "paragraph", "text": state.get("instances") or "待实施前确认"},
                     ],
                 },
                 {
@@ -415,16 +415,16 @@ def build_fallback_plan_data(
                     "level": 1,
                     "blocks": [
                         {"type": "heading", "text": "5.1影响范围", "level": 2},
-                        {"type": "paragraph", "text": "模型输出无法解析，本章节保留通用占位。请重新生成以读取产品 Skill 并补齐具体影响范围。", "first_line_indent": 0.74},
+                        {"type": "paragraph", "text": "模型输出无法解析，本章节保留通用占位。请重新生成以读取产品 Skill 并补齐具体影响范围。"},
                         {"type": "heading", "text": "5.2危险点分析", "level": 2},
                         {"type": "paragraphs", "items": ["（1）授权不当危险点：授权过大，导致操作影响预定方案以外的生产环境实例。", "（2）备份不当危险点：检修前备份、快照、原配置或业务确认记录不完整，导致异常后无法准确恢复。", "（3）验证不当危险点：检修对象、业务访问状态、监控指标或项目组确认结果未核实清楚，导致操作后出现业务影响。", "（4）双人复核不当危险点：双人复核不仔细，导致操作错误执行而出现业务影响。"]},
                         {"type": "heading", "text": "5.3安全措施", "level": 2},
                         {"type": "heading", "text": "5.3.1授权", "level": 3},
                         {"type": "paragraphs", "items": [f"ASCM：国网总部直属单位权限     授权账号：{state.get('ascm_account') or '待实施前确认'}", f"堡垒机账号：{state.get('bastion_account') or '待实施前确认'}"]},
                         {"type": "heading", "text": "5.3.2备份", "level": 3},
-                        {"type": "paragraph", "text": "按对应产品 Skill 和实际检修动作确认备份、快照、原配置导出或业务确认记录。", "first_line_indent": 0.74},
+                        {"type": "paragraph", "text": "按对应产品 Skill 和实际检修动作确认备份、快照、原配置导出或业务确认记录。"},
                         {"type": "heading", "text": "5.3.3验证", "level": 3},
-                        {"type": "paragraph", "text": "按对应产品 Skill 验证检修前后资源状态、业务访问、监控告警和日志。", "first_line_indent": 0.74},
+                        {"type": "paragraph", "text": "按对应产品 Skill 验证检修前后资源状态、业务访问、监控告警和日志。"},
                         {"type": "heading", "text": "5.3.4 双人复核", "level": 3},
                         {"type": "paragraphs", "items": ["（1）确认在正确的组织和资源集下做操作，检查操作对象是否正确；", "（2）严格按照文档复核关键步骤及关键点。"]},
                     ],
@@ -491,6 +491,7 @@ personnel, risks, steps, rollback content, scripts, or other parts explicitly re
 - 必须读取并遵守 `maintenance-plan-composer` Skill 中的“Word 渲染 JSON 格式契约”。
 - 必须读取并遵守具体产品检修 Skill；产品 Skill 决定风险项、操作步骤、回滚步骤和参数表。
 - 生成最终答案前，调用 `build_maintenance_document` 工具对完整 JSON 做一次渲染检查；工具通过后仍然只输出完整 JSON。
+- 渲染工具默认自动加载 composer Skill 的通用格式契约；只有用户明确提出特殊版式时，才传入 `style_contract` 覆盖默认格式。
 - 顶层必须包含 document 对象；每个章节必须包含 blocks 数组。
 - 表格、标题、正文、复选框、编号步骤必须按该 Skill 规定的 block 类型输出。
 - 不要只输出 heading/title/content；只有标题没有 blocks 的章节会被判定为无效格式。
@@ -616,7 +617,7 @@ def default_section(name: str, state: dict[str, str]) -> dict[str, Any]:
             "heading": name,
             "level": 1,
             "blocks": [
-                {"type": "paragraph", "text": state.get("background") or "待根据需求和对应 Skill 补充。", "first_line_indent": 0.74}
+                {"type": "paragraph", "text": state.get("background") or "待根据需求和对应 Skill 补充。"}
             ],
         }
     if name == "检修类型":
@@ -648,7 +649,7 @@ def default_section(name: str, state: dict[str, str]) -> dict[str, Any]:
                 {"type": "paragraph", "text": f"（2）实施地点：{state.get('location') or '待实施前确认'}"},
                 {"type": "paragraph", "text": "（3）专有云版本：v3.16"},
                 {"type": "paragraph", "text": "（4）涉及的组件实例信息："},
-                {"type": "paragraph", "text": state.get("instances") or "待实施前确认", "first_line_indent": 0.74},
+                {"type": "paragraph", "text": state.get("instances") or "待实施前确认"},
             ],
         }
     if name == "实施计划":
@@ -669,7 +670,6 @@ def default_section(name: str, state: dict[str, str]) -> dict[str, Any]:
             {
                 "type": "paragraph",
                 "text": "模型未输出本章节内容，请重新生成或补充更明确需求。",
-                "first_line_indent": 0.74,
             }
         ],
     }
@@ -720,20 +720,12 @@ def ensure_renderer_ready_document(
 
 
 def enforce_common_document_contract(data: dict[str, Any], state: dict[str, str]) -> dict[str, Any]:
-    """Enforce shared layout semantics that must not depend on model output."""
+    """Enforce shared document semantics and assign named renderer styles."""
     spec = data.get("document")
     if not isinstance(spec, dict):
         return data
 
-    cover = spec.setdefault("cover", {})
-    if isinstance(cover, dict):
-        cover.update(
-            {
-                "title_font_name": "方正小标宋_GBK",
-                "title_font_size": 22,
-                "middle_spacers": 5,
-            }
-        )
+    spec.setdefault("cover", {})
 
     selected_type = canonical_maintenance_type(state.get("maintenance_type"))
     environment_tables: list[dict[str, Any]] = []
@@ -763,7 +755,7 @@ def enforce_common_document_contract(data: dict[str, Any], state: dict[str, str]
         elif "现场环境" in heading:
             for block in blocks:
                 if isinstance(block, dict) and block.get("type") == "table":
-                    block["font_size"] = 11
+                    block["style"] = "environment_table"
                     environment_tables.append(deepcopy(block))
         elif "实施步骤" in heading:
             implementation_section = section
