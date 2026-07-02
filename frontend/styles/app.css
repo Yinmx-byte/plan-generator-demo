@@ -112,8 +112,13 @@ select:focus {
   grid-template-columns: 240px minmax(0, 1fr);
   padding: 16px;
   gap: 14px;
+  transition: grid-template-columns 180ms ease;
+}
+body.sidebar-collapsed .shell {
+  grid-template-columns: 66px minmax(0, 1fr);
 }
 .sidebar {
+  position: relative;
   min-height: 0;
   display: grid;
   grid-template-rows: auto 1fr auto;
@@ -124,6 +129,51 @@ select:focus {
   background: rgba(255, 255, 255, 0.82);
   box-shadow: var(--shadow);
   backdrop-filter: blur(10px);
+  transition: padding 180ms ease;
+}
+.sidebar-toggle {
+  position: absolute;
+  top: 12px;
+  right: -13px;
+  z-index: 5;
+  width: 28px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-color: var(--line-strong);
+  background: #fff;
+  color: var(--blue-dark);
+  font-size: 20px;
+  font-weight: 900;
+  box-shadow: var(--shadow-soft);
+}
+.sidebar-toggle span {
+  transform: translateY(-1px);
+}
+body.sidebar-collapsed .sidebar {
+  padding: 12px 8px;
+}
+body.sidebar-collapsed .brand {
+  justify-content: center;
+  padding-bottom: 10px;
+}
+body.sidebar-collapsed .brand > div:not(.brand-mark),
+body.sidebar-collapsed .sidebar-note {
+  display: none;
+}
+body.sidebar-collapsed .nav {
+  gap: 8px;
+}
+body.sidebar-collapsed .nav-item {
+  width: 100%;
+  min-height: 42px;
+  justify-content: center;
+  padding: 7px 4px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.15;
 }
 .brand {
   display: flex;
@@ -846,15 +896,21 @@ button.ghost {
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: 410px minmax(0, 1fr);
+  grid-template-columns: minmax(360px, 0.42fr) minmax(0, 1fr);
   gap: 14px;
+  overflow: hidden;
 }
 .iterator-control {
+  min-height: 0;
+  overflow-y: auto;
   align-self: stretch;
   align-content: start;
 }
 .iterator-control textarea {
-  min-height: 118px;
+  min-height: 92px;
+}
+.iterator-control > .iterator-json-pane {
+  display: none;
 }
 .iterator-json-pane {
   padding: 10px;
@@ -882,11 +938,23 @@ button.ghost {
   border-radius: 8px;
   background: #fff;
 }
+.iterator-state-panel {
+  overflow: hidden;
+}
+.iterator-state-panel[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: min(34vh, 340px);
+}
 .iterator-state-grid {
   margin-top: 12px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  min-height: 0;
+  max-height: 232px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 .state-field {
   display: grid;
@@ -1521,8 +1589,18 @@ button.danger:hover {
     min-height: 100vh;
     grid-template-columns: 1fr;
   }
+  body.sidebar-collapsed .shell {
+    grid-template-columns: 1fr;
+  }
+  .sidebar-toggle {
+    display: none;
+  }
   .sidebar {
     grid-template-rows: auto auto auto;
+  }
+  body.sidebar-collapsed .brand > div:not(.brand-mark),
+  body.sidebar-collapsed .sidebar-note {
+    display: block;
   }
   .nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));

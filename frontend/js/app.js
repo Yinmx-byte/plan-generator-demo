@@ -2,6 +2,7 @@ const pageHost = document.getElementById('pageHost');
 const pageTitle = document.getElementById('pageTitle');
 const pageEyebrow = document.getElementById('pageEyebrow');
 const navItems = [...document.querySelectorAll('.nav-item')];
+const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
 const resetBtn = document.getElementById('resetBtn');
 const refreshAllBtn = document.getElementById('refreshAllBtn');
 const planSessionStorageKey = 'planGeneratorTabState';
@@ -450,6 +451,15 @@ async function typeInto(el, text) {
 
 function setActiveNav(page) {
   navItems.forEach((item) => item.classList.toggle('active', item.dataset.page === page));
+}
+
+function setSidebarCollapsed(collapsed) {
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  if (sidebarToggleBtn) {
+    sidebarToggleBtn.setAttribute('aria-expanded', String(!collapsed));
+    sidebarToggleBtn.querySelector('span').textContent = collapsed ? '›' : '‹';
+  }
+  localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
 }
 
 async function loadPage(page) {
@@ -1928,7 +1938,12 @@ navItems.forEach((item) => {
   item.addEventListener('click', () => loadPage(item.dataset.page));
 });
 
+sidebarToggleBtn?.addEventListener('click', () => {
+  setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+});
+
 resetBtn.addEventListener('click', resetChat);
 refreshAllBtn.addEventListener('click', () => loadPage(currentPage));
 
+setSidebarCollapsed(localStorage.getItem('sidebarCollapsed') === '1');
 loadPage('plan');
