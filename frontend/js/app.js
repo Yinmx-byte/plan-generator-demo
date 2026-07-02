@@ -535,12 +535,11 @@ async function loadSkills() {
       const versionText = skill.version ? `v${skill.version}` : '未标版本';
       item.innerHTML = `
         <div>
-          <div class="item-title">${escapeHtml(displayName)}</div>
+          <div class="item-title-row">
+            <div class="item-title">${escapeHtml(displayName)}</div>
+            <span class="status-pill skill-version-pill">${escapeHtml(versionText)}</span>
+          </div>
           <div class="item-alias">${escapeHtml(skill.name)}</div>
-        </div>
-        <div class="skill-card-meta">
-          <span class="status-pill">${escapeHtml(versionText)}</span>
-          <span>检修方案 Skill</span>
         </div>
         <div class="item-meta">${escapeHtml(skill.description || '未填写描述')}</div>
         <div class="card-actions">

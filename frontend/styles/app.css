@@ -174,16 +174,7 @@ body.sidebar-collapsed .sidebar-note {
   display: none;
 }
 body.sidebar-collapsed .nav {
-  gap: 8px;
-}
-body.sidebar-collapsed .nav-item {
-  width: 100%;
-  min-height: 42px;
-  justify-content: center;
-  padding: 7px 4px;
-  text-align: center;
-  font-size: 12px;
-  line-height: 1.15;
+  display: none;
 }
 .brand {
   display: flex;
@@ -683,6 +674,19 @@ button.document-open-btn {
   font-weight: 800;
   word-break: break-word;
 }
+.item-title-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+.item-title-row .item-title {
+  margin-bottom: 4px;
+}
+.skill-version-pill {
+  align-self: start;
+  white-space: nowrap;
+}
 .item-alias {
   margin-top: -2px;
   color: var(--muted);
@@ -690,13 +694,6 @@ button.document-open-btn {
   font-size: 11px;
   line-height: 1.35;
   word-break: break-all;
-}
-.skill-card-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  font-size: 12px;
 }
 .item-meta {
   color: var(--muted);
@@ -906,7 +903,7 @@ button.ghost {
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(360px, 0.42fr) minmax(0, 1fr);
+  grid-template-columns: minmax(500px, 560px) minmax(680px, 1fr);
   gap: 14px;
   overflow: hidden;
 }
@@ -915,9 +912,11 @@ button.ghost {
   overflow-y: auto;
   align-self: stretch;
   align-content: start;
+  padding: 18px;
+  gap: 12px;
 }
 .iterator-control textarea {
-  min-height: 92px;
+  min-height: 104px;
 }
 .iterator-json-pane {
   padding: 10px;
@@ -934,10 +933,10 @@ button.ghost {
 }
 .iterator-state-panel,
 .document-evaluation-pane {
-  padding: 10px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  background: linear-gradient(180deg, #ffffff 0%, #f9fbfc 100%);
 }
 .iterator-state-panel {
   overflow: hidden;
@@ -945,17 +944,17 @@ button.ghost {
 .iterator-state-panel[open] {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  max-height: min(34vh, 340px);
+  max-height: min(38vh, 390px);
 }
 .iterator-state-grid {
   margin-top: 12px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
   min-height: 0;
-  max-height: 232px;
+  max-height: 282px;
   overflow-y: auto;
-  padding-right: 4px;
+  padding-right: 6px;
 }
 .state-field {
   display: grid;
@@ -974,10 +973,10 @@ button.ghost {
   grid-column: 1 / -1;
 }
 .state-field textarea {
-  min-height: 86px;
+  min-height: 78px;
 }
 .iterator-state-actions {
-  margin-top: 10px;
+  margin-top: 12px;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
@@ -1584,6 +1583,12 @@ button.danger:hover {
   flex-wrap: wrap;
 }
 
+@media (max-width: 1280px) {
+  .iterator-layout {
+    grid-template-columns: minmax(420px, 0.8fr) minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 980px) {
   .shell {
     height: auto;
@@ -1602,6 +1607,9 @@ button.danger:hover {
   body.sidebar-collapsed .brand > div:not(.brand-mark),
   body.sidebar-collapsed .sidebar-note {
     display: block;
+  }
+  body.sidebar-collapsed .nav {
+    display: grid;
   }
   .nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));
