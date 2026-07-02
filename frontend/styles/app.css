@@ -18,6 +18,16 @@
 }
 
 * { box-sizing: border-box; }
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  white-space: nowrap !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb {
@@ -909,9 +919,6 @@ button.ghost {
 .iterator-control textarea {
   min-height: 92px;
 }
-.iterator-control > .iterator-json-pane {
-  display: none;
-}
 .iterator-json-pane {
   padding: 10px;
   border: 1px solid var(--line);
@@ -924,12 +931,6 @@ button.ghost {
   cursor: pointer;
   font-size: 13px;
   font-weight: 800;
-}
-.iterator-json-pane textarea {
-  margin-top: 10px;
-  min-height: 120px;
-  font-family: "Cascadia Mono", "Consolas", "Microsoft YaHei UI", monospace;
-  font-size: 12px;
 }
 .iterator-state-panel,
 .document-evaluation-pane {

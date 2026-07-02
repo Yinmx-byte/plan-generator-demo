@@ -21,11 +21,7 @@
         <button id="fillIteratorSampleBtn" type="button">填入 ECS 示例</button>
       </div>
     </details>
-
-    <details class="iterator-json-pane">
-      <summary>查看生成的 state JSON</summary>
-      <textarea id="iteratorStateJson" spellcheck="false" readonly placeholder="结构化参数会自动转换为 state JSON"></textarea>
-    </details>
+    <textarea class="visually-hidden" id="iteratorStateJson" spellcheck="false" readonly tabindex="-1" aria-hidden="true"></textarea>
 
     <label class="check-option">
       <input id="iteratorAllowPartial" type="checkbox">
