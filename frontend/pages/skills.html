@@ -48,6 +48,13 @@
       </div>
       <button class="ghost" value="cancel" formmethod="dialog" type="submit">关闭</button>
     </div>
+    <div class="skill-version-row">
+      <label for="skillVersionSelect">历史版本</label>
+      <select id="skillVersionSelect">
+        <option value="">暂无历史版本</option>
+      </select>
+      <button id="rollbackSkillBtn" type="button" disabled>回退到此版本</button>
+    </div>
     <textarea id="skillEditor" spellcheck="false" placeholder="SKILL.md 内容"></textarea>
     <div class="modal-actions">
       <span class="status-text" id="skillEditStatus"></span>

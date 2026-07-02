@@ -3,11 +3,13 @@
 import os
 import re
 import json
+import difflib
 import shutil
 import subprocess
 import sys
 import tempfile
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
@@ -23,6 +25,16 @@ router = APIRouter()
 
 class SkillUpdateRequest(BaseModel):
     content: str
+    reason: str = "manual-save"
+
+
+class SkillDraftRequest(BaseModel):
+    content: str
+    reason: str = "draft"
+
+
+class SkillRollbackRequest(BaseModel):
+    version_id: str
 
 
 class SkillIteratorRequest(BaseModel):
@@ -62,6 +74,31 @@ SKILL_DISPLAY_NAMES = {
     "docx-document-editor": "DOCX 文档修订",
 }
 
+SKILL_VERSIONS_ROOT = ROOT / "skill_versions"
+
+INTERNAL_SKILL_NAMES = {
+    "cloud-maintenance-master-workflow",
+    "docx-document-editor",
+    "maintenance-plan-workflow",
+}
+
+MAINTENANCE_SKILL_HINTS = (
+    "maintenance",
+    "plan",
+    "检修",
+    "方案",
+    "ecs",
+    "rds",
+    "oss",
+    "slb",
+    "redis",
+    "polardb",
+    "mq",
+    "k8s",
+    "component",
+    "database",
+)
+
 
 def skill_payload(skill) -> dict:
     display_name = skill.metadata.get("display_name") or SKILL_DISPLAY_NAMES.get(skill.name) or skill.name
@@ -69,16 +106,35 @@ def skill_payload(skill) -> dict:
         "name": skill.name,
         "display_name": display_name,
         "description": skill.description,
+        "version": str(skill.metadata.get("version") or ""),
+        "plan_generation": is_maintenance_plan_skill(skill),
         "path": str(skill.path),
     }
 
 
 @router.get("/api/skills")
-async def list_skills():
+async def list_skills(scope: str = Query(default="all")):
     registry = get_skill_registry()
+    skills = registry.skills
+    if scope in {"maintenance", "plan", "plan-generation"}:
+        skills = [skill for skill in skills if is_maintenance_plan_skill(skill)]
     return {
-        "skills": [skill_payload(skill) for skill in registry.skills]
+        "skills": [skill_payload(skill) for skill in skills]
     }
+
+
+def is_maintenance_plan_skill(skill) -> bool:
+    if skill.name in INTERNAL_SKILL_NAMES:
+        return False
+    text = "\n".join(
+        [
+            skill.name,
+            skill.description or "",
+            str(skill.metadata.get("description") or ""),
+            str(skill.metadata.get("display_name") or ""),
+        ]
+    ).lower()
+    return any(hint.lower() in text for hint in MAINTENANCE_SKILL_HINTS)
 
 
 def safe_skill_dir_name(name: str) -> str:
@@ -102,6 +158,138 @@ def ensure_within_directory(base: Path, target: Path) -> None:
     target_resolved = target.resolve()
     if not str(target_resolved).startswith(str(base_resolved)):
         raise HTTPException(status_code=400, detail="非法文件路径")
+
+
+def skill_markdown_path(skill) -> Path:
+    skill_file = skill.path / "SKILL.md"
+    ensure_within_directory(SKILLS_ROOT, skill_file)
+    if not skill_file.exists():
+        raise HTTPException(status_code=404, detail="SKILL.md not found")
+    return skill_file
+
+
+def read_skill_markdown(skill) -> str:
+    return skill_markdown_path(skill).read_text(encoding="utf-8")
+
+
+def validate_skill_markdown(content: str) -> str:
+    content = content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Skill content cannot be empty")
+    if len(content) > 200_000:
+        raise HTTPException(status_code=400, detail="Skill content is too large")
+    if "name:" not in content and "# " not in content:
+        raise HTTPException(status_code=400, detail="Invalid SKILL.md content")
+    return content + "\n"
+
+
+def skill_version_dir(skill_name: str) -> Path:
+    return SKILL_VERSIONS_ROOT / safe_skill_dir_name(skill_name)
+
+
+def snapshot_skill(skill, reason: str = "snapshot") -> dict:
+    content = read_skill_markdown(skill)
+    version_dir = skill_version_dir(skill.name)
+    version_dir.mkdir(parents=True, exist_ok=True)
+    version_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    md_path = version_dir / f"{version_id}.md"
+    meta_path = version_dir / f"{version_id}.json"
+    md_path.write_text(content, encoding="utf-8")
+    meta = {
+        "version_id": version_id,
+        "skill_name": skill.name,
+        "display_name": skill_payload(skill)["display_name"],
+        "skill_version": str(skill.metadata.get("version") or ""),
+        "reason": reason,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "path": str(md_path),
+    }
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    return meta
+
+
+def list_skill_version_snapshots(skill_name: str) -> list[dict]:
+    version_dir = skill_version_dir(skill_name)
+    if not version_dir.exists():
+        return []
+    snapshots: list[dict] = []
+    for meta_path in sorted(version_dir.glob("*.json"), reverse=True):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        md_path = version_dir / f"{meta_path.stem}.md"
+        if md_path.exists():
+            meta["path"] = str(md_path)
+            snapshots.append(meta)
+    return snapshots
+
+
+def make_unified_diff(old: str, new: str, fromfile: str = "current/SKILL.md", tofile: str = "candidate/SKILL.md") -> str:
+    return "".join(
+        difflib.unified_diff(
+            old.splitlines(keepends=True),
+            new.splitlines(keepends=True),
+            fromfile=fromfile,
+            tofile=tofile,
+        )
+    )
+
+
+def bump_skill_version(content: str) -> tuple[str, str]:
+    version_re = re.compile(r"(?m)^version:\s*([0-9]+)\.([0-9]+)\.([0-9]+)\s*$")
+    match = version_re.search(content)
+    if match:
+        major, minor, patch = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        new_version = f"{major}.{minor}.{patch + 1}"
+        return version_re.sub(f"version: {new_version}", content, count=1), new_version
+    if content.startswith("---\n"):
+        new_version = "0.1.0"
+        return content.replace("---\n", f"---\nversion: {new_version}\n", 1), new_version
+    return content, ""
+
+
+def build_iterator_skill_draft(skill, current_content: str, result: dict) -> dict:
+    evaluation = result.get("evaluation") or result
+    findings = evaluation.get("findings") or []
+    summary = evaluation.get("recommended_patch_summary") or ""
+    suggestions: list[str] = []
+    for finding in findings:
+        message = str(finding.get("message") or "").strip()
+        change = str(finding.get("suggested_skill_change") or "").strip()
+        category = str(finding.get("category") or "quality").strip()
+        severity = str(finding.get("severity") or "medium").strip()
+        if not message and not change:
+            continue
+        suggestions.append(
+            f"- 【{severity}/{category}】{message}"
+            + (f"\n  - Skill 调整建议：{change}" if change else "")
+        )
+    if not suggestions and not summary:
+        return {"has_changes": False, "content": current_content, "diff": "", "suggested_version": ""}
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    block = [
+        "",
+        "## 质量迭代记录",
+        "",
+        f"### {timestamp}",
+        "",
+        "以下内容来自生成文档与优质历史方案的对比评估。应用前请人工审阅差异，确认不会把一次测试样例的个性化内容固化进通用 Skill。",
+    ]
+    if summary:
+        block.extend(["", f"总体建议：{summary}"])
+    if suggestions:
+        block.extend(["", "待固化规则：", *suggestions])
+
+    draft = current_content.rstrip() + "\n" + "\n".join(block) + "\n"
+    draft, suggested_version = bump_skill_version(draft)
+    return {
+        "has_changes": draft != current_content,
+        "content": draft,
+        "diff": make_unified_diff(current_content, draft),
+        "suggested_version": suggested_version,
+    }
 
 
 @router.post("/api/skills/upload")
@@ -168,7 +356,7 @@ async def upload_skill(
 @router.get("/api/skills/{skill_name}")
 async def get_skill_detail(skill_name: str):
     skill = get_skill_or_404(skill_name)
-    skill_file = skill.path / "SKILL.md"
+    skill_file = skill_markdown_path(skill)
     ensure_within_directory(SKILLS_ROOT, skill_file)
     if not skill_file.exists():
         raise HTTPException(status_code=404, detail="未找到 SKILL.md")
@@ -176,6 +364,7 @@ async def get_skill_detail(skill_name: str):
         "name": skill.name,
         "display_name": skill_payload(skill)["display_name"],
         "description": skill.description,
+        "version": str(skill.metadata.get("version") or ""),
         "path": str(skill.path),
         "content": skill_file.read_text(encoding="utf-8"),
     }
@@ -184,16 +373,17 @@ async def get_skill_detail(skill_name: str):
 @router.put("/api/skills/{skill_name}")
 async def update_skill_detail(skill_name: str, request: SkillUpdateRequest):
     skill = get_skill_or_404(skill_name)
-    content = request.content.strip()
+    content = validate_skill_markdown(request.content)
+    snapshot = snapshot_skill(skill, request.reason or "manual-save")
     if not content:
         raise HTTPException(status_code=400, detail="Skill 内容不能为空")
     if len(content) > 200_000:
         raise HTTPException(status_code=400, detail="Skill 内容过大")
     if "name:" not in content and "# " not in content:
         raise HTTPException(status_code=400, detail="请保存有效的 SKILL.md 内容")
-    skill_file = skill.path / "SKILL.md"
+    skill_file = skill_markdown_path(skill)
     ensure_within_directory(SKILLS_ROOT, skill_file)
-    skill_file.write_text(content + "\n", encoding="utf-8")
+    skill_file.write_text(content, encoding="utf-8")
     await reset_skill_runtime()
     updated = get_skill_or_404(skill_name)
     return {
@@ -201,7 +391,71 @@ async def update_skill_detail(skill_name: str, request: SkillUpdateRequest):
         "name": updated.name,
         "display_name": skill_payload(updated)["display_name"],
         "description": updated.description,
+        "version": str(updated.metadata.get("version") or ""),
+        "snapshot": snapshot,
         "path": str(updated.path),
+    }
+
+
+@router.get("/api/skills/{skill_name}/versions")
+async def list_skill_versions(skill_name: str):
+    get_skill_or_404(skill_name)
+    return {
+        "skill_name": skill_name,
+        "versions": list_skill_version_snapshots(skill_name),
+    }
+
+
+@router.post("/api/skills/{skill_name}/draft")
+async def create_skill_draft(skill_name: str, request: SkillDraftRequest):
+    skill = get_skill_or_404(skill_name)
+    current = read_skill_markdown(skill)
+    candidate = validate_skill_markdown(request.content)
+    return {
+        "status": "ok",
+        "skill": skill_payload(skill),
+        "reason": request.reason,
+        "has_changes": candidate != current,
+        "content": candidate,
+        "diff": make_unified_diff(current, candidate),
+    }
+
+
+@router.post("/api/skills/{skill_name}/apply")
+async def apply_skill_draft(skill_name: str, request: SkillDraftRequest):
+    skill = get_skill_or_404(skill_name)
+    current = read_skill_markdown(skill)
+    candidate = validate_skill_markdown(request.content)
+    snapshot = snapshot_skill(skill, request.reason or "apply-draft")
+    skill_markdown_path(skill).write_text(candidate, encoding="utf-8")
+    await reset_skill_runtime()
+    updated = get_skill_or_404(skill_name)
+    return {
+        "status": "ok",
+        "skill": skill_payload(updated),
+        "snapshot": snapshot,
+        "diff": make_unified_diff(current, candidate),
+    }
+
+
+@router.post("/api/skills/{skill_name}/rollback")
+async def rollback_skill_version(skill_name: str, request: SkillRollbackRequest):
+    skill = get_skill_or_404(skill_name)
+    version_dir = skill_version_dir(skill.name)
+    version_file = version_dir / f"{safe_skill_dir_name(request.version_id)}.md"
+    ensure_within_directory(version_dir, version_file)
+    if not version_file.exists():
+        raise HTTPException(status_code=404, detail="Skill version snapshot not found")
+    restored = validate_skill_markdown(version_file.read_text(encoding="utf-8"))
+    snapshot = snapshot_skill(skill, f"rollback-before-{request.version_id}")
+    skill_markdown_path(skill).write_text(restored, encoding="utf-8")
+    await reset_skill_runtime()
+    updated = get_skill_or_404(skill_name)
+    return {
+        "status": "ok",
+        "skill": skill_payload(updated),
+        "restored_version_id": request.version_id,
+        "snapshot": snapshot,
     }
 
 
@@ -336,12 +590,14 @@ async def run_skill_iterator(request_body: SkillIteratorRequest, request: Reques
         ]
 
     result = await run_blocking(run_iterator_subprocess, command)
+    draft = build_iterator_skill_draft(skill, read_skill_markdown(skill), result)
     return {
         "status": "ok",
         "mode": "generated_docx" if has_generation_input else "skill_static_preflight",
         "skill": skill_payload(skill),
         "reference_dir": str(reference_dir),
         "resolved_reference_dir": str(resolved_reference_dir),
+        "draft": draft,
         "result": result,
     }
 

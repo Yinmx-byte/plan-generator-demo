@@ -513,7 +513,7 @@ async function loadSkills() {
   const countEl = document.getElementById('skillCount');
   if (!listEl) return;
   try {
-    const resp = await fetch('/api/skills');
+    const resp = await fetch('/api/skills?scope=maintenance');
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || '加载失败');
     const skills = data.skills || [];
@@ -522,10 +522,15 @@ async function loadSkills() {
       const item = document.createElement('div');
       item.className = 'item-card';
       const displayName = skill.display_name || skill.name;
+      const versionText = skill.version ? `v${skill.version}` : '未标版本';
       item.innerHTML = `
         <div>
           <div class="item-title">${escapeHtml(displayName)}</div>
           <div class="item-alias">${escapeHtml(skill.name)}</div>
+        </div>
+        <div class="skill-card-meta">
+          <span class="status-pill">${escapeHtml(versionText)}</span>
+          <span>检修方案 Skill</span>
         </div>
         <div class="item-meta">${escapeHtml(skill.description || '未填写描述')}</div>
         <div class="card-actions">
@@ -557,14 +562,18 @@ async function deleteSkill(skillName, displayName = skillName) {
   }
 }
 
-async function populateSkillSelect(selectEl, preferredPattern = /ecs/i) {
+async function populateSkillSelect(selectEl, preferredPattern = /ecs/i, options = {}) {
   if (!selectEl) return [];
-  const resp = await fetch('/api/skills');
+  const scope = options.scope || 'maintenance';
+  const resp = await fetch(`/api/skills?scope=${encodeURIComponent(scope)}`);
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.detail || 'Skill 加载失败');
   const skills = data.skills || [];
   selectEl.innerHTML = skills
-    .map((skill) => `<option value="${escapeHtml(skill.name)}">${escapeHtml(skill.display_name || skill.name)}</option>`)
+    .map((skill) => {
+      const label = skill.version ? `${skill.display_name || skill.name} · v${skill.version}` : (skill.display_name || skill.name);
+      return `<option value="${escapeHtml(skill.name)}">${escapeHtml(label)}</option>`;
+    })
     .join('');
   const preferred = [...selectEl.options].find((option) => preferredPattern.test(option.value) || preferredPattern.test(option.textContent));
   if (preferred) selectEl.value = preferred.value;
@@ -578,6 +587,8 @@ async function openSkillEditor(skillName) {
   const editor = document.getElementById('skillEditor');
   const status = document.getElementById('skillEditStatus');
   const saveBtn = document.getElementById('saveSkillBtn');
+  const versionSelect = document.getElementById('skillVersionSelect');
+  const rollbackBtn = document.getElementById('rollbackSkillBtn');
   if (!dialog || !editor) return;
 
   title.textContent = `编辑 ${skillName}`;
@@ -585,6 +596,8 @@ async function openSkillEditor(skillName) {
   status.textContent = '';
   editor.value = '';
   saveBtn.disabled = true;
+  if (versionSelect) versionSelect.innerHTML = '<option value="">暂无历史版本</option>';
+  if (rollbackBtn) rollbackBtn.disabled = true;
   dialog.dataset.skillName = skillName;
   dialog.showModal();
 
@@ -593,11 +606,52 @@ async function openSkillEditor(skillName) {
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || '读取失败');
     editor.value = data.content || '';
-    meta.textContent = data.path || '';
+    meta.textContent = `${data.version ? `当前版本 v${data.version} · ` : ''}${data.path || ''}`;
     saveBtn.disabled = false;
+    await loadSkillVersions(skillName);
     editor.focus();
   } catch (err) {
     status.textContent = '读取失败：' + err.message;
+  }
+}
+
+async function loadSkillVersions(skillName) {
+  const versionSelect = document.getElementById('skillVersionSelect');
+  const rollbackBtn = document.getElementById('rollbackSkillBtn');
+  if (!versionSelect || !rollbackBtn) return [];
+  const resp = await fetch(`/api/skills/${encodeURIComponent(skillName)}/versions`);
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.detail || '版本加载失败');
+  const versions = data.versions || [];
+  versionSelect.innerHTML = versions.length
+    ? versions.map((item) => {
+        const label = `${item.created_at || item.version_id} · ${item.skill_version || '未标版本'} · ${item.reason || 'snapshot'}`;
+        return `<option value="${escapeHtml(item.version_id)}">${escapeHtml(label)}</option>`;
+      }).join('')
+    : '<option value="">暂无历史版本</option>';
+  rollbackBtn.disabled = !versions.length;
+  rollbackBtn.onclick = () => rollbackSkillVersion(skillName);
+  return versions;
+}
+
+async function rollbackSkillVersion(skillName) {
+  const versionSelect = document.getElementById('skillVersionSelect');
+  const status = document.getElementById('skillEditStatus');
+  if (!versionSelect?.value) return;
+  if (!confirm('确认回退到选中的 Skill 历史版本？当前内容会先自动保存为快照。')) return;
+  try {
+    const resp = await fetch(`/api/skills/${encodeURIComponent(skillName)}/rollback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version_id: versionSelect.value }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '回退失败');
+    if (status) status.textContent = '已回退到历史版本';
+    await openSkillEditor(skillName);
+    await loadSkills();
+  } catch (err) {
+    if (status) status.textContent = '回退失败：' + err.message;
   }
 }
 
@@ -1618,31 +1672,33 @@ function renderIteratorResult(container, payload) {
   const findings = evaluation.findings || [];
   const scores = evaluation.dimension_scores || {};
   const candidateDocx = result.candidate_docx || evaluation.candidate?.path || '';
+  const draft = payload.draft || {};
+  const skillName = payload.skill?.name || '';
   container.innerHTML = `
     <div class="iterator-summary">
       <div class="score-tile">
-        <span>总分</span>
+        <span>Score</span>
         <strong>${escapeHtml(evaluation.score ?? '-')}</strong>
       </div>
       <div class="score-tile">
-        <span>模式</span>
-        <strong>${escapeHtml(payload.mode === 'generated_docx' ? '生成结果评估' : '静态预检')}</strong>
+        <span>Mode</span>
+        <strong>${escapeHtml(payload.mode === 'generated_docx' ? 'Generated DOCX' : 'Static preflight')}</strong>
       </div>
       <div class="score-tile">
-        <span>问题数</span>
+        <span>Findings</span>
         <strong>${findings.length}</strong>
       </div>
     </div>
     <div class="iterator-section">
-      <h4>维度评分</h4>
+      <h4>Dimension Scores</h4>
       <div class="dimension-grid">
         ${Object.entries(scores).map(([key, value]) => `
           <div><span>${escapeHtml(key)}</span><strong>${escapeHtml(value)}</strong></div>
-        `).join('') || '<p>暂无维度评分</p>'}
+        `).join('') || '<p>No dimension scores.</p>'}
       </div>
     </div>
     <div class="iterator-section">
-      <h4>主要发现</h4>
+      <h4>Findings</h4>
       <div class="finding-list">
         ${findings.map((finding) => `
           <div class="finding-card finding-${escapeHtml(finding.severity || 'medium')}">
@@ -1653,19 +1709,72 @@ function renderIteratorResult(container, payload) {
             <p>${escapeHtml(finding.message || '')}</p>
             <small>${escapeHtml(finding.suggested_skill_change || '')}</small>
           </div>
-        `).join('') || '<p>未发现明显问题。</p>'}
+        `).join('') || '<p>No obvious findings.</p>'}
       </div>
     </div>
     <div class="iterator-section">
-      <h4>建议</h4>
-      <p>${escapeHtml(evaluation.recommended_patch_summary || '暂无建议')}</p>
-      ${candidateDocx ? `<p class="status-text">候选文档：${escapeHtml(candidateDocx)}</p>` : ''}
+      <h4>Recommendation</h4>
+      <p>${escapeHtml(evaluation.recommended_patch_summary || 'No recommendation.')}</p>
+      ${candidateDocx ? `<p class="status-text">Candidate DOCX: ${escapeHtml(candidateDocx)}</p>` : ''}
+    </div>
+    <div class="iterator-section iterator-draft-section">
+      <div class="item-card-head">
+        <h4>Skill Candidate Update</h4>
+        <span class="status-pill">${draft.has_changes ? escapeHtml(draft.suggested_version ? `v${draft.suggested_version}` : 'pending') : 'no change'}</span>
+      </div>
+      ${draft.has_changes ? `
+        <p>The evaluation was converted into a candidate SKILL.md update. Review the diff before applying it.</p>
+        <pre class="diff-view">${escapeHtml(draft.diff || '')}</pre>
+        <div class="card-actions">
+          <button class="primary" data-action="apply-iterator-draft" type="button">Apply candidate</button>
+          <button data-action="reject-iterator-draft" type="button">Discard update</button>
+        </div>
+      ` : '<p>No write-back candidate was produced for this run.</p>'}
     </div>
     <details class="iterator-json-pane" open>
-      <summary>原始 JSON</summary>
+      <summary>Raw JSON</summary>
       <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
     </details>
   `;
+  container.querySelector('[data-action="apply-iterator-draft"]')?.addEventListener('click', () => {
+    applyIteratorDraft(container, skillName, draft.content);
+  });
+  container.querySelector('[data-action="reject-iterator-draft"]')?.addEventListener('click', () => {
+    const section = container.querySelector('.iterator-draft-section');
+    if (section) {
+      section.innerHTML = '<h4>Skill Candidate Update</h4><p>This candidate was discarded. The current Skill was not changed.</p>';
+    }
+  });
+}
+
+async function applyIteratorDraft(container, skillName, content) {
+  if (!skillName || !content) return;
+  if (!confirm('Apply this candidate to the current Skill? A rollback snapshot will be created first.')) return;
+  const section = container.querySelector('.iterator-draft-section');
+  try {
+    const resp = await fetch(`/api/skills/${encodeURIComponent(skillName)}/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content,
+        reason: 'quality-iterator-apply',
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Failed to apply candidate');
+    if (section) {
+      section.innerHTML = `
+        <h4>Skill Candidate Update</h4>
+        <p>The candidate was applied. The previous version is available as a rollback snapshot.</p>
+        <p class="status-text">Current version: ${escapeHtml(data.skill?.version ? `v${data.skill.version}` : 'unversioned')}</p>
+      `;
+    }
+    await loadSkills();
+  } catch (err) {
+    if (section) {
+      section.insertAdjacentHTML('beforeend', `<div class="msg error">Apply failed: ${escapeHtml(err.message)}</div>`);
+    }
+  }
 }
 
 function renderDocumentEvaluationResult(container, payload) {
