@@ -84,6 +84,31 @@ const iteratorSampleState = {
   ops_detail: '变更前后需截图留痕，创建完成后核对实例状态、规格、网络、安全组和资源集归属，不涉及业务重启。',
 };
 
+const evaluationDimensionLabels = {
+  structure: '文档结构',
+  risk: '风险评估',
+  operation: '实施步骤',
+  rollback: '回滚闭环',
+  contract: '质量契约',
+  format: '文档格式',
+};
+
+const evaluationCategoryLabels = {
+  structure: '文档结构',
+  risk: '风险评估',
+  operation: '实施步骤',
+  rollback: '回滚步骤',
+  contract: '质量契约',
+  format: '版式格式',
+  finding: '问题',
+};
+
+const evaluationSeverityLabels = {
+  high: '高',
+  medium: '中',
+  low: '低',
+};
+
 localStorage.removeItem('planGeneratorSessionId');
 
 function persistPlanState() {
@@ -1675,6 +1700,38 @@ function validateIteratorGenerationInput(message, state) {
   return '';
 }
 
+function labelEvaluationDimension(key) {
+  return evaluationDimensionLabels[key] || key;
+}
+
+function labelEvaluationCategory(key) {
+  return evaluationCategoryLabels[key] || key || '问题';
+}
+
+function labelEvaluationSeverity(key) {
+  return evaluationSeverityLabels[key] || key || '-';
+}
+
+function labelEvaluationMode(mode) {
+  if (mode === 'generated_docx') return '生成文档评估';
+  if (mode === 'skill_static_preflight') return 'Skill 静态预检';
+  return mode || '未知模式';
+}
+
+function localizeEvaluationText(text) {
+  return String(text || '')
+    .replaceAll('Generated DOCX', '生成文档')
+    .replaceAll('Static preflight', '静态预检')
+    .replaceAll('candidate DOCX', '候选文档')
+    .replaceAll('Candidate DOCX', '候选文档')
+    .replaceAll('source skill', '源 Skill')
+    .replaceAll('source_skill', '源 Skill')
+    .replaceAll('generated_docx', '生成文档评估')
+    .replaceAll('findings', '问题列表')
+    .replaceAll('contract', '质量契约')
+    .replaceAll('create', '创建场景');
+}
+
 function renderIteratorResult(container, payload) {
   const result = payload.result || {};
   const evaluation = result.evaluation || result;
@@ -1686,62 +1743,62 @@ function renderIteratorResult(container, payload) {
   container.innerHTML = `
     <div class="iterator-summary">
       <div class="score-tile">
-        <span>Score</span>
+        <span>总分</span>
         <strong>${escapeHtml(evaluation.score ?? '-')}</strong>
       </div>
       <div class="score-tile">
-        <span>Mode</span>
-        <strong>${escapeHtml(payload.mode === 'generated_docx' ? 'Generated DOCX' : 'Static preflight')}</strong>
+        <span>评估模式</span>
+        <strong>${escapeHtml(labelEvaluationMode(payload.mode))}</strong>
       </div>
       <div class="score-tile">
-        <span>Findings</span>
+        <span>发现问题</span>
         <strong>${findings.length}</strong>
       </div>
     </div>
     <div class="iterator-section">
-      <h4>Dimension Scores</h4>
+      <h4>分项评分</h4>
       <div class="dimension-grid">
         ${Object.entries(scores).map(([key, value]) => `
-          <div><span>${escapeHtml(key)}</span><strong>${escapeHtml(value)}</strong></div>
-        `).join('') || '<p>No dimension scores.</p>'}
+          <div><span>${escapeHtml(labelEvaluationDimension(key))}</span><strong>${escapeHtml(value)}</strong></div>
+        `).join('') || '<p>暂无分项评分。</p>'}
       </div>
     </div>
     <div class="iterator-section">
-      <h4>Findings</h4>
+      <h4>问题明细</h4>
       <div class="finding-list">
         ${findings.map((finding) => `
           <div class="finding-card finding-${escapeHtml(finding.severity || 'medium')}">
             <div class="item-card-head">
-              <strong>${escapeHtml(finding.category || 'finding')}</strong>
-              <span class="status-pill">${escapeHtml(finding.severity || '-')}</span>
+              <strong>${escapeHtml(labelEvaluationCategory(finding.category))}</strong>
+              <span class="status-pill">${escapeHtml(labelEvaluationSeverity(finding.severity))}</span>
             </div>
-            <p>${escapeHtml(finding.message || '')}</p>
-            <small>${escapeHtml(finding.suggested_skill_change || '')}</small>
+            <p>${escapeHtml(localizeEvaluationText(finding.message))}</p>
+            <small>${escapeHtml(localizeEvaluationText(finding.suggested_skill_change))}</small>
           </div>
-        `).join('') || '<p>No obvious findings.</p>'}
+        `).join('') || '<p>未发现明显问题。</p>'}
       </div>
     </div>
     <div class="iterator-section">
-      <h4>Recommendation</h4>
-      <p>${escapeHtml(evaluation.recommended_patch_summary || 'No recommendation.')}</p>
-      ${candidateDocx ? `<p class="status-text">Candidate DOCX: ${escapeHtml(candidateDocx)}</p>` : ''}
+      <h4>改进建议</h4>
+      <p>${escapeHtml(localizeEvaluationText(evaluation.recommended_patch_summary || '暂无改进建议。'))}</p>
+      ${candidateDocx ? `<p class="status-text">候选文档：${escapeHtml(candidateDocx)}</p>` : ''}
     </div>
     <div class="iterator-section iterator-draft-section">
       <div class="item-card-head">
-        <h4>Skill Candidate Update</h4>
-        <span class="status-pill">${draft.has_changes ? escapeHtml(draft.suggested_version ? `v${draft.suggested_version}` : 'pending') : 'no change'}</span>
+        <h4>Skill 候选更新</h4>
+        <span class="status-pill">${draft.has_changes ? escapeHtml(draft.suggested_version ? `v${draft.suggested_version}` : '待确认') : '无变更'}</span>
       </div>
       ${draft.has_changes ? `
-        <p>The evaluation was converted into a candidate SKILL.md update. Review the diff before applying it.</p>
+        <p>已根据评估结果生成候选 SKILL.md 更新。请先查看差异，再决定是否应用。</p>
         <pre class="diff-view">${escapeHtml(draft.diff || '')}</pre>
         <div class="card-actions">
-          <button class="primary" data-action="apply-iterator-draft" type="button">Apply candidate</button>
-          <button data-action="reject-iterator-draft" type="button">Discard update</button>
+          <button class="primary" data-action="apply-iterator-draft" type="button">应用候选更新</button>
+          <button data-action="reject-iterator-draft" type="button">放弃本次更新</button>
         </div>
-      ` : '<p>No write-back candidate was produced for this run.</p>'}
+      ` : '<p>本次未生成需要写回的 Skill 候选更新。</p>'}
     </div>
-    <details class="iterator-json-pane" open>
-      <summary>Raw JSON</summary>
+    <details class="iterator-json-pane">
+      <summary>原始评估 JSON</summary>
       <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
     </details>
   `;
@@ -1751,14 +1808,14 @@ function renderIteratorResult(container, payload) {
   container.querySelector('[data-action="reject-iterator-draft"]')?.addEventListener('click', () => {
     const section = container.querySelector('.iterator-draft-section');
     if (section) {
-      section.innerHTML = '<h4>Skill Candidate Update</h4><p>This candidate was discarded. The current Skill was not changed.</p>';
+      section.innerHTML = '<h4>Skill 候选更新</h4><p>已放弃本次候选更新，当前 Skill 未修改。</p>';
     }
   });
 }
 
 async function applyIteratorDraft(container, skillName, content) {
   if (!skillName || !content) return;
-  if (!confirm('Apply this candidate to the current Skill? A rollback snapshot will be created first.')) return;
+  if (!confirm('确定将候选内容应用到当前 Skill 吗？系统会先创建可回退快照。')) return;
   const section = container.querySelector('.iterator-draft-section');
   try {
     const resp = await fetch(`/api/skills/${encodeURIComponent(skillName)}/apply`, {
@@ -1770,18 +1827,18 @@ async function applyIteratorDraft(container, skillName, content) {
       }),
     });
     const data = await resp.json();
-    if (!resp.ok) throw new Error(data.detail || 'Failed to apply candidate');
+    if (!resp.ok) throw new Error(data.detail || '应用候选更新失败');
     if (section) {
       section.innerHTML = `
-        <h4>Skill Candidate Update</h4>
-        <p>The candidate was applied. The previous version is available as a rollback snapshot.</p>
-        <p class="status-text">Current version: ${escapeHtml(data.skill?.version ? `v${data.skill.version}` : 'unversioned')}</p>
+        <h4>Skill 候选更新</h4>
+        <p>候选更新已应用，上一版本已保存为可回退快照。</p>
+        <p class="status-text">当前版本：${escapeHtml(data.skill?.version ? `v${data.skill.version}` : '未标版本')}</p>
       `;
     }
     await loadSkills();
   } catch (err) {
     if (section) {
-      section.insertAdjacentHTML('beforeend', `<div class="msg error">Apply failed: ${escapeHtml(err.message)}</div>`);
+      section.insertAdjacentHTML('beforeend', `<div class="msg error">应用失败：${escapeHtml(err.message)}</div>`);
     }
   }
 }

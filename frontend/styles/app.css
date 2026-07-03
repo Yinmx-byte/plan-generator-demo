@@ -993,10 +993,15 @@ button.ghost {
   gap: 12px;
   background: rgba(255, 255, 255, 0.82);
 }
+.iterator-results > * {
+  min-width: 0;
+}
 .iterator-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
+  width: 100%;
+  min-width: 0;
 }
 .score-tile,
 .iterator-section,
@@ -1016,7 +1021,9 @@ button.ghost {
 .score-tile strong {
   display: block;
   margin-top: 5px;
-  font-size: 24px;
+  font-size: clamp(18px, 2vw, 24px);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 .iterator-section h4 {
   margin: 0 0 10px;
@@ -1570,7 +1577,7 @@ button.danger:hover {
   gap: 10px;
 }
 .document-evaluation-result .iterator-summary {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 .document-evaluation-result .iterator-json-pane {
   display: none;

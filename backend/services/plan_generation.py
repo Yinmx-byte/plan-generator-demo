@@ -40,6 +40,14 @@ def readable_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())
 
 
+def safe_docx_filename(value: Any, fallback: str = "检修方案") -> str:
+    """Return a Windows-safe filename stem."""
+    text = readable_text(value) or fallback
+    text = re.sub(r'[\\/:*?"<>|]+', "_", text)
+    text = re.sub(r"\s+", "", text).strip("._ ")
+    return (text or fallback)[:80]
+
+
 def header_text_at(header: Any, index: int) -> str:
     if not isinstance(header, list) or index >= len(header):
         return ""
@@ -1001,13 +1009,16 @@ def render_docx(data: dict[str, Any]) -> tuple[str, Path, str]:
     output_dir = Path(tempfile.gettempdir()) / "plan-generator"
     output_dir.mkdir(parents=True, exist_ok=True)
     file_id = uuid.uuid4().hex
-    output_path = output_dir / f"检修方案_{file_id[:8]}.docx"
+    title = data.get("title") or data.get("document", {}).get("title", "检修方案")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{safe_docx_filename(title)}_{timestamp}.docx"
+    output_path = output_dir / filename
     doc.save(str(output_path))
     _generated_files[file_id] = output_path
     _generated_documents[file_id] = deepcopy(data)
 
     files = sorted(
-        output_dir.glob("检修方案_*.docx"),
+        output_dir.glob("*.docx"),
         key=lambda f: f.stat().st_mtime,
         reverse=True,
     )
@@ -1021,8 +1032,7 @@ def render_docx(data: dict[str, Any]) -> tuple[str, Path, str]:
                 _generated_files.pop(old_id, None)
                 _generated_documents.pop(old_id, None)
 
-    filename = data.get("title") or data.get("document", {}).get("title", "检修方案")
-    return file_id, output_path, filename + ".docx"
+    return file_id, output_path, filename
 
 
 
