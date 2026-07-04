@@ -5,9 +5,9 @@
       "type": "stdio",
       "command": "node",
       "args": [
-        "D:\\develop\\page-agent\\packages\\mcp\\src\\index.js"
+        "src/index.js"
       ],
-      "cwd": "D:\\develop\\page-agent",
+      "cwd": "mcp_servers/page_agent",
       "group_name": "mcp",
       "enable_funcs": [
         "execute_task",

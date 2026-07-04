@@ -13,6 +13,31 @@
       "namesake_strategy": "rename"
     },
     {
+      "name": "page-agent",
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "src/index.js"
+      ],
+      "cwd": "mcp_servers/page_agent",
+      "group_name": "mcp",
+      "enable_funcs": [
+        "execute_task",
+        "execute_task_async",
+        "get_task_events",
+        "get_status",
+        "stop_task"
+      ],
+      "env": {
+        "LLM_BASE_URL": "$LLM_BASE_URL",
+        "LLM_API_KEY": "$LLM_API_KEY",
+        "LLM_MODEL_NAME": "$LLM_MODEL_NAME",
+        "PORT": "$PAGE_AGENT_PORT"
+      },
+      "execution_timeout": 120,
+      "namesake_strategy": "rename"
+    },
+    {
       "name": "local-script-validator",
       "type": "stdio",
       "command": "python",

@@ -475,7 +475,7 @@ async def delete_skill(skill_name: str):
 
 
 def iterator_script_path(name: str) -> Path:
-    script = Path.home() / ".codex" / "skills" / "maintenance-skill-iterator" / "scripts" / name
+    script = ROOT / "quality_iterator" / "scripts" / name
     if not script.exists():
         raise HTTPException(status_code=500, detail=f"未找到自迭代脚本：{script}")
     return script
