@@ -367,6 +367,7 @@ async def stream_master_agent_response(request: ChatRequest, startup_message: st
         )
         return
 
+    agent_task: asyncio.Task | None = None
     try:
         yield sse_event(
             "status",
@@ -398,7 +399,7 @@ async def stream_master_agent_response(request: ChatRequest, startup_message: st
         async def trace_callback(trace_message: str) -> None:
             await trace_queue.put({"session_id": session_id, "message": trace_message})
 
-        task = asyncio.create_task(
+        agent_task = asyncio.create_task(
             run_master_agent_turn(
                 message,
                 session,
@@ -407,7 +408,7 @@ async def stream_master_agent_response(request: ChatRequest, startup_message: st
             )
         )
         while True:
-            if task.done() and trace_queue.empty():
+            if agent_task.done() and trace_queue.empty():
                 break
             try:
                 trace_data = await asyncio.wait_for(trace_queue.get(), timeout=0.2)
@@ -415,7 +416,7 @@ async def stream_master_agent_response(request: ChatRequest, startup_message: st
                 continue
             yield sse_event("trace", trace_data)
 
-        response = await task
+        response = await agent_task
         assistant_message = get_response_text(response) or "Master Agent 已完成本轮处理。"
         generated = session.get("generated")
         validation_result = None
@@ -450,6 +451,14 @@ async def stream_master_agent_response(request: ChatRequest, startup_message: st
             "error",
             {"session_id": session_id, "message": f"Master Agent 执行失败：{exc}"},
         )
+
+    finally:
+        if agent_task is not None and not agent_task.done():
+            agent_task.cancel()
+            try:
+                await asyncio.wait_for(agent_task, timeout=2)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
 
 
 @app.post("/api/chat/stream")

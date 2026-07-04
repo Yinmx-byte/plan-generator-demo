@@ -98,6 +98,22 @@ export class HubBridge {
 		}
 	}
 
+	/** @returns {Promise<void>} */
+	async close() {
+		if (this.#pendingTask) {
+			this.#pendingTask.reject(new Error('Page Agent MCP server is shutting down'))
+			this.#pendingTask = null
+		}
+		if (this.connected) {
+			this.stopTask()
+			this.#hub?.close()
+		}
+		await Promise.allSettled([
+			new Promise((resolve) => this.#wss.close(resolve)),
+			new Promise((resolve) => this.#httpServer.close(resolve)),
+		])
+	}
+
 	// TODO: Add version checking
 
 	/** @param {import('ws').WebSocket} ws */

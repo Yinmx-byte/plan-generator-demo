@@ -7,14 +7,15 @@ import os
 import uuid
 from typing import Any, AsyncIterator
 
-from fastapi import HTTPException
 from agentscope.agent import ReActAgent
 from agentscope.memory import InMemoryMemory
 from agentscope.message import Msg
 from agentscope.tool import ToolResponse
+from fastapi import HTTPException
 
 from runtime import get_formatter, get_master_model, get_toolkit
 from services.json_utils import get_response_text
+
 
 async def run_plan_validation_agent(
     state: dict[str, str],
@@ -135,6 +136,9 @@ async def run_page_agent_task_events(task: str) -> AsyncIterator[dict[str, Any]]
     task = task.strip()
     if not task:
         raise HTTPException(status_code=400, detail="请输入 Page Agent 测试指令")
+
+    task_id = ""
+    completed = False
     start_text = await call_page_agent_tool("execute_task_async", {"task": task})
     if start_text.startswith("Error:"):
         yield {"type": "error", "message": start_text}
@@ -151,33 +155,41 @@ async def run_page_agent_task_events(task: str) -> AsyncIterator[dict[str, Any]]
 
     cursor = int(started.get("cursor") or 0)
     yield {"type": "status", "message": f"Page Agent 任务已启动：{task_id}"}
-    while True:
-        await asyncio.sleep(0.8)
-        text = await call_page_agent_tool("get_task_events", {"task_id": task_id, "cursor": cursor})
-        if text.startswith("Error:"):
-            yield {"type": "error", "message": text}
-            return
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            yield {"type": "error", "message": text}
-            return
-        cursor = int(data.get("next_cursor") or cursor)
-        for trace in data.get("events") or []:
-            yield {"type": "trace", "message": format_page_agent_trace(trace), "raw": trace}
-        status = data.get("status")
-        if status in {"completed", "failed", "error"}:
-            result = data.get("result") or {}
-            if status == "completed":
-                yield {"type": "done", "message": result.get("data") or "Page Agent 执行完成"}
-            elif result:
-                yield {
-                    "type": "error",
-                    "message": result.get("data") or f"Page Agent 执行失败：{status}",
-                }
-            else:
-                yield {"type": "error", "message": data.get("error") or f"Page Agent 执行失败：{status}"}
-            return
+    try:
+        while True:
+            await asyncio.sleep(0.8)
+            text = await call_page_agent_tool("get_task_events", {"task_id": task_id, "cursor": cursor})
+            if text.startswith("Error:"):
+                yield {"type": "error", "message": text}
+                return
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                yield {"type": "error", "message": text}
+                return
+            cursor = int(data.get("next_cursor") or cursor)
+            for trace in data.get("events") or []:
+                yield {"type": "trace", "message": format_page_agent_trace(trace), "raw": trace}
+            status = data.get("status")
+            if status in {"completed", "failed", "error"}:
+                completed = True
+                result = data.get("result") or {}
+                if status == "completed":
+                    yield {"type": "done", "message": result.get("data") or "Page Agent 执行完成"}
+                elif result:
+                    yield {
+                        "type": "error",
+                        "message": result.get("data") or f"Page Agent 执行失败：{status}",
+                    }
+                else:
+                    yield {"type": "error", "message": data.get("error") or f"Page Agent 执行失败：{status}"}
+                return
+    finally:
+        if task_id and not completed:
+            try:
+                await asyncio.wait_for(call_page_agent_tool("stop_task", {"task_id": task_id}), timeout=2)
+            except Exception:
+                pass
 
 
 async def run_page_agent_task(task: str) -> str:
@@ -204,8 +216,3 @@ async def run_page_agent_task(task: str) -> str:
     async for chunk in tool_result:
         result = tool_response_text(chunk) or result
     return result or "Page Agent 执行完成，但未返回文本结果。"
-
-
-# ── API 路由 ────────────────────────────────────────────────────
-
-

@@ -218,6 +218,26 @@ mcpServer.registerTool(
 	}
 )
 
+let shuttingDown = false
+async function shutdown() {
+	if (shuttingDown) return
+	shuttingDown = true
+	try {
+		await hub.close()
+	} catch (err) {
+		console.error(`[page-agent-mcp] Shutdown error: ${err.message}`)
+	} finally {
+		process.exit(0)
+	}
+}
+
 const transport = new StdioServerTransport()
+transport.onclose = shutdown
 await mcpServer.connect(transport)
+process.stdin.resume()
 console.error('[page-agent-mcp] MCP server ready (stdio)')
+
+process.once('SIGINT', shutdown)
+process.once('SIGTERM', shutdown)
+process.stdin.once('end', shutdown)
+process.stdin.once('close', shutdown)
