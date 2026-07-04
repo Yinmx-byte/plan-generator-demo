@@ -216,3 +216,14 @@ async def run_page_agent_task(task: str) -> str:
     async for chunk in tool_result:
         result = tool_response_text(chunk) or result
     return result or "Page Agent 执行完成，但未返回文本结果。"
+
+
+async def stop_page_agent_task() -> str:
+    """Stop the current Page Agent browser automation task if one is running."""
+    try:
+        text = await call_page_agent_tool("stop_task", {})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return f"Page Agent 中止请求未完成：{exc}"
+    return text or "Page Agent 中止信号已发送。"

@@ -51,6 +51,7 @@ from services.page_agent import (
     run_page_agent_task,
     run_page_agent_task_events,
     run_plan_validation_agent,
+    stop_page_agent_task,
 )
 from services.requirements import (
     build_missing_question,
@@ -182,6 +183,14 @@ async def execute_page_agent_task(request: PageAgentTaskRequest):
     return {
         "status": "ok",
         "result": await run_page_agent_task(request.task),
+    }
+
+
+@app.post("/api/page-agent/task/stop")
+async def stop_page_agent_current_task():
+    return {
+        "status": "ok",
+        "message": await stop_page_agent_task(),
     }
 
 

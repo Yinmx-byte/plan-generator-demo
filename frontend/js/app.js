@@ -1873,8 +1873,19 @@ function initPageAgentPage() {
   const taskInput = document.getElementById('pageAgentTaskInput');
   const startBtn = document.getElementById('startMcpBtn');
   const runBtn = document.getElementById('runPageAgentBtn');
+  const stopBtn = document.getElementById('stopPageAgentBtn');
   const statusEl = document.getElementById('mcpStatus');
+  let pageAgentController = null;
   addMessage(pageAgentMessagesEl, 'assistant', '这里用于单独测试 Page Agent。输出不会混入主方案生成对话。');
+
+  function setPageAgentRunning(running) {
+    runBtn.disabled = running;
+    taskInput.disabled = running;
+    if (stopBtn) {
+      stopBtn.hidden = !running;
+      stopBtn.disabled = false;
+    }
+  }
 
   startBtn.addEventListener('click', async () => {
     startBtn.disabled = true;
@@ -1891,6 +1902,26 @@ function initPageAgentPage() {
     }
   });
 
+  stopBtn?.addEventListener('click', async () => {
+    stopBtn.disabled = true;
+    statusEl.textContent = '正在中止 Page Agent 当前任务...';
+    try {
+      if (pageAgentController) pageAgentController.abort();
+      const resp = await fetch('/api/page-agent/task/stop', { method: 'POST' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.detail || data.message || '中止失败');
+      addMessage(pageAgentMessagesEl, 'status', data.message || 'Page Agent 中止信号已发送。');
+      statusEl.textContent = 'Page Agent 中止信号已发送。';
+    } catch (err) {
+      addMessage(pageAgentMessagesEl, 'error', 'Page Agent 中止失败：' + err.message);
+      statusEl.textContent = 'Page Agent 中止失败：' + err.message;
+    } finally {
+      pageAgentController = null;
+      setPageAgentRunning(false);
+      taskInput.focus();
+    }
+  });
+
   runBtn.addEventListener('click', async (event) => {
     event.stopImmediatePropagation();
     const task = taskInput.value.trim();
@@ -1899,13 +1930,16 @@ function initPageAgentPage() {
       return;
     }
     addMessage(pageAgentMessagesEl, 'user', task);
-    runBtn.disabled = true;
+    taskInput.value = '';
+    pageAgentController = new AbortController();
+    setPageAgentRunning(true);
     statusEl.textContent = 'Page Agent 正在执行测试指令...';
     try {
       const resp = await fetch('/api/page-agent/task/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task }),
+        signal: pageAgentController.signal,
       });
       if (!resp.ok || !resp.body) {
         const data = await resp.json().catch(() => ({}));
@@ -1935,10 +1969,17 @@ function initPageAgentPage() {
       const msg = addMessage(pageAgentMessagesEl, 'assistant', '');
       await typeInto(msg, finalMessage || '无返回内容');
     } catch (err) {
-      statusEl.textContent = 'Page Agent 执行失败：' + err.message;
-      addMessage(pageAgentMessagesEl, 'error', 'Page Agent 执行失败：' + err.message);
+      if (err.name === 'AbortError') {
+        statusEl.textContent = 'Page Agent 任务已中止。';
+        addMessage(pageAgentMessagesEl, 'status', 'Page Agent 任务已中止。');
+      } else {
+        statusEl.textContent = 'Page Agent 执行失败：' + err.message;
+        addMessage(pageAgentMessagesEl, 'error', 'Page Agent 执行失败：' + err.message);
+      }
     } finally {
-      runBtn.disabled = false;
+      pageAgentController = null;
+      setPageAgentRunning(false);
+      taskInput.focus();
     }
   }, { capture: true });
 }
