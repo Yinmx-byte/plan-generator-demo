@@ -192,32 +192,6 @@ async def run_page_agent_task_events(task: str) -> AsyncIterator[dict[str, Any]]
                 pass
 
 
-async def run_page_agent_task(task: str) -> str:
-    task = task.strip()
-    if not task:
-        raise HTTPException(status_code=400, detail="请输入 Page Agent 测试指令")
-    toolkit = await get_toolkit()
-    tool_name = "execute_task"
-    if tool_name not in toolkit.tools:
-        raise HTTPException(
-            status_code=503,
-            detail="Page Agent MCP 工具未注册，请检查 backend/mcp_servers.json。",
-        )
-    tool_call = {
-        "type": "tool_use",
-        "id": uuid.uuid4().hex,
-        "name": tool_name,
-        "input": {"task": task},
-    }
-    result = ""
-    tool_result = toolkit.call_tool_function(tool_call)
-    if inspect.isawaitable(tool_result):
-        tool_result = await tool_result
-    async for chunk in tool_result:
-        result = tool_response_text(chunk) or result
-    return result or "Page Agent 执行完成，但未返回文本结果。"
-
-
 async def stop_page_agent_task() -> str:
     """Stop the current Page Agent browser automation task if one is running."""
     try:

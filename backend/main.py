@@ -48,7 +48,6 @@ from services.plan_generation import (
     update_generated_document,
 )
 from services.page_agent import (
-    run_page_agent_task,
     run_page_agent_task_events,
     run_plan_validation_agent,
     stop_page_agent_task,
@@ -175,14 +174,6 @@ async def start_mcp_servers():
         "status": "ok",
         "message": "MCP 已启动或已处于可用状态。",
         "servers": [item.get("name") for item in load_mcp_server_configs()],
-    }
-
-
-@app.post("/api/page-agent/task")
-async def execute_page_agent_task(request: PageAgentTaskRequest):
-    return {
-        "status": "ok",
-        "result": await run_page_agent_task(request.task),
     }
 
 
