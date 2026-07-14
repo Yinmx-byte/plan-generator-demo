@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { exec } from 'node:child_process'
+import { exec, execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { platform } from 'node:os'
 import * as z from 'zod/v4'
 
@@ -60,12 +60,26 @@ function startAsyncTask(task) {
 	return record
 }
 
-// Open launcher in default browser
+// Open the launcher in Chrome on Windows so the Page Agent extension is found
+// in the same browser profile the user uses for cloud-console verification.
 const url = `http://localhost:${port}`
-const cmd = platform() === 'darwin' ? 'open' : platform() === 'win32' ? 'start ""' : 'xdg-open'
-exec(`${cmd} "${url}"`, (err) => {
-	if (err) console.error(`[page-agent-mcp] Could not open browser: ${err.message}`)
-})
+const chromeCandidates = [
+	env.PAGE_AGENT_CHROME_PATH,
+	'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+	'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+].filter(Boolean)
+const chromePath = chromeCandidates.find((candidate) => existsSync(candidate))
+
+if (platform() === 'win32' && chromePath) {
+	execFile(chromePath, ['--new-window', url], (err) => {
+		if (err) console.error(`[page-agent-mcp] Could not open Chrome: ${err.message}`)
+	})
+} else {
+	const cmd = platform() === 'darwin' ? 'open' : platform() === 'win32' ? 'start ""' : 'xdg-open'
+	exec(`${cmd} "${url}"`, (err) => {
+		if (err) console.error(`[page-agent-mcp] Could not open browser: ${err.message}`)
+	})
+}
 
 // --- MCP server (stdio) ---
 

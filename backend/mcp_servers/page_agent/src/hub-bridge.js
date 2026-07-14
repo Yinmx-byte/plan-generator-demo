@@ -31,7 +31,7 @@ export class HubBridge {
 	/** @type {import('ws').WebSocket | null} */
 	#hub = null
 
-	/** @type {{ resolve: (r: {success: boolean, data: string}) => void, reject: (e: Error) => void, onTrace?: (trace: {event: string, data: unknown, timestamp: number}) => void } | null} */
+	/** @type {{ resolve: (r: {success: boolean, data: string}) => void, reject: (e: Error) => void, onTrace?: (trace: {event: string, data: unknown, timestamp: number}) => void, stopTimer?: NodeJS.Timeout } | null} */
 	#pendingTask = null
 
 	/** @param {number} port */
@@ -96,11 +96,22 @@ export class HubBridge {
 		if (this.connected) {
 			this.#hub.send(JSON.stringify({ type: 'stop' }))
 		}
+		if (!this.#pendingTask || this.#pendingTask.stopTimer) return
+
+		const pendingTask = this.#pendingTask
+		// The extension normally returns a result after receiving "stop". Release
+		// a stale task as well, otherwise one interrupted task blocks every later run.
+		pendingTask.stopTimer = setTimeout(() => {
+			if (this.#pendingTask !== pendingTask) return
+			this.#pendingTask = null
+			pendingTask.reject(new Error('Page Agent task stopped without a completion response'))
+		}, 2500)
 	}
 
 	/** @returns {Promise<void>} */
 	async close() {
 		if (this.#pendingTask) {
+			if (this.#pendingTask.stopTimer) clearTimeout(this.#pendingTask.stopTimer)
 			this.#pendingTask.reject(new Error('Page Agent MCP server is shutting down'))
 			this.#pendingTask = null
 		}
@@ -136,9 +147,11 @@ export class HubBridge {
 			}
 
 			if (msg.type === 'result') {
+				if (this.#pendingTask?.stopTimer) clearTimeout(this.#pendingTask.stopTimer)
 				this.#pendingTask?.resolve({ success: msg.success ?? false, data: msg.data ?? '' })
 				this.#pendingTask = null
 			} else if (msg.type === 'error') {
+				if (this.#pendingTask?.stopTimer) clearTimeout(this.#pendingTask.stopTimer)
 				this.#pendingTask?.reject(new Error(msg.message ?? 'Unknown error from hub'))
 				this.#pendingTask = null
 			} else if (msg.type === 'trace') {
