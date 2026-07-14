@@ -1554,7 +1554,6 @@ function initKnowledgePage() {
 async function initIteratorPage() {
   const skillSelect = document.getElementById('iteratorSkillSelect');
   const referenceInput = document.getElementById('iteratorReferenceDir');
-  const messageInput = document.getElementById('iteratorMessage');
   const stateInput = document.getElementById('iteratorStateJson');
   const stateFieldsEl = document.getElementById('iteratorStateFields');
   const stateDialog = document.getElementById('iteratorStateDialog');
@@ -1574,7 +1573,7 @@ async function initIteratorPage() {
     const state = updateIteratorStateJson(stateFieldsEl, stateInput);
     if (stateSummaryEl) {
       const count = Object.keys(state).length;
-      stateSummaryEl.textContent = count ? `已填写 ${count} 项参数` : '尚未填写结构化参数';
+      stateSummaryEl.textContent = count ? `已填写 ${count} 项参数` : '尚未填写参数';
     }
     return state;
   };
@@ -1607,9 +1606,8 @@ async function initIteratorPage() {
       return;
     }
     const state = syncIteratorState();
-    const message = messageInput.value.trim();
     if (!preflight) {
-      const validationMessage = validateIteratorGenerationInput(message, state);
+      const validationMessage = validateIteratorGenerationInput(state);
       if (validationMessage) {
         statusEl.textContent = validationMessage;
         return;
@@ -1627,7 +1625,7 @@ async function initIteratorPage() {
         body: JSON.stringify({
           skill_name: skillName,
           reference_dir: referenceDir,
-          message: preflight ? '' : message,
+          message: '',
           state_json: preflight ? '' : stateInput.value.trim(),
           allow_partial: allowPartialInput.checked,
         }),
@@ -1710,12 +1708,11 @@ function updateIteratorStateJson(container, stateInput) {
   return state;
 }
 
-function validateIteratorGenerationInput(message, state) {
-  if (message.trim()) return '';
+function validateIteratorGenerationInput(state) {
   const missing = iteratorStateFields
     .filter((field) => field.required && !state[field.key])
     .map((field) => field.label);
-  if (missing.length) return '请填写测试需求，或补齐结构化参数：' + missing.slice(0, 4).join('、');
+  if (missing.length) return '请补齐结构化参数：' + missing.slice(0, 4).join('、');
   return '';
 }
 

@@ -950,31 +950,34 @@ button.ghost {
   grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.75fr);
   gap: 12px;
 }
-.iterator-setup-grid label,
-.iterator-demand-field {
+.iterator-setup-grid label {
   display: grid;
   gap: 6px;
-}
-.iterator-control textarea {
-  min-height: 82px;
 }
 .iterator-parameter-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 9px 12px;
+  min-height: 118px;
+  padding: 18px 20px;
   border: 1px solid #cfdae5;
   border-radius: 8px;
-  background: #f7fafc;
+  background: linear-gradient(135deg, #f7fafc 0%, #eef5fb 100%);
 }
 .iterator-parameter-bar p {
-  margin: 3px 0 0;
+  margin: 6px 0 8px;
   color: var(--muted);
   font-size: 12px;
 }
+.iterator-parameter-bar strong {
+  color: var(--blue-dark);
+  font-size: 13px;
+}
 .iterator-parameter-bar button {
   flex: 0 0 auto;
+  min-width: 132px;
+  min-height: 42px;
 }
 .iterator-json-pane {
   padding: 10px;
