@@ -1,26 +1,37 @@
 <section class="iterator-layout">
   <div class="tool-card iterator-control">
-    <p class="eyebrow">Skill Quality Loop</p>
-    <h3>检修 Skill 质量迭代</h3>
-    <p>选择一个已有 Skill，并指定高质量历史检修方案目录。主流程会先生成候选 DOCX，再评估生成结果，并把文档问题反推为 Skill 优化建议。</p>
-
-    <label class="field-label" for="iteratorReferenceDir">优质文档目录</label>
-    <input id="iteratorReferenceDir" type="text" value="D:\个人工作\2026\微创项目\整理后文档\检修方案-整理">
-
-    <label class="field-label" for="iteratorSkillSelect">待评估 Skill</label>
-    <select id="iteratorSkillSelect"></select>
-
-    <label class="field-label" for="iteratorMessage">测试需求文本</label>
-    <textarea id="iteratorMessage" placeholder="可以粘贴一段完整需求。若下方结构化参数已填写，可留空。"></textarea>
-
-    <details class="iterator-state-panel" open>
-      <summary>结构化参数</summary>
-      <div class="iterator-state-grid" id="iteratorStateFields"></div>
-      <div class="iterator-state-actions">
-        <button id="clearIteratorStateBtn" type="button">清空参数</button>
-        <button id="fillIteratorSampleBtn" type="button">填入 ECS 示例</button>
+    <div class="iterator-intro">
+      <div>
+        <p class="eyebrow">Skill Quality Loop</p>
+        <h3>检修 Skill 质量迭代</h3>
+        <p>先生成候选文档，再从结构、风险、操作、回滚与格式维度评估，并给出可审阅的 Skill 优化建议。</p>
       </div>
-    </details>
+      <span class="iterator-step-mark">01 配置评估</span>
+    </div>
+
+    <div class="iterator-setup-grid">
+      <label>
+        <span class="field-label">优质文档目录</span>
+        <input id="iteratorReferenceDir" type="text" value="D:\个人工作\2026\微创项目\整理后文档\检修方案-整理">
+      </label>
+      <label>
+        <span class="field-label">待评估 Skill</span>
+        <select id="iteratorSkillSelect"></select>
+      </label>
+    </div>
+
+    <label class="iterator-demand-field" for="iteratorMessage">
+      <span class="field-label">测试需求文本</span>
+      <textarea id="iteratorMessage" placeholder="粘贴一段完整检修需求；也可以只在结构化参数中填写测试条件。"></textarea>
+    </label>
+
+    <div class="iterator-parameter-bar">
+      <div>
+        <span class="field-label">结构化参数</span>
+        <p id="iteratorStateSummary">尚未填写结构化参数</p>
+      </div>
+      <button id="openIteratorStateBtn" type="button">配置参数</button>
+    </div>
     <textarea class="visually-hidden" id="iteratorStateJson" spellcheck="false" readonly tabindex="-1" aria-hidden="true"></textarea>
 
     <label class="check-option">
@@ -50,4 +61,25 @@
       </div>
     </div>
   </div>
+
+  <dialog class="modal modal-wide iterator-state-dialog" id="iteratorStateDialog">
+    <form method="dialog" class="modal-card iterator-state-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Structured Parameters</p>
+          <h3>填写结构化测试参数</h3>
+          <p>这些参数将与测试需求一起传给候选方案生成流程；带 * 的字段是完整生成所需条件。</p>
+        </div>
+        <button class="ghost" value="cancel" type="submit">关闭</button>
+      </div>
+      <div class="iterator-state-grid" id="iteratorStateFields"></div>
+      <div class="modal-actions iterator-state-actions">
+        <div>
+          <button id="clearIteratorStateBtn" type="button">清空参数</button>
+          <button id="fillIteratorSampleBtn" type="button">填入 ECS 示例</button>
+        </div>
+        <button class="primary" value="confirm" type="submit">保存参数</button>
+      </div>
+    </form>
+  </dialog>
 </section>

@@ -490,6 +490,7 @@ function setSidebarCollapsed(collapsed) {
 async function loadPage(page) {
   if (currentPage === 'plan') persistPlanState();
   currentPage = page;
+  document.body.classList.toggle('iterator-page', page === 'iterator');
   setActiveNav(page);
   pageTitle.textContent = pageMeta[page].title;
   pageEyebrow.textContent = pageMeta[page].eyebrow;
@@ -1552,6 +1553,9 @@ async function initIteratorPage() {
   const messageInput = document.getElementById('iteratorMessage');
   const stateInput = document.getElementById('iteratorStateJson');
   const stateFieldsEl = document.getElementById('iteratorStateFields');
+  const stateDialog = document.getElementById('iteratorStateDialog');
+  const openStateBtn = document.getElementById('openIteratorStateBtn');
+  const stateSummaryEl = document.getElementById('iteratorStateSummary');
   const allowPartialInput = document.getElementById('iteratorAllowPartial');
   const runBtn = document.getElementById('runIteratorBtn');
   const preflightBtn = document.getElementById('runIteratorPreflightBtn');
@@ -1562,16 +1566,27 @@ async function initIteratorPage() {
   const resultsEl = document.getElementById('iteratorResults');
   if (!skillSelect || !runBtn) return;
 
+  const syncIteratorState = () => {
+    const state = updateIteratorStateJson(stateFieldsEl, stateInput);
+    if (stateSummaryEl) {
+      const count = Object.keys(state).length;
+      stateSummaryEl.textContent = count ? `已填写 ${count} 项参数` : '尚未填写结构化参数';
+    }
+    return state;
+  };
+
   renderIteratorStateFields(stateFieldsEl);
-  stateFieldsEl?.addEventListener('input', () => updateIteratorStateJson(stateFieldsEl, stateInput));
-  stateFieldsEl?.addEventListener('change', () => updateIteratorStateJson(stateFieldsEl, stateInput));
+  syncIteratorState();
+  stateFieldsEl?.addEventListener('input', syncIteratorState);
+  stateFieldsEl?.addEventListener('change', syncIteratorState);
+  openStateBtn?.addEventListener('click', () => stateDialog?.showModal());
   clearStateBtn?.addEventListener('click', () => {
     fillIteratorState(stateFieldsEl, {});
-    updateIteratorStateJson(stateFieldsEl, stateInput);
+    syncIteratorState();
   });
   fillSampleBtn?.addEventListener('click', () => {
     fillIteratorState(stateFieldsEl, iteratorSampleState);
-    updateIteratorStateJson(stateFieldsEl, stateInput);
+    syncIteratorState();
   });
 
   try {
@@ -1587,7 +1602,7 @@ async function initIteratorPage() {
       statusEl.textContent = '请选择 Skill 并填写优质文档目录';
       return;
     }
-    const state = updateIteratorStateJson(stateFieldsEl, stateInput);
+    const state = syncIteratorState();
     const message = messageInput.value.trim();
     if (!preflight) {
       const validationMessage = validateIteratorGenerationInput(message, state);
