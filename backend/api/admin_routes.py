@@ -475,7 +475,7 @@ async def delete_skill(skill_name: str):
 
 
 def iterator_script_path(name: str) -> Path:
-    script = Path.home() / ".codex" / "skills" / "maintenance-skill-iterator" / "scripts" / name
+    script = ROOT / "quality_iterator" / "scripts" / name
     if not script.exists():
         raise HTTPException(status_code=500, detail=f"未找到自迭代脚本：{script}")
     return script
@@ -542,6 +542,14 @@ def resolve_iterator_reference_dir(reference_dir: Path, skill_name: str) -> Path
             if product.lower() in str(path).lower():
                 return path
     return doc_dirs[0]
+
+
+@router.get("/api/skill-iterator/rules")
+async def get_skill_iterator_rules():
+    """Return the evaluator's live rule catalog for the iterator UI."""
+    from quality_iterator.scripts.evaluate_plan_quality import get_quality_rule_catalog
+
+    return get_quality_rule_catalog()
 
 
 @router.post("/api/skill-iterator/run")

@@ -3,7 +3,7 @@
     <div class="panel-head">
       <div>
         <p class="eyebrow">MCP Browser Automation</p>
-        <h3>Page Agent 对话</h3>
+        <h3>实施方案验证</h3>
       </div>
       <div class="panel-actions">
         <button id="startMcpBtn" type="button">启动 Page Agent</button>
@@ -17,6 +17,7 @@
       <textarea id="pageAgentTaskInput" placeholder="例如：打开阿里云控制台，定位到 ECS 实例列表，检查实例创建入口和配置项"></textarea>
       <div class="composer-actions">
         <div class="status-text" id="mcpStatus">先启动 Page Agent，并在 Chrome 中确认扩展 Hub 已连接。</div>
+        <button id="stopPageAgentBtn" type="button" hidden>中止任务</button>
         <button class="primary" id="runPageAgentBtn" type="button">发送</button>
       </div>
     </section>

@@ -1,22 +1,18 @@
-<section class="tool-page">
+<section class="tool-page skill-management-page">
   <div class="tool-main">
     <div class="panel-head">
       <div>
         <p class="eyebrow">AgentScope Skill</p>
-        <h3>Skill 管理</h3>
+        <h3>检修方案生成 Skill 管理</h3>
+        <p class="skill-principles">Skill 用于固化检修规则、资源字段、步骤模板与风险约束；高质量历史方案与同类措辞由知识库提供。</p>
       </div>
       <div class="panel-actions">
         <span class="pill" id="skillCount">0 个</span>
         <button id="openSkillUploadBtn" type="button">上传 Skill</button>
       </div>
     </div>
+    <div class="status-text skill-upload-status" id="uploadStatus"></div>
     <div class="item-grid" id="skillList"></div>
-  </div>
-
-  <div class="tool-card">
-    <h3>设计原则</h3>
-    <p>Skill 只放稳定规则、资源字段、步骤模板和风险约束；历史方案原文和同类措辞交给 RAG。</p>
-    <div class="status-text" id="uploadStatus"></div>
   </div>
 </section>
 

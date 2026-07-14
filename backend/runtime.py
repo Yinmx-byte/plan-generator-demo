@@ -51,7 +51,7 @@ async def reset_skill_runtime() -> None:
         try:
             await asyncio.wait_for(
                 close_mcp_clients(),
-                timeout=float(os.getenv("MCP_CLOSE_TIMEOUT", "2")),
+                timeout=float(os.getenv("MCP_CLOSE_TIMEOUT", "6")),
             )
         except asyncio.TimeoutError:
             _mcp_clients.clear()
@@ -242,10 +242,14 @@ async def register_mcp_servers(toolkit: Toolkit) -> list[dict[str, Any]]:
 
 async def close_mcp_clients() -> None:
     global _mcp_clients
+    timeout = float(os.getenv("MCP_CLOSE_TIMEOUT", "6"))
     for client in _mcp_clients:
         close = getattr(client, "close", None)
         if close:
-            await close(ignore_errors=True)
+            try:
+                await asyncio.wait_for(close(ignore_errors=True), timeout=timeout)
+            except (asyncio.TimeoutError, Exception):
+                pass
     _mcp_clients = []
 
 
@@ -260,7 +264,14 @@ async def get_toolkit() -> Toolkit:
     toolkit.register_tool_function(build_maintenance_document)
     for skill in get_skill_registry().skills:
         toolkit.register_agent_skill(str(skill.path))
-    await register_mcp_servers(toolkit)
+    try:
+        await asyncio.wait_for(
+            register_mcp_servers(toolkit),
+            timeout=float(os.getenv("MCP_CONNECT_TIMEOUT", "30")),
+        )
+    except Exception:
+        await close_mcp_clients()
+        raise
     _toolkit = toolkit
     return _toolkit
 

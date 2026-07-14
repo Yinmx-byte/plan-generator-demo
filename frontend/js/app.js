@@ -9,10 +9,10 @@ const planSessionStorageKey = 'planGeneratorTabState';
 
 const pageMeta = {
   plan: { title: '智能对话', eyebrow: 'Conversation' },
-  skills: { title: 'Skill 管理', eyebrow: 'AgentScope' },
-  knowledge: { title: '知识库', eyebrow: 'RAG' },
-  'page-agent': { title: 'Page Agent', eyebrow: 'MCP' },
-  iterator: { title: '质量迭代', eyebrow: 'Skill Loop' },
+  skills: { title: '检修方案生成 Skill 管理', eyebrow: 'AgentScope' },
+  knowledge: { title: '高质量检修方案知识库', eyebrow: 'RAG' },
+  'page-agent': { title: '实施方案验证', eyebrow: 'MCP' },
+  iterator: { title: 'Skill 质量迭代', eyebrow: 'Skill Loop' },
 };
 
 function readPlanSessionState() {
@@ -490,6 +490,11 @@ function setSidebarCollapsed(collapsed) {
 async function loadPage(page) {
   if (currentPage === 'plan') persistPlanState();
   currentPage = page;
+  document.body.classList.toggle('iterator-page', page === 'iterator');
+  document.querySelector('.workspace')?.classList.toggle(
+    'tool-workspace',
+    ['skills', 'knowledge', 'iterator'].includes(page),
+  );
   setActiveNav(page);
   pageTitle.textContent = pageMeta[page].title;
   pageEyebrow.textContent = pageMeta[page].eyebrow;
@@ -1549,30 +1554,88 @@ function initKnowledgePage() {
 async function initIteratorPage() {
   const skillSelect = document.getElementById('iteratorSkillSelect');
   const referenceInput = document.getElementById('iteratorReferenceDir');
-  const messageInput = document.getElementById('iteratorMessage');
   const stateInput = document.getElementById('iteratorStateJson');
   const stateFieldsEl = document.getElementById('iteratorStateFields');
+  const stateDialog = document.getElementById('iteratorStateDialog');
+  const openStateBtn = document.getElementById('openIteratorStateBtn');
+  const stateSummaryEl = document.getElementById('iteratorStateSummary');
   const allowPartialInput = document.getElementById('iteratorAllowPartial');
   const runBtn = document.getElementById('runIteratorBtn');
   const preflightBtn = document.getElementById('runIteratorPreflightBtn');
   const clearStateBtn = document.getElementById('clearIteratorStateBtn');
   const fillSampleBtn = document.getElementById('fillIteratorSampleBtn');
+  const preflightRulesBtn = document.getElementById('openIteratorPreflightRulesBtn');
+  const scoringRulesBtn = document.getElementById('openIteratorScoringRulesBtn');
+  const rulesDialog = document.getElementById('iteratorRulesDialog');
+  const rulesTitleEl = document.getElementById('iteratorRulesTitle');
+  const rulesDescriptionEl = document.getElementById('iteratorRulesDescription');
+  const rulesContentEl = document.getElementById('iteratorRulesContent');
   const statusEl = document.getElementById('iteratorStatus');
   const modeEl = document.getElementById('iteratorMode');
   const resultsEl = document.getElementById('iteratorResults');
   if (!skillSelect || !runBtn) return;
 
+  const syncIteratorState = () => {
+    const state = updateIteratorStateJson(stateFieldsEl, stateInput);
+    if (stateSummaryEl) {
+      const count = Object.keys(state).length;
+      stateSummaryEl.textContent = count ? `已填写 ${count} 项参数` : '尚未填写参数';
+    }
+    return state;
+  };
+
   renderIteratorStateFields(stateFieldsEl);
-  stateFieldsEl?.addEventListener('input', () => updateIteratorStateJson(stateFieldsEl, stateInput));
-  stateFieldsEl?.addEventListener('change', () => updateIteratorStateJson(stateFieldsEl, stateInput));
+  syncIteratorState();
+  stateFieldsEl?.addEventListener('input', syncIteratorState);
+  stateFieldsEl?.addEventListener('change', syncIteratorState);
+  openStateBtn?.addEventListener('click', () => stateDialog?.showModal());
   clearStateBtn?.addEventListener('click', () => {
     fillIteratorState(stateFieldsEl, {});
-    updateIteratorStateJson(stateFieldsEl, stateInput);
+    syncIteratorState();
   });
   fillSampleBtn?.addEventListener('click', () => {
     fillIteratorState(stateFieldsEl, iteratorSampleState);
-    updateIteratorStateJson(stateFieldsEl, stateInput);
+    syncIteratorState();
   });
+
+  async function showIteratorRules(kind) {
+    if (!rulesDialog || !rulesTitleEl || !rulesDescriptionEl || !rulesContentEl) return;
+    rulesTitleEl.textContent = '加载规则中...';
+    rulesDescriptionEl.textContent = '';
+    rulesContentEl.innerHTML = '<div class="item-card"><div class="item-title">正在读取当前评估规则...</div></div>';
+    rulesDialog.showModal();
+    try {
+      const response = await fetch('/api/skill-iterator/rules');
+      const catalog = await response.json();
+      if (!response.ok) throw new Error(formatApiError(catalog.detail || '规则读取失败'));
+      const rule = catalog[kind];
+      if (!rule) throw new Error('未找到对应规则');
+      rulesTitleEl.textContent = rule.title || '评估规则';
+      rulesDescriptionEl.textContent = rule.description || '';
+      rulesContentEl.innerHTML = `
+        <div class="iterator-rule-list">
+          ${(rule.items || []).map((item) => `
+            <div class="iterator-rule-item">
+              <strong>${escapeHtml(item.title || '')}</strong>
+              <p>${escapeHtml(item.detail || '')}</p>
+            </div>
+          `).join('')}
+        </div>
+        ${Array.isArray(rule.generic_phrases) && rule.generic_phrases.length ? `
+          <div class="iterator-rule-note">
+            <strong>会提示人工复核的笼统措辞</strong>
+            <p>${escapeHtml(rule.generic_phrases.join('、'))}</p>
+          </div>
+        ` : ''}
+      `;
+    } catch (err) {
+      rulesTitleEl.textContent = '规则读取失败';
+      rulesContentEl.innerHTML = `<div class="msg error">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  preflightRulesBtn?.addEventListener('click', () => showIteratorRules('static_preflight'));
+  scoringRulesBtn?.addEventListener('click', () => showIteratorRules('scoring'));
 
   try {
     await populateSkillSelect(skillSelect, /ecs/i);
@@ -1587,10 +1650,9 @@ async function initIteratorPage() {
       statusEl.textContent = '请选择 Skill 并填写优质文档目录';
       return;
     }
-    const state = updateIteratorStateJson(stateFieldsEl, stateInput);
-    const message = messageInput.value.trim();
+    const state = syncIteratorState();
     if (!preflight) {
-      const validationMessage = validateIteratorGenerationInput(message, state);
+      const validationMessage = validateIteratorGenerationInput(state);
       if (validationMessage) {
         statusEl.textContent = validationMessage;
         return;
@@ -1608,7 +1670,7 @@ async function initIteratorPage() {
         body: JSON.stringify({
           skill_name: skillName,
           reference_dir: referenceDir,
-          message: preflight ? '' : message,
+          message: '',
           state_json: preflight ? '' : stateInput.value.trim(),
           allow_partial: allowPartialInput.checked,
         }),
@@ -1691,12 +1753,11 @@ function updateIteratorStateJson(container, stateInput) {
   return state;
 }
 
-function validateIteratorGenerationInput(message, state) {
-  if (message.trim()) return '';
+function validateIteratorGenerationInput(state) {
   const missing = iteratorStateFields
     .filter((field) => field.required && !state[field.key])
     .map((field) => field.label);
-  if (missing.length) return '请填写测试需求，或补齐结构化参数：' + missing.slice(0, 4).join('、');
+  if (missing.length) return '请补齐结构化参数：' + missing.slice(0, 4).join('、');
   return '';
 }
 
@@ -1737,7 +1798,8 @@ function renderIteratorResult(container, payload) {
   const evaluation = result.evaluation || result;
   const findings = evaluation.findings || [];
   const scores = evaluation.dimension_scores || {};
-  const candidateDocx = result.candidate_docx || evaluation.candidate?.path || '';
+  const candidatePath = result.candidate_docx || evaluation.candidate?.path || '';
+  const isStaticPreflight = payload.mode === 'skill_static_preflight';
   const draft = payload.draft || {};
   const skillName = payload.skill?.name || '';
   container.innerHTML = `
@@ -1781,7 +1843,7 @@ function renderIteratorResult(container, payload) {
     <div class="iterator-section">
       <h4>改进建议</h4>
       <p>${escapeHtml(localizeEvaluationText(evaluation.recommended_patch_summary || '暂无改进建议。'))}</p>
-      ${candidateDocx ? `<p class="status-text">候选文档：${escapeHtml(candidateDocx)}</p>` : ''}
+      ${candidatePath ? `<p class="status-text">${isStaticPreflight ? '已检查的 Skill：' : '候选文档：'}${escapeHtml(candidatePath)}</p>` : ''}
     </div>
     <div class="iterator-section iterator-draft-section">
       <div class="item-card-head">
@@ -1873,8 +1935,19 @@ function initPageAgentPage() {
   const taskInput = document.getElementById('pageAgentTaskInput');
   const startBtn = document.getElementById('startMcpBtn');
   const runBtn = document.getElementById('runPageAgentBtn');
+  const stopBtn = document.getElementById('stopPageAgentBtn');
   const statusEl = document.getElementById('mcpStatus');
+  let pageAgentController = null;
   addMessage(pageAgentMessagesEl, 'assistant', '这里用于单独测试 Page Agent。输出不会混入主方案生成对话。');
+
+  function setPageAgentRunning(running) {
+    runBtn.disabled = running;
+    taskInput.disabled = running;
+    if (stopBtn) {
+      stopBtn.hidden = !running;
+      stopBtn.disabled = false;
+    }
+  }
 
   startBtn.addEventListener('click', async () => {
     startBtn.disabled = true;
@@ -1891,6 +1964,26 @@ function initPageAgentPage() {
     }
   });
 
+  stopBtn?.addEventListener('click', async () => {
+    stopBtn.disabled = true;
+    statusEl.textContent = '正在中止 Page Agent 当前任务...';
+    try {
+      if (pageAgentController) pageAgentController.abort();
+      const resp = await fetch('/api/page-agent/task/stop', { method: 'POST' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.detail || data.message || '中止失败');
+      addMessage(pageAgentMessagesEl, 'status', data.message || 'Page Agent 中止信号已发送。');
+      statusEl.textContent = 'Page Agent 中止信号已发送。';
+    } catch (err) {
+      addMessage(pageAgentMessagesEl, 'error', 'Page Agent 中止失败：' + err.message);
+      statusEl.textContent = 'Page Agent 中止失败：' + err.message;
+    } finally {
+      pageAgentController = null;
+      setPageAgentRunning(false);
+      taskInput.focus();
+    }
+  });
+
   runBtn.addEventListener('click', async (event) => {
     event.stopImmediatePropagation();
     const task = taskInput.value.trim();
@@ -1899,13 +1992,16 @@ function initPageAgentPage() {
       return;
     }
     addMessage(pageAgentMessagesEl, 'user', task);
-    runBtn.disabled = true;
+    taskInput.value = '';
+    pageAgentController = new AbortController();
+    setPageAgentRunning(true);
     statusEl.textContent = 'Page Agent 正在执行测试指令...';
     try {
       const resp = await fetch('/api/page-agent/task/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task }),
+        signal: pageAgentController.signal,
       });
       if (!resp.ok || !resp.body) {
         const data = await resp.json().catch(() => ({}));
@@ -1935,10 +2031,17 @@ function initPageAgentPage() {
       const msg = addMessage(pageAgentMessagesEl, 'assistant', '');
       await typeInto(msg, finalMessage || '无返回内容');
     } catch (err) {
-      statusEl.textContent = 'Page Agent 执行失败：' + err.message;
-      addMessage(pageAgentMessagesEl, 'error', 'Page Agent 执行失败：' + err.message);
+      if (err.name === 'AbortError') {
+        statusEl.textContent = 'Page Agent 任务已中止。';
+        addMessage(pageAgentMessagesEl, 'status', 'Page Agent 任务已中止。');
+      } else {
+        statusEl.textContent = 'Page Agent 执行失败：' + err.message;
+        addMessage(pageAgentMessagesEl, 'error', 'Page Agent 执行失败：' + err.message);
+      }
     } finally {
-      runBtn.disabled = false;
+      pageAgentController = null;
+      setPageAgentRunning(false);
+      taskInput.focus();
     }
   }, { capture: true });
 }

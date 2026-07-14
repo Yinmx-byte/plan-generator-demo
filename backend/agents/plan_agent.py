@@ -90,13 +90,21 @@ async def run_plan_agent(
     agent.set_msg_queue_enabled(True, queue)
     task = asyncio.create_task(agent(Msg("user", user_prompt, "user")))
 
-    while True:
-        if task.done() and queue.empty():
-            break
-        try:
-            msg, last, _speech = await asyncio.wait_for(queue.get(), timeout=0.2)
-        except asyncio.TimeoutError:
-            continue
-        for trace in format_agent_trace(msg, runtime.get_response_text, last):
-            await trace_callback(trace)
-    return await task
+    try:
+        while True:
+            if task.done() and queue.empty():
+                break
+            try:
+                msg, last, _speech = await asyncio.wait_for(queue.get(), timeout=0.2)
+            except asyncio.TimeoutError:
+                continue
+            for trace in format_agent_trace(msg, runtime.get_response_text, last):
+                await trace_callback(trace)
+        return await task
+    finally:
+        if not task.done():
+            task.cancel()
+            try:
+                await asyncio.wait_for(task, timeout=2)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
