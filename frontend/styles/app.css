@@ -956,6 +956,7 @@ button.ghost {
 }
 .iterator-parameter-bar {
   display: flex;
+  width: min(100%, 980px);
   align-items: center;
   justify-content: space-between;
   gap: 16px;

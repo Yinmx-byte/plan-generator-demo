@@ -1753,7 +1753,8 @@ function renderIteratorResult(container, payload) {
   const evaluation = result.evaluation || result;
   const findings = evaluation.findings || [];
   const scores = evaluation.dimension_scores || {};
-  const candidateDocx = result.candidate_docx || evaluation.candidate?.path || '';
+  const candidatePath = result.candidate_docx || evaluation.candidate?.path || '';
+  const isStaticPreflight = payload.mode === 'skill_static_preflight';
   const draft = payload.draft || {};
   const skillName = payload.skill?.name || '';
   container.innerHTML = `
@@ -1797,7 +1798,7 @@ function renderIteratorResult(container, payload) {
     <div class="iterator-section">
       <h4>改进建议</h4>
       <p>${escapeHtml(localizeEvaluationText(evaluation.recommended_patch_summary || '暂无改进建议。'))}</p>
-      ${candidateDocx ? `<p class="status-text">候选文档：${escapeHtml(candidateDocx)}</p>` : ''}
+      ${candidatePath ? `<p class="status-text">${isStaticPreflight ? '已检查的 Skill：' : '候选文档：'}${escapeHtml(candidatePath)}</p>` : ''}
     </div>
     <div class="iterator-section iterator-draft-section">
       <div class="item-card-head">
