@@ -35,9 +35,15 @@
       <span>允许字段不完整时生成候选文档</span>
     </label>
 
-    <div class="card-actions">
-      <button id="runIteratorPreflightBtn" type="button">仅静态预检</button>
-      <button class="primary" id="runIteratorBtn" type="button">生成并评估</button>
+    <div class="iterator-actions">
+      <div class="iterator-rule-actions">
+        <button class="ghost" id="openIteratorPreflightRulesBtn" type="button">查看静态预检规则</button>
+        <button class="ghost" id="openIteratorScoringRulesBtn" type="button">查看文档评分规则</button>
+      </div>
+      <div class="card-actions">
+        <button id="runIteratorPreflightBtn" type="button">仅静态预检</button>
+        <button class="primary" id="runIteratorBtn" type="button">生成并评估</button>
+      </div>
     </div>
     <div class="status-text" id="iteratorStatus">“仅静态预检”只检查 Skill 规则；填写结构化参数后，“生成并评估”才会生成候选文档并与优质方案对照。</div>
   </div>
@@ -76,6 +82,20 @@
         </div>
         <button class="primary" value="confirm" type="submit">保存参数</button>
       </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal iterator-rules-dialog" id="iteratorRulesDialog">
+    <form method="dialog" class="modal-card iterator-rules-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Quality Rules</p>
+          <h3 id="iteratorRulesTitle">评估规则</h3>
+          <p id="iteratorRulesDescription"></p>
+        </div>
+        <button class="ghost" value="cancel" type="submit">关闭</button>
+      </div>
+      <div class="iterator-rules-content" id="iteratorRulesContent"></div>
     </form>
   </dialog>
 </section>

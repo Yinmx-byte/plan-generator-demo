@@ -55,6 +55,65 @@ ACTION_ALIASES = {
 }
 
 
+def get_quality_rule_catalog() -> dict:
+    """Expose the evaluator's current checks for the user-facing rule viewer."""
+    return {
+        "static_preflight": {
+            "title": "静态预检规则",
+            "description": "不调用模型、不生成 DOCX。预检读取当前 SKILL.md，检查规则本身是否覆盖后续生成所需的关键约束。",
+            "items": [
+                {
+                    "title": "质量评估契约",
+                    "detail": "读取 Skill 中“质量评估契约”章节，并按通用规则及当前动作场景（如创建、回收、扩缩容、重启）选择检查项。",
+                },
+                {
+                    "title": "文档结构约束",
+                    "detail": "检查 Skill 是否覆盖标准方案章节：背景、检修类型、现场环境、实施计划、风险评估、实施步骤与回滚步骤。",
+                },
+                {
+                    "title": "关键操作闭环",
+                    "detail": "检查备份、检修前验证、检修操作、检修后验证，以及回滚操作、回滚后验证等要求是否写入 Skill。",
+                },
+                {
+                    "title": "风险与格式约束",
+                    "detail": "检查影响范围、危险点分析、安全措施、授权、备份、验证、双人复核等风险要求；通用编排 Skill 还检查 JSON、章节块、表格与首页规则。",
+                },
+            ],
+        },
+        "scoring": {
+            "title": "文档评分规则",
+            "description": "仅在“生成并评估”后执行：先生成候选 DOCX，再与当前规则和优质历史方案目录一起进行质量检查。总分为六项得分的算术平均值。",
+            "items": [
+                {
+                    "title": "结构完整性（structure）",
+                    "detail": f"按标准章节清单计算覆盖率，共 {len(CANONICAL_HEADINGS)} 项。",
+                },
+                {
+                    "title": "风险覆盖（risk）",
+                    "detail": "检查影响范围、危险点分析、安全措施、授权、备份、验证、双人复核。",
+                },
+                {
+                    "title": "操作可执行性（operation）",
+                    "detail": "检查备份、检修前验证、检修操作、检修后验证是否形成完整操作链路。",
+                },
+                {
+                    "title": "回滚闭环（rollback）",
+                    "detail": "检查是否包含回滚操作与回滚后验证。",
+                },
+                {
+                    "title": "Skill 契约符合度（contract）",
+                    "detail": "按当前产品 Skill 的质量评估契约，检查通用项与本次动作对应项的关键词覆盖率。",
+                },
+                {
+                    "title": "格式与表达（format）",
+                    "detail": "DOCX 根据表格数量和重复编号检查评分；同时标记过于笼统的通用措辞。",
+                },
+            ],
+            "generic_phrases": GENERIC_PHRASES,
+        },
+    }
+
+
 @dataclass
 class DocProfile:
     path: str

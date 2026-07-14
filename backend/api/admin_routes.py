@@ -544,6 +544,14 @@ def resolve_iterator_reference_dir(reference_dir: Path, skill_name: str) -> Path
     return doc_dirs[0]
 
 
+@router.get("/api/skill-iterator/rules")
+async def get_skill_iterator_rules():
+    """Return the evaluator's live rule catalog for the iterator UI."""
+    from quality_iterator.scripts.evaluate_plan_quality import get_quality_rule_catalog
+
+    return get_quality_rule_catalog()
+
+
 @router.post("/api/skill-iterator/run")
 async def run_skill_iterator(request_body: SkillIteratorRequest, request: Request):
     skill = get_skill_or_404(request_body.skill_name)

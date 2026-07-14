@@ -1564,6 +1564,12 @@ async function initIteratorPage() {
   const preflightBtn = document.getElementById('runIteratorPreflightBtn');
   const clearStateBtn = document.getElementById('clearIteratorStateBtn');
   const fillSampleBtn = document.getElementById('fillIteratorSampleBtn');
+  const preflightRulesBtn = document.getElementById('openIteratorPreflightRulesBtn');
+  const scoringRulesBtn = document.getElementById('openIteratorScoringRulesBtn');
+  const rulesDialog = document.getElementById('iteratorRulesDialog');
+  const rulesTitleEl = document.getElementById('iteratorRulesTitle');
+  const rulesDescriptionEl = document.getElementById('iteratorRulesDescription');
+  const rulesContentEl = document.getElementById('iteratorRulesContent');
   const statusEl = document.getElementById('iteratorStatus');
   const modeEl = document.getElementById('iteratorMode');
   const resultsEl = document.getElementById('iteratorResults');
@@ -1591,6 +1597,45 @@ async function initIteratorPage() {
     fillIteratorState(stateFieldsEl, iteratorSampleState);
     syncIteratorState();
   });
+
+  async function showIteratorRules(kind) {
+    if (!rulesDialog || !rulesTitleEl || !rulesDescriptionEl || !rulesContentEl) return;
+    rulesTitleEl.textContent = '加载规则中...';
+    rulesDescriptionEl.textContent = '';
+    rulesContentEl.innerHTML = '<div class="item-card"><div class="item-title">正在读取当前评估规则...</div></div>';
+    rulesDialog.showModal();
+    try {
+      const response = await fetch('/api/skill-iterator/rules');
+      const catalog = await response.json();
+      if (!response.ok) throw new Error(formatApiError(catalog.detail || '规则读取失败'));
+      const rule = catalog[kind];
+      if (!rule) throw new Error('未找到对应规则');
+      rulesTitleEl.textContent = rule.title || '评估规则';
+      rulesDescriptionEl.textContent = rule.description || '';
+      rulesContentEl.innerHTML = `
+        <div class="iterator-rule-list">
+          ${(rule.items || []).map((item) => `
+            <div class="iterator-rule-item">
+              <strong>${escapeHtml(item.title || '')}</strong>
+              <p>${escapeHtml(item.detail || '')}</p>
+            </div>
+          `).join('')}
+        </div>
+        ${Array.isArray(rule.generic_phrases) && rule.generic_phrases.length ? `
+          <div class="iterator-rule-note">
+            <strong>会提示人工复核的笼统措辞</strong>
+            <p>${escapeHtml(rule.generic_phrases.join('、'))}</p>
+          </div>
+        ` : ''}
+      `;
+    } catch (err) {
+      rulesTitleEl.textContent = '规则读取失败';
+      rulesContentEl.innerHTML = `<div class="msg error">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  preflightRulesBtn?.addEventListener('click', () => showIteratorRules('static_preflight'));
+  scoringRulesBtn?.addEventListener('click', () => showIteratorRules('scoring'));
 
   try {
     await populateSkillSelect(skillSelect, /ecs/i);
