@@ -9,10 +9,10 @@ const planSessionStorageKey = 'planGeneratorTabState';
 
 const pageMeta = {
   plan: { title: '智能对话', eyebrow: 'Conversation' },
-  skills: { title: 'Skill 管理', eyebrow: 'AgentScope' },
-  knowledge: { title: '知识库', eyebrow: 'RAG' },
-  'page-agent': { title: 'Page Agent', eyebrow: 'MCP' },
-  iterator: { title: '质量迭代', eyebrow: 'Skill Loop' },
+  skills: { title: '检修方案生成 Skill 管理', eyebrow: 'AgentScope' },
+  knowledge: { title: '高质量检修方案知识库', eyebrow: 'RAG' },
+  'page-agent': { title: '实施方案验证', eyebrow: 'MCP' },
+  iterator: { title: 'Skill 质量迭代', eyebrow: 'Skill Loop' },
 };
 
 function readPlanSessionState() {
@@ -491,6 +491,10 @@ async function loadPage(page) {
   if (currentPage === 'plan') persistPlanState();
   currentPage = page;
   document.body.classList.toggle('iterator-page', page === 'iterator');
+  document.querySelector('.workspace')?.classList.toggle(
+    'tool-workspace',
+    ['skills', 'knowledge', 'iterator'].includes(page),
+  );
   setActiveNav(page);
   pageTitle.textContent = pageMeta[page].title;
   pageEyebrow.textContent = pageMeta[page].eyebrow;

@@ -273,6 +273,13 @@ body.sidebar-collapsed .nav {
   align-items: center;
   gap: 8px;
 }
+.workspace.tool-workspace {
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+}
+.workspace.tool-workspace .topbar {
+  display: none;
+}
 .page-host {
   min-height: 0;
 }
@@ -1079,7 +1086,8 @@ body.iterator-page .sidebar {
 body.iterator-page .workspace {
   min-height: calc(100vh - 32px);
   align-self: start;
-  grid-template-rows: auto auto;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
 }
 body.iterator-page .page-host {
   min-height: auto;
