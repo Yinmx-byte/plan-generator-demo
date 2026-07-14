@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>云平台智能运维助手</title>
-<link rel="stylesheet" href="/styles/app.css">
+<link rel="stylesheet" href="/styles/app.css?v=5">
 </head>
 <body>
 <div class="shell">
@@ -21,10 +21,11 @@
     </div>
     <nav class="nav">
       <button class="nav-item active" data-page="plan">智能对话</button>
-      <button class="nav-item" data-page="skills">检修方案生成 Skill 管理</button>
-      <button class="nav-item" data-page="knowledge">高质量检修方案知识库</button>
-      <button class="nav-item" data-page="page-agent">实施方案验证</button>
-      <button class="nav-item" data-page="iterator">Skill 质量迭代</button>
+      <button class="nav-item" data-page="skills">Skill 管理</button>
+      <button class="nav-item" data-page="knowledge">知识库</button>
+      <button class="nav-item" data-page="page-agent">Page Agent</button>
+      <button class="nav-item" data-page="iterator">质量迭代</button>
+      <button class="nav-item" data-page="archive">归档管理</button>
     </nav>
     <div class="sidebar-note">
       <strong>执行边界</strong>
@@ -48,6 +49,16 @@
   </main>
 </div>
 
+<script>
+// Fallback handlers — guaranteed to run before the ES module loads.
+document.getElementById('resetBtn')?.addEventListener('click', function() {
+  sessionStorage.removeItem('planGeneratorTabState');
+  location.reload();
+});
+document.getElementById('refreshAllBtn')?.addEventListener('click', function() {
+  location.reload();
+});
+</script>
 <script type="module" src="/js/app.js"></script>
 </body>
 </html>

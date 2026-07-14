@@ -1757,6 +1757,198 @@ button.danger:hover {
   flex-wrap: wrap;
 }
 
+/* ── Archive page ────────────────────────────────────────────────── */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px 6px;
+  flex-wrap: wrap;
+  padding: 4px 10px;
+  background: #f5f6f8;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.archive-body {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.filter-bar input,
+.filter-bar select {
+  height: 30px;
+  min-width: 90px;
+  max-width: 150px;
+  padding: 2px 8px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  background: #fff;
+}
+.filter-bar input[type="date"] {
+  min-width: 115px;
+  font-size: 11px;
+}
+.filter-bar button {
+  height: 30px;
+  padding: 0 14px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.archive-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 10px 0 0;
+}
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  font-size: 13px;
+}
+.data-table th,
+.data-table td {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  line-height: 1.45;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.data-table th {
+  background: #eef1f5;
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--ink-soft);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.data-table tbody tr:nth-child(even) {
+  background: #fafbfc;
+}
+.data-table tbody tr:hover {
+  background: #f2f5f9;
+}
+.data-table td.actions {
+  white-space: nowrap;
+}
+.data-table td.actions button {
+  margin-right: 4px;
+}
+.archive-diff-summary {
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8faf8;
+}
+.archive-diff-summary p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+}
+.archive-diff-sections {
+  display: grid;
+  gap: 8px;
+}
+.diff-item {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+}
+.pill-added { background: #d4edda; color: #155724; }
+.pill-removed { background: #f8d7da; color: #721c24; }
+.pill-modified { background: #fff3cd; color: #856404; }
+.pill-unchanged { background: #e2e3e5; color: #383d41; }
+.hint {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+
+/* ── Collapsible panel ─────────────────────────────────────────── */
+.collapsible .collapse-header {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+}
+.collapsible .collapse-arrow {
+  font-size: 11px;
+  transition: transform 200ms ease;
+  color: var(--muted);
+}
+.collapsible.open .collapse-arrow {
+  transform: rotate(180deg);
+}
+.collapsible .collapse-body {
+  margin-top: 12px;
+}
+.collapsible:not(.open) .collapse-body {
+  display: none;
+}
+.cleanup-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.cleanup-controls label {
+  font-size: 12px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.cleanup-controls input[type="date"] {
+  height: 30px;
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+}
+.cleanup-controls button {
+  height: 30px;
+  font-size: 12px;
+  padding: 0 12px;
+}
+.cleanup-result {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: #fff8e6;
+  border: 1px solid #f0d68a;
+  border-radius: 4px;
+}
+.cleanup-result span {
+  font-size: 12px;
+  color: var(--ink);
+}
+.cleanup-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+button.danger {
+  background: var(--red-soft);
+  color: var(--red);
+  border-color: #e6b0aa;
+}
+button.danger:hover {
+  background: #fde8e5;
+  border-color: var(--red);
+}
+button.danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 @media (max-width: 1280px) {
   .iterator-setup-grid { grid-template-columns: minmax(0, 1fr) minmax(240px, 0.8fr); }
 }

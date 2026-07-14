@@ -9,10 +9,11 @@ const planSessionStorageKey = 'planGeneratorTabState';
 
 const pageMeta = {
   plan: { title: '智能对话', eyebrow: 'Conversation' },
-  skills: { title: '检修方案生成 Skill 管理', eyebrow: 'AgentScope' },
-  knowledge: { title: '高质量检修方案知识库', eyebrow: 'RAG' },
-  'page-agent': { title: '实施方案验证', eyebrow: 'MCP' },
-  iterator: { title: 'Skill 质量迭代', eyebrow: 'Skill Loop' },
+  skills: { title: 'Skill 管理', eyebrow: 'AgentScope' },
+  knowledge: { title: '知识库', eyebrow: 'RAG' },
+  'page-agent': { title: 'Page Agent', eyebrow: 'MCP' },
+  iterator: { title: '质量迭代', eyebrow: 'Skill Loop' },
+  archive: { title: '归档管理', eyebrow: 'Archive' },
 };
 
 function readPlanSessionState() {
@@ -489,23 +490,25 @@ function setSidebarCollapsed(collapsed) {
 
 async function loadPage(page) {
   if (currentPage === 'plan') persistPlanState();
+  // Close any open dialogs from the current page before switching.
+  document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   currentPage = page;
-  document.body.classList.toggle('iterator-page', page === 'iterator');
-  document.querySelector('.workspace')?.classList.toggle(
-    'tool-workspace',
-    ['skills', 'knowledge', 'iterator'].includes(page),
-  );
   setActiveNav(page);
   pageTitle.textContent = pageMeta[page].title;
   pageEyebrow.textContent = pageMeta[page].eyebrow;
   const resp = await fetch(`/pages/${page}.html`);
   pageHost.innerHTML = await resp.text();
 
-  if (page === 'plan') initPlanPage();
-  if (page === 'skills') initSkillsPage();
-  if (page === 'knowledge') initKnowledgePage();
-  if (page === 'page-agent') initPageAgentPage();
-  if (page === 'iterator') initIteratorPage();
+  try {
+    if (page === 'plan') initPlanPage();
+    if (page === 'skills') initSkillsPage();
+    if (page === 'knowledge') initKnowledgePage();
+    if (page === 'page-agent') initPageAgentPage();
+    if (page === 'iterator') initIteratorPage();
+    if (page === 'archive') initArchivePage();
+  } catch (err) {
+    console.error(`初始化页面 ${page} 失败:`, err);
+  }
 }
 
 function renderItemGrid(container, items, emptyText, render) {
@@ -1554,88 +1557,30 @@ function initKnowledgePage() {
 async function initIteratorPage() {
   const skillSelect = document.getElementById('iteratorSkillSelect');
   const referenceInput = document.getElementById('iteratorReferenceDir');
+  const messageInput = document.getElementById('iteratorMessage');
   const stateInput = document.getElementById('iteratorStateJson');
   const stateFieldsEl = document.getElementById('iteratorStateFields');
-  const stateDialog = document.getElementById('iteratorStateDialog');
-  const openStateBtn = document.getElementById('openIteratorStateBtn');
-  const stateSummaryEl = document.getElementById('iteratorStateSummary');
   const allowPartialInput = document.getElementById('iteratorAllowPartial');
   const runBtn = document.getElementById('runIteratorBtn');
   const preflightBtn = document.getElementById('runIteratorPreflightBtn');
   const clearStateBtn = document.getElementById('clearIteratorStateBtn');
   const fillSampleBtn = document.getElementById('fillIteratorSampleBtn');
-  const preflightRulesBtn = document.getElementById('openIteratorPreflightRulesBtn');
-  const scoringRulesBtn = document.getElementById('openIteratorScoringRulesBtn');
-  const rulesDialog = document.getElementById('iteratorRulesDialog');
-  const rulesTitleEl = document.getElementById('iteratorRulesTitle');
-  const rulesDescriptionEl = document.getElementById('iteratorRulesDescription');
-  const rulesContentEl = document.getElementById('iteratorRulesContent');
   const statusEl = document.getElementById('iteratorStatus');
   const modeEl = document.getElementById('iteratorMode');
   const resultsEl = document.getElementById('iteratorResults');
   if (!skillSelect || !runBtn) return;
 
-  const syncIteratorState = () => {
-    const state = updateIteratorStateJson(stateFieldsEl, stateInput);
-    if (stateSummaryEl) {
-      const count = Object.keys(state).length;
-      stateSummaryEl.textContent = count ? `已填写 ${count} 项参数` : '尚未填写参数';
-    }
-    return state;
-  };
-
   renderIteratorStateFields(stateFieldsEl);
-  syncIteratorState();
-  stateFieldsEl?.addEventListener('input', syncIteratorState);
-  stateFieldsEl?.addEventListener('change', syncIteratorState);
-  openStateBtn?.addEventListener('click', () => stateDialog?.showModal());
+  stateFieldsEl?.addEventListener('input', () => updateIteratorStateJson(stateFieldsEl, stateInput));
+  stateFieldsEl?.addEventListener('change', () => updateIteratorStateJson(stateFieldsEl, stateInput));
   clearStateBtn?.addEventListener('click', () => {
     fillIteratorState(stateFieldsEl, {});
-    syncIteratorState();
+    updateIteratorStateJson(stateFieldsEl, stateInput);
   });
   fillSampleBtn?.addEventListener('click', () => {
     fillIteratorState(stateFieldsEl, iteratorSampleState);
-    syncIteratorState();
+    updateIteratorStateJson(stateFieldsEl, stateInput);
   });
-
-  async function showIteratorRules(kind) {
-    if (!rulesDialog || !rulesTitleEl || !rulesDescriptionEl || !rulesContentEl) return;
-    rulesTitleEl.textContent = '加载规则中...';
-    rulesDescriptionEl.textContent = '';
-    rulesContentEl.innerHTML = '<div class="item-card"><div class="item-title">正在读取当前评估规则...</div></div>';
-    rulesDialog.showModal();
-    try {
-      const response = await fetch('/api/skill-iterator/rules');
-      const catalog = await response.json();
-      if (!response.ok) throw new Error(formatApiError(catalog.detail || '规则读取失败'));
-      const rule = catalog[kind];
-      if (!rule) throw new Error('未找到对应规则');
-      rulesTitleEl.textContent = rule.title || '评估规则';
-      rulesDescriptionEl.textContent = rule.description || '';
-      rulesContentEl.innerHTML = `
-        <div class="iterator-rule-list">
-          ${(rule.items || []).map((item) => `
-            <div class="iterator-rule-item">
-              <strong>${escapeHtml(item.title || '')}</strong>
-              <p>${escapeHtml(item.detail || '')}</p>
-            </div>
-          `).join('')}
-        </div>
-        ${Array.isArray(rule.generic_phrases) && rule.generic_phrases.length ? `
-          <div class="iterator-rule-note">
-            <strong>会提示人工复核的笼统措辞</strong>
-            <p>${escapeHtml(rule.generic_phrases.join('、'))}</p>
-          </div>
-        ` : ''}
-      `;
-    } catch (err) {
-      rulesTitleEl.textContent = '规则读取失败';
-      rulesContentEl.innerHTML = `<div class="msg error">${escapeHtml(err.message)}</div>`;
-    }
-  }
-
-  preflightRulesBtn?.addEventListener('click', () => showIteratorRules('static_preflight'));
-  scoringRulesBtn?.addEventListener('click', () => showIteratorRules('scoring'));
 
   try {
     await populateSkillSelect(skillSelect, /ecs/i);
@@ -1650,9 +1595,10 @@ async function initIteratorPage() {
       statusEl.textContent = '请选择 Skill 并填写优质文档目录';
       return;
     }
-    const state = syncIteratorState();
+    const state = updateIteratorStateJson(stateFieldsEl, stateInput);
+    const message = messageInput.value.trim();
     if (!preflight) {
-      const validationMessage = validateIteratorGenerationInput(state);
+      const validationMessage = validateIteratorGenerationInput(message, state);
       if (validationMessage) {
         statusEl.textContent = validationMessage;
         return;
@@ -1670,7 +1616,7 @@ async function initIteratorPage() {
         body: JSON.stringify({
           skill_name: skillName,
           reference_dir: referenceDir,
-          message: '',
+          message: preflight ? '' : message,
           state_json: preflight ? '' : stateInput.value.trim(),
           allow_partial: allowPartialInput.checked,
         }),
@@ -1753,11 +1699,12 @@ function updateIteratorStateJson(container, stateInput) {
   return state;
 }
 
-function validateIteratorGenerationInput(state) {
+function validateIteratorGenerationInput(message, state) {
+  if (message.trim()) return '';
   const missing = iteratorStateFields
     .filter((field) => field.required && !state[field.key])
     .map((field) => field.label);
-  if (missing.length) return '请补齐结构化参数：' + missing.slice(0, 4).join('、');
+  if (missing.length) return '请填写测试需求，或补齐结构化参数：' + missing.slice(0, 4).join('、');
   return '';
 }
 
@@ -1798,8 +1745,7 @@ function renderIteratorResult(container, payload) {
   const evaluation = result.evaluation || result;
   const findings = evaluation.findings || [];
   const scores = evaluation.dimension_scores || {};
-  const candidatePath = result.candidate_docx || evaluation.candidate?.path || '';
-  const isStaticPreflight = payload.mode === 'skill_static_preflight';
+  const candidateDocx = result.candidate_docx || evaluation.candidate?.path || '';
   const draft = payload.draft || {};
   const skillName = payload.skill?.name || '';
   container.innerHTML = `
@@ -1843,7 +1789,7 @@ function renderIteratorResult(container, payload) {
     <div class="iterator-section">
       <h4>改进建议</h4>
       <p>${escapeHtml(localizeEvaluationText(evaluation.recommended_patch_summary || '暂无改进建议。'))}</p>
-      ${candidatePath ? `<p class="status-text">${isStaticPreflight ? '已检查的 Skill：' : '候选文档：'}${escapeHtml(candidatePath)}</p>` : ''}
+      ${candidateDocx ? `<p class="status-text">候选文档：${escapeHtml(candidateDocx)}</p>` : ''}
     </div>
     <div class="iterator-section iterator-draft-section">
       <div class="item-card-head">
@@ -1935,19 +1881,8 @@ function initPageAgentPage() {
   const taskInput = document.getElementById('pageAgentTaskInput');
   const startBtn = document.getElementById('startMcpBtn');
   const runBtn = document.getElementById('runPageAgentBtn');
-  const stopBtn = document.getElementById('stopPageAgentBtn');
   const statusEl = document.getElementById('mcpStatus');
-  let pageAgentController = null;
   addMessage(pageAgentMessagesEl, 'assistant', '这里用于单独测试 Page Agent。输出不会混入主方案生成对话。');
-
-  function setPageAgentRunning(running) {
-    runBtn.disabled = running;
-    taskInput.disabled = running;
-    if (stopBtn) {
-      stopBtn.hidden = !running;
-      stopBtn.disabled = false;
-    }
-  }
 
   startBtn.addEventListener('click', async () => {
     startBtn.disabled = true;
@@ -1964,26 +1899,6 @@ function initPageAgentPage() {
     }
   });
 
-  stopBtn?.addEventListener('click', async () => {
-    stopBtn.disabled = true;
-    statusEl.textContent = '正在中止 Page Agent 当前任务...';
-    try {
-      if (pageAgentController) pageAgentController.abort();
-      const resp = await fetch('/api/page-agent/task/stop', { method: 'POST' });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(data.detail || data.message || '中止失败');
-      addMessage(pageAgentMessagesEl, 'status', data.message || 'Page Agent 中止信号已发送。');
-      statusEl.textContent = 'Page Agent 中止信号已发送。';
-    } catch (err) {
-      addMessage(pageAgentMessagesEl, 'error', 'Page Agent 中止失败：' + err.message);
-      statusEl.textContent = 'Page Agent 中止失败：' + err.message;
-    } finally {
-      pageAgentController = null;
-      setPageAgentRunning(false);
-      taskInput.focus();
-    }
-  });
-
   runBtn.addEventListener('click', async (event) => {
     event.stopImmediatePropagation();
     const task = taskInput.value.trim();
@@ -1992,16 +1907,13 @@ function initPageAgentPage() {
       return;
     }
     addMessage(pageAgentMessagesEl, 'user', task);
-    taskInput.value = '';
-    pageAgentController = new AbortController();
-    setPageAgentRunning(true);
+    runBtn.disabled = true;
     statusEl.textContent = 'Page Agent 正在执行测试指令...';
     try {
       const resp = await fetch('/api/page-agent/task/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task }),
-        signal: pageAgentController.signal,
       });
       if (!resp.ok || !resp.body) {
         const data = await resp.json().catch(() => ({}));
@@ -2031,17 +1943,10 @@ function initPageAgentPage() {
       const msg = addMessage(pageAgentMessagesEl, 'assistant', '');
       await typeInto(msg, finalMessage || '无返回内容');
     } catch (err) {
-      if (err.name === 'AbortError') {
-        statusEl.textContent = 'Page Agent 任务已中止。';
-        addMessage(pageAgentMessagesEl, 'status', 'Page Agent 任务已中止。');
-      } else {
-        statusEl.textContent = 'Page Agent 执行失败：' + err.message;
-        addMessage(pageAgentMessagesEl, 'error', 'Page Agent 执行失败：' + err.message);
-      }
+      statusEl.textContent = 'Page Agent 执行失败：' + err.message;
+      addMessage(pageAgentMessagesEl, 'error', 'Page Agent 执行失败：' + err.message);
     } finally {
-      pageAgentController = null;
-      setPageAgentRunning(false);
-      taskInput.focus();
+      runBtn.disabled = false;
     }
   }, { capture: true });
 }
@@ -2071,27 +1976,285 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;');
 }
 
-async function resetChat() {
-  if (sessionId) {
-    await fetch('/api/chat/reset', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId }),
-    }).catch(() => {});
+// ── Archive page ─────────────────────────────────────────────────
+function initArchivePage() {
+  const countEl = document.getElementById('archiveCount');
+  const tableBody = document.getElementById('archiveTableBody');
+  const filterBtn = document.getElementById('archiveFilterBtn');
+  const filterResetBtn = document.getElementById('archiveFilterResetBtn');
+  const downloadExcelBtn = document.getElementById('archiveDownloadExcelBtn');
+  const configDisplay = document.getElementById('archiveConfigDisplay');
+  const configSaveBtn = document.getElementById('archiveConfigSaveBtn');
+  const rootInput = document.getElementById('archiveRootInput');
+  const seriesDialog = document.getElementById('archiveSeriesDialog');
+  const seriesCloseBtn = document.getElementById('archiveSeriesCloseBtn');
+  const diffDialog = document.getElementById('archiveDiffDialog');
+  const diffCloseBtn = document.getElementById('archiveDiffCloseBtn');
+  const latestOnlyCb = document.getElementById('archiveLatestOnlyCb');
+  const cleanupToggle = document.getElementById('archiveCleanupToggle');
+  const cleanupBody = document.getElementById('archiveCleanupBody');
+  const cleanupPanel = document.getElementById('archiveCleanupPanel');
+  const cleanupScopeBtn = document.getElementById('archiveCleanupScopeBtn');
+  const cleanupOldBtn = document.getElementById('archiveCleanupOldBtn');
+  const cleanupAllBtn = document.getElementById('archiveCleanupAllBtn');
+  const cleanupResult = document.getElementById('archiveCleanupResult');
+  const cleanupStats = document.getElementById('archiveCleanupStats');
+  const cleanupStart = document.getElementById('archiveCleanupStart');
+  const cleanupEnd = document.getElementById('archiveCleanupEnd');
+
+  function getFilters() {
+    const val = (id) => document.getElementById(id)?.value?.trim() || '';
+    return {
+      system_name: val('archiveFilterSystem'),
+      person: val('archiveFilterPerson'),
+      product_type: val('archiveFilterProduct'),
+      action: val('archiveFilterAction'),
+      start_date: val('archiveFilterStartDate'),
+      end_date: val('archiveFilterEndDate'),
+    };
   }
-  sessionId = null;
-  currentDocumentFileId = null;
-  currentDocumentDownloadUrl = '';
-  currentDocumentFilename = '';
-  currentDocumentData = null;
-  planSessionState = {};
-  sessionStorage.removeItem(planSessionStorageKey);
-  if (currentPage !== 'plan') {
+
+  function buildQuery(filters) {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([k, v]) => { if (v) params.append(k, v); });
+    return params.toString();
+  }
+
+  async function loadSummary() {
+    try {
+      const filters = getFilters();
+      if (latestOnlyCb?.checked) filters.latest_only = 'true';
+      const qs = buildQuery(filters);
+      const resp = await fetch(`/api/archive/summary?${qs}`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const records = data.records || [];
+      if (countEl) countEl.textContent = `${records.length} 条`;
+      if (!tableBody) return;
+      tableBody.innerHTML = '';
+      if (!records.length) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="11" style="text-align:center;color:#999;">暂无归档记录</td>';
+        tableBody.appendChild(tr);
+        return;
+      }
+      records.forEach((r) => {
+        const personnel = [r.provider, r.executor, r.reviewer, r.security_officer]
+          .filter(Boolean).join('/');
+        const tr = document.createElement('tr');
+        tr.innerHTML = [
+          `<td>${r.id || ''}</td>`,
+          `<td>${r.archive_date || ''}</td>`,
+          `<td>${(r.schedule_start || '-').slice(0, 10)}</td>`,
+          `<td><span class="pill">v${r.version || 1}</span></td>`,
+          `<td>${r.product_type || ''}</td>`,
+          `<td>${escapeHtml(r.system_name || '')}</td>`,
+          `<td>${r.action || ''}</td>`,
+          `<td title="${escapeHtml(r.title || '')}">${escapeHtml((r.title || '').slice(0, 30))}${(r.title || '').length > 30 ? '...' : ''}</td>`,
+          `<td>${escapeHtml(personnel)}</td>`,
+          `<td>${escapeHtml((r.change_summary || '-').slice(0, 40))}</td>`,
+          `<td class="actions"><button class="ghost" data-action="history" data-series="${escapeHtml(r.series_id)}">${r.version > 1 ? '对比' : '查看'}</button></td>`,
+        ].join('');
+        tableBody.appendChild(tr);
+      });
+
+      tableBody.querySelectorAll('button[data-action="history"]').forEach((btn) => {
+        btn.addEventListener('click', () => showSeriesHistory(btn.dataset.series));
+      });
+    } catch (_err) {
+      // Silently ignore fetch errors on page init.
+    }
+  }
+
+  async function showSeriesHistory(seriesId) {
+    const resp = await fetch(`/api/archive/series/${seriesId}`);
+    const data = await resp.json();
+    const records = data.records || [];
+    document.getElementById('archiveSeriesTitle').textContent = `版本历史 — ${records[0]?.title || seriesId}`;
+    const body = document.getElementById('archiveSeriesBody');
+    if (!body) return;
+    body.innerHTML = records.map((r, i) => {
+      const prev = i > 0 ? records[i - 1] : null;
+      return `<tr>
+        <td><span class="pill">v${r.version}</span></td>
+        <td>${r.archive_date || ''}</td>
+        <td>${r.downloaded_at || ''}</td>
+        <td>${escapeHtml((r.change_summary || '-').slice(0, 50))}</td>
+        <td class="actions">
+          ${prev
+            ? `<button class="ghost compare-btn" data-series="${seriesId}" data-from="${prev.version}" data-to="${r.version}">对比 v${prev.version}→v${r.version}</button>`
+            : '<span style="color:#999;">初始版本</span>'}
+        </td>
+      </tr>`;
+    }).join('');
+    body.querySelectorAll('.compare-btn').forEach((btn) => {
+      btn.addEventListener('click', () => showDiff(btn.dataset.series, btn.dataset.from, btn.dataset.to));
+    });
+    seriesDialog?.showModal();
+  }
+
+  async function showDiff(seriesId, fromVer, toVer) {
+    const resp = await fetch(`/api/archive/compare?series_id=${seriesId}&from_version=${fromVer}&to_version=${toVer}`);
+    const data = await resp.json();
+    document.getElementById('archiveDiffTitle').textContent = `版本对比: v${fromVer} → v${toVer}`;
+    const summaryEl = document.getElementById('archiveDiffSummary');
+    if (summaryEl) summaryEl.innerHTML = `<p><strong>变更摘要：</strong>${escapeHtml(data.summary || '无')}</p>`;
+    const sectionsEl = document.getElementById('archiveDiffSections');
+    if (sectionsEl) {
+      const diffs = data.section_diffs || [];
+      sectionsEl.innerHTML = diffs.map((d) => {
+        const badge = { added: '新增', removed: '删除', modified: '已修改', unchanged: '未变化' }[d.status] || d.status;
+        return `<div class="diff-item"><span class="pill pill-${d.status}">${badge}</span> ${escapeHtml(d.heading || '')}</div>`;
+      }).join('');
+    }
+    diffDialog?.showModal();
+  }
+
+  async function loadConfig() {
+    try {
+      const resp = await fetch('/api/archive/config');
+      if (!resp.ok) return;
+      const data = await resp.json();
+      if (rootInput) rootInput.value = data.archive_root || '';
+      if (configDisplay) configDisplay.textContent = `归档目录: ${data.archive_root}`;
+    } catch (_err) {
+      // Silently ignore fetch errors on page init.
+    }
+  }
+
+  filterBtn?.addEventListener('click', loadSummary);
+  filterResetBtn?.addEventListener('click', () => {
+    ['archiveFilterSystem', 'archiveFilterPerson', 'archiveFilterStartDate', 'archiveFilterEndDate'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    const productEl = document.getElementById('archiveFilterProduct');
+    if (productEl) productEl.value = '';
+    const actionEl = document.getElementById('archiveFilterAction');
+    if (actionEl) actionEl.value = '';
+    loadSummary();
+  });
+  downloadExcelBtn?.addEventListener('click', () => {
+    const lp = latestOnlyCb?.checked ? '?latest_only=true' : '';
+    window.open('/api/archive/summary/excel' + lp, '_blank');
+  });
+  configSaveBtn?.addEventListener('click', async () => {
+    const root = rootInput?.value.trim();
+    if (!root) return;
+    await fetch('/api/archive/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archive_root: root }),
+    });
+    loadConfig();
+  });
+  seriesCloseBtn?.addEventListener('click', () => seriesDialog?.close());
+  diffCloseBtn?.addEventListener('click', () => diffDialog?.close());
+
+  // ── latest_only toggle ──────────────────────────────────────────
+  latestOnlyCb?.addEventListener('change', () => loadSummary());
+
+  // ── cleanup panel ───────────────────────────────────────────────
+  cleanupToggle?.addEventListener('click', () => {
+    cleanupPanel?.classList.toggle('open');
+  });
+  // Start collapsed.
+  cleanupPanel?.classList.remove('open');
+
+  async function loadCleanupScope() {
+    const start = cleanupStart?.value || '';
+    const end = cleanupEnd?.value || '';
+    try {
+      const params = new URLSearchParams();
+      if (start) params.append('start_date', start);
+      if (end) params.append('end_date', end);
+      const resp = await fetch(`/api/archive/cleanup/scope?${params}`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      cleanupStats.textContent = (
+        `共 ${data.total_records} 条记录（${data.series_count} 个系列），` +
+        `其中历史版本 ${data.old_version_count} 个`
+      );
+      cleanupResult.style.display = '';
+      cleanupOldBtn.disabled = data.old_version_count === 0;
+      cleanupAllBtn.disabled = data.total_records === 0;
+    } catch (_err) {
+      cleanupStats.textContent = '查询失败，请重试。';
+      cleanupResult.style.display = '';
+    }
+  }
+
+  cleanupScopeBtn?.addEventListener('click', loadCleanupScope);
+
+  async function execCleanup(url) {
+    const start = cleanupStart?.value || '';
+    const end = cleanupEnd?.value || '';
+    const params = new URLSearchParams();
+    if (start) params.append('start_date', start);
+    if (end) params.append('end_date', end);
+    try {
+      const resp = await fetch(`${url}?${params}`, { method: 'DELETE' });
+      const data = await resp.json();
+      if (resp.ok) {
+        alert(`清理完成：已删除 ${data.deleted_count} 个版本的文件。`);
+        loadSummary();
+        cleanupResult.style.display = 'none';
+      } else {
+        alert(`清理失败：${data.detail || '未知错误'}`);
+      }
+    } catch (_err) {
+      alert('清理请求失败，请重试。');
+    }
+  }
+
+  cleanupOldBtn?.addEventListener('click', () => {
+    const start = cleanupStart?.value || '';
+    const end = cleanupEnd?.value || '';
+    const msg = start || end
+      ? `确认删除 ${start || '不限'} 至 ${end || '不限'} 范围内的历史版本文件？最新版本将被保留。此操作不可恢复。`
+      : '确认删除所有历史版本文件？最新版本将被保留。此操作不可恢复。';
+    if (confirm(msg)) execCleanup('/api/archive/files/old-versions');
+  });
+
+  cleanupAllBtn?.addEventListener('click', () => {
+    const start = cleanupStart?.value || '';
+    const end = cleanupEnd?.value || '';
+    const msg = start || end
+      ? `确认删除 ${start || '不限'} 至 ${end || '不限'} 范围内的全部文件？数据库记录将保留。此操作不可恢复。`
+      : '确认删除全部文件？数据库记录将保留。此操作不可恢复。';
+    if (confirm(msg)) execCleanup('/api/archive/files/all');
+  });
+
+  loadSummary();
+  loadConfig();
+}
+
+async function resetChat() {
+  if (resetBtn) resetBtn.textContent = '处理中...';
+  try {
+    if (sessionId) {
+      await fetch('/api/chat/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId }),
+      }).catch(() => {});
+    }
+    sessionId = null;
+    currentDocumentFileId = null;
+    currentDocumentDownloadUrl = '';
+    currentDocumentFilename = '';
+    currentDocumentData = null;
+    planSessionState = {};
+    sessionStorage.removeItem(planSessionStorageKey);
     await loadPage('plan');
-  } else {
-    await loadPage('plan');
+  } finally {
+    if (resetBtn) resetBtn.textContent = '新建对话';
   }
 }
+
+// Expose handlers globally for inline onclick fallback.
+window._appReset = resetChat;
+window._appRefresh = () => loadPage(currentPage);
 
 navItems.forEach((item) => {
   item.addEventListener('click', () => loadPage(item.dataset.page));
@@ -2101,8 +2264,12 @@ sidebarToggleBtn?.addEventListener('click', () => {
   setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed'));
 });
 
-resetBtn.addEventListener('click', resetChat);
-refreshAllBtn.addEventListener('click', () => loadPage(currentPage));
+if (resetBtn) resetBtn.addEventListener('click', resetChat);
+if (refreshAllBtn) refreshAllBtn.addEventListener('click', async () => {
+  if (refreshAllBtn) refreshAllBtn.textContent = '刷新中...';
+  try { await loadPage(currentPage); }
+  finally { if (refreshAllBtn) refreshAllBtn.textContent = '刷新数据'; }
+});
 
 setSidebarCollapsed(localStorage.getItem('sidebarCollapsed') === '1');
 loadPage('plan');

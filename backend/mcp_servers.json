@@ -5,14 +5,12 @@
       "type": "stdio",
       "command": "node",
       "args": [
-        "src/index.js"
+        "D:\\AIpackages\\page-agent\\packages\\mcp\\src\\index.js"
       ],
-      "cwd": "mcp_servers/page_agent",
+      "cwd": "D:\\AIpackages\\page-agent",
       "group_name": "mcp",
       "enable_funcs": [
         "execute_task",
-        "execute_task_async",
-        "get_task_events",
         "get_status",
         "stop_task"
       ],

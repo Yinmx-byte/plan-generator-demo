@@ -1,0 +1,148 @@
+<section class="tool-page">
+  <div class="tool-main">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Archive</p>
+        <h3>归档管理</h3>
+      </div>
+      <div class="panel-actions">
+        <span class="pill" id="archiveCount">0 条</span>
+        <button id="archiveDownloadExcelBtn" type="button">下载汇总表</button>
+      </div>
+    </div>
+
+    <div class="archive-body">
+      <div class="filter-bar" id="archiveFilterBar">
+      <input id="archiveFilterSystem" type="text" placeholder="系统名称">
+      <input id="archiveFilterPerson" type="text" placeholder="人员">
+      <select id="archiveFilterProduct">
+        <option value="">全部产品</option>
+        <option value="ECS">ECS</option>
+        <option value="RDS">RDS</option>
+        <option value="Redis">Redis</option>
+        <option value="SLB">SLB</option>
+        <option value="OSS">OSS</option>
+        <option value="K8s">K8s</option>
+        <option value="PolarDB">PolarDB</option>
+        <option value="MQ">MQ</option>
+        <option value="通用">通用</option>
+      </select>
+      <select id="archiveFilterAction">
+        <option value="">全部动作</option>
+        <option value="创建">创建</option>
+        <option value="回收">回收</option>
+        <option value="重启">重启</option>
+        <option value="扩容">扩容</option>
+        <option value="缩容">缩容</option>
+        <option value="升配">升配</option>
+        <option value="降配">降配</option>
+        <option value="配置变更">配置变更</option>
+        <option value="规格变更">规格变更</option>
+        <option value="组件扩缩容">组件扩缩容</option>
+        <option value="磁盘扩容">磁盘扩容</option>
+        <option value="参数调整">参数调整</option>
+        <option value="白名单变更">白名单变更</option>
+        <option value="维护性重启">维护性重启</option>
+        <option value="读写分离链路切换">读写分离链路切换</option>
+        <option value="变更">变更</option>
+      </select>
+      <input id="archiveFilterStartDate" type="date" placeholder="开始日期">
+      <input id="archiveFilterEndDate" type="date" placeholder="结束日期">
+      <button id="archiveFilterBtn" type="button">筛选</button>
+      <button id="archiveFilterResetBtn" type="button" class="ghost">重置</button>
+      <label class="check-option" style="margin-left:4px;">
+        <input type="checkbox" id="archiveLatestOnlyCb">
+        仅显示最新版本
+      </label>
+    </div>
+
+    <div class="archive-table-wrap">
+      <table class="data-table" id="archiveTable">
+        <thead>
+          <tr>
+            <th>序号</th>
+            <th>归档日期</th>
+            <th>检修日期</th>
+            <th>版本</th>
+            <th>产品</th>
+            <th>系统名称</th>
+            <th>动作</th>
+            <th>方案标题</th>
+            <th>人员</th>
+            <th>变更摘要</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="archiveTableBody"></tbody>
+      </table>
+    </div>
+    </div>
+  </div>
+
+  <div class="tool-card" id="archiveConfigPanel">
+    <h3>归档配置</h3>
+    <div class="status-text" id="archiveConfigDisplay"></div>
+    <label for="archiveRootInput">归档根目录</label>
+    <input id="archiveRootInput" type="text" placeholder="默认: ~/检修方案归档">
+    <button id="archiveConfigSaveBtn" type="button">保存路径</button>
+    <p class="hint">生成的 DOCX 将按日期归档到该目录，并自动维护汇总 Excel。</p>
+  </div>
+
+  <div class="tool-card collapsible" id="archiveCleanupPanel">
+    <h3 class="collapse-header" id="archiveCleanupToggle" role="button" tabindex="0">
+      数据清理
+      <span class="collapse-arrow">&#9660;</span>
+    </h3>
+    <div class="collapse-body" id="archiveCleanupBody">
+      <div class="cleanup-controls">
+        <label for="archiveCleanupStart">开始日期</label>
+        <input id="archiveCleanupStart" type="date">
+        <label for="archiveCleanupEnd">结束日期</label>
+        <input id="archiveCleanupEnd" type="date">
+        <button id="archiveCleanupScopeBtn" type="button">查询范围</button>
+      </div>
+      <div class="cleanup-result" id="archiveCleanupResult" style="display:none;">
+        <span id="archiveCleanupStats"></span>
+        <div class="cleanup-actions">
+          <button id="archiveCleanupOldBtn" type="button" class="danger">清理历史版本（保留最新）</button>
+          <button id="archiveCleanupAllBtn" type="button" class="danger">清理全部文件</button>
+        </div>
+      </div>
+      <p class="hint">清理操作仅删除物理文件，Excel 和数据库记录保留。操作不可恢复，请谨慎执行。</p>
+    </div>
+  </div>
+</section>
+
+<dialog class="modal modal-wide" id="archiveSeriesDialog">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 id="archiveSeriesTitle">版本历史</h3>
+      <button class="ghost" id="archiveSeriesCloseBtn" type="button">关闭</button>
+    </div>
+    <div class="archive-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>版本</th>
+            <th>归档日期</th>
+            <th>下载时间</th>
+            <th>变更摘要</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="archiveSeriesBody"></tbody>
+      </table>
+    </div>
+  </div>
+</dialog>
+
+<dialog class="modal modal-wide" id="archiveDiffDialog">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 id="archiveDiffTitle">版本对比</h3>
+      <button class="ghost" id="archiveDiffCloseBtn" type="button">关闭</button>
+    </div>
+    <div class="archive-diff-summary" id="archiveDiffSummary"></div>
+    <div class="archive-diff-sections" id="archiveDiffSections"></div>
+  </div>
+</dialog>

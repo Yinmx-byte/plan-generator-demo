@@ -29,6 +29,7 @@ from services.json_utils import extract_json, get_response_text
 
 _generated_files: dict[str, Path] = {}
 _generated_documents: dict[str, dict[str, Any]] = {}
+_generated_states: dict[str, dict[str, Any]] = {}
 DEFAULT_DEPARTMENT = "云运营中心平台运维处"
 
 
@@ -166,6 +167,11 @@ def get_generated_file(file_id: str | None) -> Optional[Path]:
 def get_generated_document(file_id: str | None) -> Optional[dict[str, Any]]:
     data = _generated_documents.get(file_id or "")
     return deepcopy(data) if data else None
+
+
+def get_generated_state(file_id: str | None) -> Optional[dict[str, Any]]:
+    state = _generated_states.get(file_id or "")
+    return deepcopy(state) if state else None
 
 
 def update_generated_document(file_id: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -833,7 +839,7 @@ async def generate_docx_from_state(
         previous_document_text=previous_document_text,
     )
     data = validate_plan_json(data, state, orchestration)
-    return render_docx(data)
+    return render_docx(data, state)
 
 
 async def compose_plan_json(
@@ -1002,7 +1008,7 @@ def validate_plan_json(
     return data
 
 
-def render_docx(data: dict[str, Any]) -> tuple[str, Path, str]:
+def render_docx(data: dict[str, Any], state: Optional[dict[str, Any]] = None) -> tuple[str, Path, str]:
     """Render validated plan JSON into a Word document and register download."""
     data = normalize_document_metadata(deepcopy(data))
     doc = build_document(data)
@@ -1016,6 +1022,8 @@ def render_docx(data: dict[str, Any]) -> tuple[str, Path, str]:
     doc.save(str(output_path))
     _generated_files[file_id] = output_path
     _generated_documents[file_id] = deepcopy(data)
+    if state:
+        _generated_states[file_id] = deepcopy(state)
 
     files = sorted(
         output_dir.glob("*.docx"),
@@ -1031,9 +1039,103 @@ def render_docx(data: dict[str, Any]) -> tuple[str, Path, str]:
             if old_path == old_file:
                 _generated_files.pop(old_id, None)
                 _generated_documents.pop(old_id, None)
+                _generated_states.pop(old_id, None)
 
     return file_id, output_path, filename
 
 
+def extract_state_from_document(data: dict[str, Any]) -> dict[str, Any]:
+    """Extract state fields from a plan document JSON for diff comparison.
+
+    Scans section blocks (tables, paragraphs) for known state keys like
+    provider, executor, schedule_start, network, etc.
+    """
+    extracted: dict[str, Any] = {}
+    sections = data.get("document", {}).get("sections", [])
+    if not isinstance(sections, list):
+        return extracted
+
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        for block in section.get("blocks", []) or []:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type", "")
+
+            if btype == "table":
+                columns = block.get("columns", []) or []
+                col_keys = [str(c.get("key", "")).strip() for c in columns if isinstance(c, dict)]
+                relevant = [k for k in col_keys if k in (
+                    "provider", "executor", "reviewer", "security_officer",
+                    "schedule_start", "schedule_end", "schedule_year",
+                    "start_time", "end_time", "year",
+                )]
+                if not relevant:
+                    continue
+                for row in block.get("rows", []) or []:
+                    if not isinstance(row, dict):
+                        continue
+                    for key in relevant:
+                        val = str(row.get(key, "")).strip()
+                        if not val or val in ("待实施前确认", "待确认", ""):
+                            continue
+                        mapped = {
+                            "start_time": "schedule_start",
+                            "end_time": "schedule_end",
+                            "year": "schedule_year",
+                        }.get(key, key)
+                        extracted[mapped] = val
+
+            elif btype in ("paragraph", "heading"):
+                text = str(block.get("text", ""))
+                patterns = [
+                    (r"内网环境[／/]外网环境[：:]\s*(.+)", "network"),
+                    (r"实施地点[：:]\s*(.+)", "location"),
+                ]
+                for pat, key in patterns:
+                    m = re.search(pat, text)
+                    if m and m[1].strip():
+                        extracted[key] = m[1].strip()
+
+    return extracted
+
+
+_AGENT_SUMMARY_PATTERNS = [
+    re.compile(r"主要变更点包括[：:]\s*", re.I),
+    re.compile(r"变更说明[：:]\s*", re.I),
+    re.compile(r"本次更新[^，。,\.]*[，,]\s*主要变更[：:]\s*", re.I),
+    re.compile(r"变更点[：:]\s*", re.I),
+]
+_AGENT_SUMMARY_TRIM = re.compile(r"(请下载[^。]*[。]?|请查阅[^。]*[。]?|以上为本次[^。]*[。]?)", re.I)
+
+
+def extract_change_description(assistant_message: str) -> str:
+    """Extract a change summary from the Master Agent response text."""
+    if not assistant_message:
+        return ""
+    for pattern in _AGENT_SUMMARY_PATTERNS:
+        m = pattern.search(assistant_message)
+        if m:
+            desc = assistant_message[m.end():].strip()
+            desc = _AGENT_SUMMARY_TRIM.sub("", desc).strip()
+            if len(desc) > 200:
+                desc = desc[:197] + "..."
+            return desc
+    return ""
+
+
+def stamp_agent_change_summary(file_id: str, assistant_message: str) -> None:
+    """If the agent produced a change description, store it in _generated_states."""
+    if not file_id or not assistant_message:
+        return
+    desc = extract_change_description(assistant_message)
+    if not desc:
+        return
+    state = _generated_states.get(file_id)
+    if state is None:
+        state = {}
+    state["_agent_change_summary"] = desc
+    _generated_states[file_id] = state
 
 

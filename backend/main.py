@@ -8,6 +8,8 @@ Skill 装卸：修改 backend/skills/ 目录下的 Skill，重启即生效。
 
 import json
 import os
+import platform
+import subprocess
 import uuid
 import asyncio
 from contextlib import asynccontextmanager
@@ -21,6 +23,7 @@ from pydantic import BaseModel
 
 from rag import get_knowledge_base
 from api.admin_routes import router as admin_router
+from api.archive_routes import router as archive_router
 from api.cloud_routes import router as cloud_router
 from agents.master_agent import (
     MasterAgentRuntime,
@@ -41,10 +44,13 @@ from runtime import (
 from services.json_utils import get_response_text
 from services.plan_generation import (
     build_generation_orchestration_context,
+    extract_state_from_document,
     generate_docx_from_state,
     get_generated_document,
     get_generated_file,
+    get_generated_state,
     render_docx,
+    stamp_agent_change_summary,
     update_generated_document,
 )
 from services.page_agent import (
@@ -117,7 +123,34 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
-        await close_mcp_clients()
+        try:
+            await asyncio.wait_for(
+                close_mcp_clients(),
+                timeout=float(os.getenv("MCP_CLOSE_TIMEOUT", "3")),
+            )
+        except asyncio.TimeoutError:
+            print("[AgentScope] MCP 客户端关闭超时，正在强制清理...")
+            import runtime as _rt
+            _rt._mcp_clients.clear()
+            page_port = os.getenv("PAGE_AGENT_PORT", "38401")
+            try:
+                if platform.system() == "Windows":
+                    result = subprocess.run(
+                        ["netstat", "-ano"],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    for line in result.stdout.splitlines():
+                        if f":{page_port}" in line and "LISTENING" in line:
+                            parts = line.strip().split()
+                            pid = parts[-1]
+                            subprocess.run(
+                                ["taskkill", "/F", "/PID", pid],
+                                capture_output=True, timeout=5,
+                            )
+                            print(f"[AgentScope] 已终止 page-agent 进程 PID={pid}")
+                            break
+            except Exception as exc:
+                print(f"[AgentScope] 强制清理 page-agent 进程失败：{exc}")
 
 
 # ── FastAPI app ─────────────────────────────────────────────────
@@ -186,6 +219,7 @@ async def stop_page_agent_current_task():
 
 
 app.include_router(admin_router)
+app.include_router(archive_router)
 app.include_router(cloud_router)
 
 
@@ -217,6 +251,7 @@ async def dev_plan_test(request: PlanTestRequest):
         state,
         orchestration=orchestration,
     )
+    stamp_agent_change_summary(file_id, extracted.get("assistant_note", ""))
     return {
         "status": "generated",
         "file_id": file_id,
@@ -259,6 +294,8 @@ async def chat(request: ChatRequest):
     )
     assistant_message = get_response_text(response) or "Master Agent 已完成本轮处理。"
     generated = session.get("generated")
+    if generated and generated.get("file_id"):
+        stamp_agent_change_summary(generated["file_id"], assistant_message)
     validation_result = None
     if request.execute_validation and generated:
         validation_result = await run_plan_validation_agent(
@@ -419,6 +456,8 @@ async def stream_master_agent_response(request: ChatRequest, startup_message: st
         response = await agent_task
         assistant_message = get_response_text(response) or "Master Agent 已完成本轮处理。"
         generated = session.get("generated")
+        if generated and generated.get("file_id"):
+            stamp_agent_change_summary(generated["file_id"], assistant_message)
         validation_result = None
         if request.execute_validation and generated:
             yield sse_event(
@@ -486,6 +525,22 @@ async def download_generated(file_id: str):
     path = get_generated_file(file_id)
     if path is None:
         raise HTTPException(status_code=404, detail="文件不存在或已过期")
+    # Archive side-effect: save DOCX + snapshot + update Excel on download.
+    try:
+        from services.plan_archive import get_archive_store
+        store = get_archive_store()
+        # Primary: state persisted alongside the generated document.
+        session_state = get_generated_state(file_id)
+        # Fallback: locate session that holds this file_id.
+        if session_state is None:
+            for _sid, session in _chat_sessions.items():
+                gen = session.get("generated")
+                if gen and gen.get("file_id") == file_id:
+                    session_state = session.get("state")
+                    break
+        store.archive(file_id, path, state=session_state)
+    except Exception as exc:
+        print(f"[Archive] 归档失败 (file_id={file_id}): {exc}")
     return FileResponse(
         path=str(path),
         filename=path.name,
@@ -512,7 +567,12 @@ async def render_generated_document(file_id: str):
     data = get_generated_document(file_id)
     if data is None:
         raise HTTPException(status_code=404, detail="生成文档数据不存在或已过期")
-    new_file_id, _path, filename = render_docx(data)
+    parent_state = get_generated_state(file_id) or {}
+    # Merge state fields extracted from the edited document so that
+    # personnel / schedule changes are captured for archive diff.
+    doc_state = extract_state_from_document(data)
+    merged_state = {**parent_state, **doc_state}
+    new_file_id, _path, filename = render_docx(data, state=merged_state)
     return {
         "status": "generated",
         "file_id": new_file_id,
