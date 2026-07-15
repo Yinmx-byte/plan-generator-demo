@@ -11,6 +11,8 @@
       "group_name": "mcp",
       "enable_funcs": [
         "execute_task",
+        "execute_task_async",
+        "get_task_events",
         "get_status",
         "stop_task"
       ],
