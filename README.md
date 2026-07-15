@@ -65,6 +65,17 @@ ALIBABA_CLOUD_ACCESS_KEY_ID=xxx
 ALIBABA_CLOUD_ACCESS_KEY_SECRET=xxx
 BAILIAN_WORKSPACE_ID=ws-xxx
 BAILIAN_INDEX_ID=xxx
+
+# 可选：远程归档。RDS 存储索引与审计记录，OSS 存储 DOCX、快照和版本差异。
+PLAN_ARCHIVE_BACKEND=rds_oss
+ARCHIVE_RDS_HOST=rm-xxx.mysql.rds.aliyuncs.com
+ARCHIVE_RDS_PORT=3306
+ARCHIVE_RDS_DATABASE=generated_maintenance_plan
+ARCHIVE_RDS_USERNAME=archive_user
+ARCHIVE_RDS_PASSWORD=xxx
+PLAN_ARCHIVE_OSS_BUCKET=your-private-bucket
+PLAN_ARCHIVE_OSS_REGION=cn-beijing
+PLAN_ARCHIVE_OSS_PREFIX=maintenance-plan-archive
 ```
 
 ### 3. 启动服务
@@ -103,6 +114,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - **方案生成服务**：`services/plan_generation.py` 将写文档能力封装为 `compose_plan_json`、`validate_plan_json`、`render_docx` 三步；其中 `compose_plan_json` 内部仍使用专用 Plan ReActAgent，方便加载 Skill 和调用渲染检查工具。
 - **Word 渲染**：`scripts/generate_plan.py` 将已验证的内容 JSON 与通用格式契约合成为 `.docx`；默认格式位于 `skills/maintenance-plan-composer/references/document-style.json`，所有检修类型共用，渲染工具也支持显式传入 `style_contract`。
 - **远程知识库管理**：前端知识库页可上传/查看/删除百炼文档；上传或删除后会自动提交重建索引任务。
+- **方案归档**：`services/plan_archive.py` 保留本地 SQLite 归档；当 `PLAN_ARCHIVE_BACKEND=rds_oss` 时自动切换为 `services/remote_plan_archive.py`，以 RDS 保存归档元数据、版本和审计记录，以 OSS 保存 DOCX、方案快照和版本差异。下载生成方案时会自动归档，归档文件可通过 `/api/archive/files/{record_id}/download` 下载。
 
 ## Master Agent 工具组配置
 

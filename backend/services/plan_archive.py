@@ -729,6 +729,21 @@ class ArchiveStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def read_archived_docx(self, record_id: int) -> tuple[bytes, str]:
+        """Read one archived document for the archive download API."""
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            record = conn.execute(
+                "SELECT title, docx_path FROM archive_records WHERE id = ?",
+                [record_id],
+            ).fetchone()
+        if not record or not record["docx_path"]:
+            raise FileNotFoundError("归档记录不存在或其文件已清理")
+        path = Path(record["docx_path"])
+        if not path.exists():
+            raise FileNotFoundError("归档文件已被清理")
+        return path.read_bytes(), f"{safe_docx_filename(record['title'])}.docx"
+
     def compare_versions(self, series_id: str, from_version: int, to_version: int) -> dict:
         """Compare two versions of the same series."""
         with sqlite3.connect(str(self.db_path)) as conn:
@@ -1146,13 +1161,19 @@ class ArchiveStore:
 
 
 # ── singleton ────────────────────────────────────────────────────────
-_archive_store: Optional[ArchiveStore] = None
+_archive_store: Optional[Any] = None
 
 
-def get_archive_store() -> ArchiveStore:
+def get_archive_store() -> Any:
     global _archive_store
     if _archive_store is None:
-        _archive_store = ArchiveStore()
+        backend = os.getenv("PLAN_ARCHIVE_BACKEND", "local").strip().lower()
+        if backend == "rds_oss":
+            from services.remote_plan_archive import RemoteArchiveStore
+
+            _archive_store = RemoteArchiveStore()
+        else:
+            _archive_store = ArchiveStore()
     return _archive_store
 
 

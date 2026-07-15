@@ -2,9 +2,10 @@
 
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from services.plan_archive import _save_persisted_root, get_archive_store
@@ -78,6 +79,20 @@ async def archive_summary_excel(
     )
 
 
+@router.get("/api/archive/files/{record_id}/download")
+async def archive_download_document(record_id: int):
+    """Download a DOCX from either local archive storage or OSS."""
+    try:
+        content, filename = get_archive_store().read_archived_docx(record_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
 @router.get("/api/archive/series/{series_id}")
 async def archive_series_history(series_id: str):
     store = get_archive_store()
@@ -109,6 +124,7 @@ async def archive_compare_versions(
 async def archive_get_config():
     store = get_archive_store()
     return {
+        "storage_backend": os.getenv("PLAN_ARCHIVE_BACKEND", "local").strip().lower(),
         "archive_root": str(store.root),
         "db_path": str(store.db_path),
         "excel_path": str(store.excel_path),
@@ -117,6 +133,8 @@ async def archive_get_config():
 
 @router.put("/api/archive/config")
 async def archive_update_config(request: ArchiveConfigUpdate):
+    if os.getenv("PLAN_ARCHIVE_BACKEND", "local").strip().lower() == "rds_oss":
+        raise HTTPException(status_code=409, detail="远程归档由环境变量配置，不能在页面中修改本地目录")
     if not request.archive_root.strip():
         raise HTTPException(status_code=400, detail="归档根目录不能为空")
     os.environ["PLAN_ARCHIVE_ROOT"] = request.archive_root
