@@ -1,20 +1,12 @@
 """Archive API routes – summary query, Excel export, version history, diff comparison."""
 
-import os
-from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel
-
-from services.plan_archive import _save_persisted_root, get_archive_store
+from services.plan_archive import get_archive_store
 
 router = APIRouter()
-
-
-class ArchiveConfigUpdate(BaseModel):
-    archive_root: str = ""
 
 
 def _parse_summary_params(
@@ -118,36 +110,6 @@ async def archive_compare_versions(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return result
-
-
-@router.get("/api/archive/config")
-async def archive_get_config():
-    store = get_archive_store()
-    return {
-        "storage_backend": os.getenv("PLAN_ARCHIVE_BACKEND", "local").strip().lower(),
-        "archive_root": str(store.root),
-        "db_path": str(store.db_path),
-        "excel_path": str(store.excel_path),
-    }
-
-
-@router.put("/api/archive/config")
-async def archive_update_config(request: ArchiveConfigUpdate):
-    if os.getenv("PLAN_ARCHIVE_BACKEND", "local").strip().lower() == "rds_oss":
-        raise HTTPException(status_code=409, detail="远程归档由环境变量配置，不能在页面中修改本地目录")
-    if not request.archive_root.strip():
-        raise HTTPException(status_code=400, detail="归档根目录不能为空")
-    os.environ["PLAN_ARCHIVE_ROOT"] = request.archive_root
-    _save_persisted_root(request.archive_root)
-    from services.plan_archive import reset_archive_store
-
-    reset_archive_store()
-    store = get_archive_store()
-    return {
-        "archive_root": str(store.root),
-        "db_path": str(store.db_path),
-        "excel_path": str(store.excel_path),
-    }
 
 
 @router.get("/api/archive/cleanup/scope")

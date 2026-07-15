@@ -1,46 +1,14 @@
-"""Maintenance plan archive service – SQLite metadata + Excel summary + structured diff."""
+"""Shared helpers for RDS + OSS maintenance-plan archive storage."""
 
-import hashlib
 import json
-import os
 import re
-import shutil
-import sqlite3
-from copy import deepcopy
 from datetime import datetime
-from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-
-from services.plan_generation import _generated_documents, safe_docx_filename
-
-DEFAULT_ARCHIVE_ROOT = str(Path.home() / "检修方案归档")
-_ARCHIVE_CONFIG_PATH = Path(__file__).parent.parent / ".archive_config.json"
-
-
-def _load_persisted_root() -> str:
-    """Read persisted archive root path from config file."""
-    try:
-        if _ARCHIVE_CONFIG_PATH.exists():
-            data = json.loads(_ARCHIVE_CONFIG_PATH.read_text(encoding="utf-8"))
-            root = str(data.get("archive_root", "")).strip()
-            if root and Path(root).is_absolute() or root.startswith("~"):
-                return str(Path(root).expanduser())
-    except Exception:
-        pass
-    return ""
-
-
-def _save_persisted_root(root: str) -> None:
-    """Persist archive root path to config file."""
-    _ARCHIVE_CONFIG_PATH.write_text(
-        json.dumps({"archive_root": str(root)}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
 
 ARCHIVE_HEADERS = [
     "序号", "归档日期", "版本号", "产品类型", "系统名称", "检修动作",
@@ -447,737 +415,85 @@ def _generate_diff_markdown(
     return "\n".join(lines)
 
 
-class ArchiveStore:
-    def __init__(self, archive_root: str = ""):
-        if not archive_root:
-            archive_root = os.getenv("PLAN_ARCHIVE_ROOT", "") or _load_persisted_root() or DEFAULT_ARCHIVE_ROOT
-        self.root = Path(archive_root)
-        self.root.mkdir(parents=True, exist_ok=True)
-        self.db_path = self.root / "archive_index.db"
-        self.excel_path = self.root / "检修工作汇总表.xlsx"
-        self._init_db()
-
-    _RECORDS_DDL = """
-        CREATE TABLE IF NOT EXISTS archive_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            series_id TEXT NOT NULL,
-            version INTEGER NOT NULL DEFAULT 1,
-            file_id TEXT NOT NULL,
-            title TEXT NOT NULL,
-            product_type TEXT DEFAULT '',
-            system_name TEXT DEFAULT '',
-            action TEXT DEFAULT '',
-            network TEXT DEFAULT '',
-            location TEXT DEFAULT '',
-            org TEXT DEFAULT '',
-            resource_set TEXT DEFAULT '',
-            schedule_start TEXT DEFAULT '',
-            schedule_end TEXT DEFAULT '',
-            schedule_start_norm TEXT DEFAULT '',
-            provider TEXT DEFAULT '',
-            executor TEXT DEFAULT '',
-            reviewer TEXT DEFAULT '',
-            security_officer TEXT DEFAULT '',
-            business_impact TEXT DEFAULT '',
-            rollback_method TEXT DEFAULT '',
-            key_params TEXT DEFAULT '',
-            change_summary TEXT DEFAULT '',
-            archive_date TEXT NOT NULL,
-            downloaded_at TEXT NOT NULL,
-            docx_path TEXT NOT NULL,
-            json_path TEXT NOT NULL,
-            parent_file_id TEXT DEFAULT NULL
-        )
-    """
-
-    def _init_db(self):
-        with sqlite3.connect(str(self.db_path)) as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
-            # Main active-records table (query target, cleaned-up rows removed).
-            conn.execute(self._RECORDS_DDL)
-            # Immutable audit log — never deleted, for traceability.
-            conn.execute(self._RECORDS_DDL.replace("archive_records", "archive_log"))
-
-            # Migration: copy any rows from archive_records into archive_log that aren't there yet.
-            try:
-                conn.execute("""
-                    INSERT OR IGNORE INTO archive_log
-                    SELECT * FROM archive_records
-                """)
-            except sqlite3.OperationalError:
-                pass  # Column mismatch on very old DB — skip.
-
-            # Remove already-cleaned rows from archive_records (docx_path emptied by old logic).
-            conn.execute("DELETE FROM archive_records WHERE docx_path = ''")
-
-            # Migration: add schedule_start_norm if table was created before this column existed.
-            for tbl in ("archive_records", "archive_log"):
-                try:
-                    conn.execute(f"ALTER TABLE {tbl} ADD COLUMN schedule_start_norm TEXT DEFAULT ''")
-                except sqlite3.OperationalError:
-                    pass
-                backfill_rows = conn.execute(
-                    f"SELECT id, schedule_start FROM {tbl} "
-                    "WHERE schedule_start_norm = '' OR schedule_start_norm IS NULL"
-                ).fetchall()
-                for row_id, sched_start in backfill_rows:
-                    norm = _maintenance_date({"schedule_start": sched_start or ""})
-                    if norm:
-                        conn.execute(
-                            f"UPDATE {tbl} SET schedule_start_norm = ? WHERE id = ?",
-                            [norm, row_id],
-                        )
-            conn.commit()
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS archive_config (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_series_id ON archive_records(series_id)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_archive_date ON archive_records(archive_date)
-            """)
-            conn.commit()
-
-    # ── public API ──────────────────────────────────────────────────
-
-    def archive(self, file_id: str, docx_path: Path,
-                state: Optional[dict] = None,
-                plan_data: Optional[dict] = None) -> dict:
-        """Archive a generated plan on download. Returns the archive record."""
-        if plan_data is None:
-            plan_data = deepcopy(_generated_documents.get(file_id, {}))
-        if not plan_data:
-            return {"status": "skipped", "reason": "no_plan_data"}
-
-        if self._already_archived(file_id):
-            return {"status": "skipped", "reason": "already_archived"}
-
-        state = state or {}
-        title = plan_data.get("title", "检修方案")
-        system_name = _extract_system_name(
-            state.get("instances", ""),
-            title,
-        )
-        action = _extract_action(
-            title,
-            state.get("instances", ""),
-            state.get("maintenance_type", ""),
-        )
-        product_type = _extract_product_type(
-            title,
-            state.get("instances", ""),
-            state.get("tech_params", ""),
-        )
-        org, resource_set = _extract_org_and_resource_set(state.get("instances", ""))
-
-        # Determine series and version.
-        series_id, version_number, parent_file_id = self._match_series(
-            title, system_name, action, product_type,
-            schedule_start=state.get("schedule_start", ""),
-        )
-        change_summary = ""
-        maintenance_date = _maintenance_date(state)
-        agent_summary = str(state.get("_agent_change_summary", "")).strip()
-
-        # Compute diff for non-initial versions.
-        old_snapshot = None
-        state_changes = None
-        if version_number > 1 and parent_file_id:
-            old_snapshot = self._load_snapshot(parent_file_id)
-            # Get old record for state-level comparison.
-            old_records = self.get_series_history(series_id)
-            if old_records:
-                old_record = old_records[-1]  # latest version = parent
-                state_changes = _compute_state_diff(old_record, state)
-            # Prefer Agent's own change description over automated diff.
-            if agent_summary:
-                change_summary = agent_summary
-            elif old_snapshot:
-                change_summary = _compute_diff_summary(old_snapshot, plan_data, state_changes)
-            # Migrate all versions if maintenance date changed.
-            if old_records:
-                old_path = Path(old_records[0]["docx_path"])
-                old_date_dir = old_path.parent.parent.name
-                if old_date_dir != maintenance_date:
-                    self._migrate_series_date(series_id, old_date_dir, maintenance_date)
-
-        # Build archive directory.
-        safe_name = safe_docx_filename(title)
-        version_dir = self.root / maintenance_date / f"{safe_name}_v{version_number}"
-        version_dir.mkdir(parents=True, exist_ok=True)
-
-        archived_docx = version_dir / f"{safe_name}.docx"
-        shutil.copy2(str(docx_path), str(archived_docx))
-
-        json_path = version_dir / "plan_snapshot.json"
-        json_path.write_text(
-            json.dumps(plan_data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-
-        # Save diff report for v2+.
-        if old_snapshot and version_number > 1:
-            diff_text = _generate_diff_markdown(
-                old_snapshot, plan_data,
-                version_number - 1, version_number, title,
-                state_changes,
-            )
-            diff_path = version_dir / f"diff_from_v{version_number - 1}.md"
-            diff_path.write_text(diff_text, encoding="utf-8")
-
-        # Persist to SQLite.
-        record = {
-            "series_id": series_id,
-            "version": version_number,
-            "file_id": file_id,
-            "title": title,
-            "product_type": product_type,
-            "system_name": system_name,
-            "action": action,
-            "network": state.get("network", ""),
-            "location": state.get("location", "国网亦庄数据中心二期运维专区"),
-            "org": org,
-            "resource_set": resource_set,
-            "schedule_start": state.get("schedule_start", ""),
-            "schedule_end": state.get("schedule_end", ""),
-            "provider": state.get("provider", ""),
-            "executor": state.get("executor", ""),
-            "reviewer": state.get("reviewer", ""),
-            "security_officer": state.get("security_officer", ""),
-            "business_impact": _extract_impact(plan_data),
-            "rollback_method": _extract_rollback(plan_data),
-            "key_params": _extract_key_params(state),
-            "change_summary": change_summary,
-            "archive_date": _today(),
-            "downloaded_at": _now_iso(),
-            "docx_path": str(archived_docx),
-            "json_path": str(json_path),
-            "parent_file_id": parent_file_id,
+def _compute_section_diffs(old_data: dict, new_data: dict) -> list[dict]:
+    """Return section-level changes for archive version comparison."""
+    diffs: list[dict] = []
+    try:
+        old_sections = {
+            _norm_heading(section["heading"]): section
+            for section in old_data.get("document", {}).get("sections", [])
+            if isinstance(section, dict) and section.get("heading")
         }
-        self._insert_record(record)
-        self.rebuild_summary_excel()
-        record["status"] = "archived"
-        return record
-
-    def query_summary(self, filters: Optional[dict] = None,
-                      latest_only: bool = False) -> list[dict]:
-        """Query archive records with optional filters.
-
-        When latest_only is True, only the highest version per series_id
-        is returned — useful for exporting a deduplicated summary.
-        """
-        filters = filters or {}
-        if latest_only:
-            sql = (
-                "SELECT r.* FROM archive_records r "
-                "INNER JOIN ("
-                "  SELECT series_id, MAX(version) AS max_v "
-                "  FROM archive_records WHERE 1=1 "
-                "{where} "
-                "  GROUP BY series_id"
-                ") latest ON r.series_id = latest.series_id AND r.version = latest.max_v "
-                "WHERE 1=1 "
-            )
-        else:
-            sql = "SELECT * FROM archive_records WHERE 1=1"
-        params: list = []
-        where_clauses = ""
-
-        def _add_filter(clause: str, *vals) -> None:
-            nonlocal where_clauses
-            where_clauses += f" AND {clause}"
-            params.extend(vals)
-
-        prefix = "r." if latest_only else ""
-        if filters.get("start_date"):
-            _add_filter(f"{prefix}schedule_start_norm >= ?", filters["start_date"])
-        if filters.get("end_date"):
-            _add_filter(f"{prefix}schedule_start_norm <= ?", filters["end_date"])
-        if filters.get("system_name"):
-            _add_filter(f"{prefix}system_name LIKE ?", f"%{filters['system_name']}%")
-        if filters.get("person"):
-            person = f"%{filters['person']}%"
-            _add_filter(
-                f"({prefix}provider LIKE ? OR {prefix}executor LIKE ? OR {prefix}reviewer LIKE ? OR {prefix}security_officer LIKE ?)",
-                person, person, person, person,
-            )
-        if filters.get("product_type"):
-            _add_filter(f"{prefix}product_type = ?", filters["product_type"])
-        if filters.get("action"):
-            _add_filter(f"{prefix}action = ?", filters["action"])
-
-        if latest_only:
-            sql = sql.replace("{where}", where_clauses)
-        sql += where_clauses
-        sql += " ORDER BY schedule_start_norm DESC, series_id, version DESC"
-
-        with sqlite3.connect(str(self.db_path)) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(sql, params).fetchall()
-            return [dict(row) for row in rows]
-
-    def get_series_history(self, series_id: str) -> list[dict]:
-        with sqlite3.connect(str(self.db_path)) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM archive_records WHERE series_id = ? ORDER BY version",
-                [series_id],
-            ).fetchall()
-            return [dict(row) for row in rows]
-
-    def read_archived_docx(self, record_id: int) -> tuple[bytes, str]:
-        """Read one archived document for the archive download API."""
-        with sqlite3.connect(str(self.db_path)) as conn:
-            conn.row_factory = sqlite3.Row
-            record = conn.execute(
-                "SELECT title, docx_path FROM archive_records WHERE id = ?",
-                [record_id],
-            ).fetchone()
-        if not record or not record["docx_path"]:
-            raise FileNotFoundError("归档记录不存在或其文件已清理")
-        path = Path(record["docx_path"])
-        if not path.exists():
-            raise FileNotFoundError("归档文件已被清理")
-        return path.read_bytes(), f"{safe_docx_filename(record['title'])}.docx"
-
-    def compare_versions(self, series_id: str, from_version: int, to_version: int) -> dict:
-        """Compare two versions of the same series."""
-        with sqlite3.connect(str(self.db_path)) as conn:
-            conn.row_factory = sqlite3.Row
-            old = conn.execute(
-                "SELECT * FROM archive_records WHERE series_id = ? AND version = ?",
-                [series_id, from_version],
-            ).fetchone()
-            new = conn.execute(
-                "SELECT * FROM archive_records WHERE series_id = ? AND version = ?",
-                [series_id, to_version],
-            ).fetchone()
-
-        if not old or not new:
-            raise FileNotFoundError(f"版本不存在: series={series_id}, v{from_version}→v{to_version}")
-
-        old_data = self._load_snapshot_by_path(old["json_path"])
-        new_data = self._load_snapshot_by_path(new["json_path"])
-
-        if not old_data or not new_data:
-            raise FileNotFoundError("快照JSON文件丢失")
-
-        section_diffs = self._compute_section_diffs(old_data, new_data)
-        summary = _compute_diff_summary(old_data, new_data)
-
-        return {
-            "series_id": series_id,
-            "from_version": from_version,
-            "to_version": to_version,
-            "old_title": old["title"],
-            "new_title": new["title"],
-            "old_downloaded_at": old["downloaded_at"],
-            "new_downloaded_at": new["downloaded_at"],
-            "summary": summary,
-            "section_diffs": section_diffs,
+        new_sections = {
+            _norm_heading(section["heading"]): section
+            for section in new_data.get("document", {}).get("sections", [])
+            if isinstance(section, dict) and section.get("heading")
         }
+        for name in dict.fromkeys([*old_sections, *new_sections]):
+            old_signatures = _block_sigs(old_sections[name]) if name in old_sections else []
+            new_signatures = _block_sigs(new_sections[name]) if name in new_sections else []
+            if old_signatures == new_signatures:
+                status = "unchanged"
+            elif not old_signatures:
+                status = "added"
+            elif not new_signatures:
+                status = "removed"
+            else:
+                status = "modified"
+            section = new_sections.get(name) or old_sections.get(name) or {}
+            diffs.append({"heading": section.get("heading", ""), "status": status})
+    except Exception:
+        return []
+    return diffs
 
-    def rebuild_summary_excel(self, output_path: Optional[Path] = None,
-                              latest_only: bool = False):
-        """Rebuild the summary Excel from SQLite."""
-        output_path = output_path or self.excel_path
-        records = self.query_summary(latest_only=latest_only)
 
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "检修工作汇总"
+def write_summary_excel(records: list[dict], output_path: Path) -> None:
+    """Build the archive summary workbook from storage-agnostic records."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "检修工作汇总"
+    for column, header in enumerate(ARCHIVE_HEADERS, 1):
+        cell = worksheet.cell(row=1, column=column, value=header)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = THIN_BORDER
 
-        for col_idx, header in enumerate(ARCHIVE_HEADERS, 1):
-            cell = ws.cell(row=1, column=col_idx, value=header)
-            cell.font = HEADER_FONT
-            cell.fill = HEADER_FILL
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.border = THIN_BORDER
-
-        for row_idx, record in enumerate(records, 2):
-            values = [
-                row_idx - 1,
-                record.get("archive_date", ""),
-                f"v{record.get('version', 1)}",
-                record.get("product_type", ""),
-                record.get("system_name", ""),
-                record.get("action", ""),
-                record.get("title", ""),
-                record.get("network", ""),
-                record.get("location", ""),
-                record.get("org", ""),
-                record.get("resource_set", ""),
-                record.get("schedule_start", ""),
-                record.get("schedule_end", ""),
-                record.get("provider", ""),
-                record.get("executor", ""),
-                record.get("reviewer", ""),
-                record.get("security_officer", ""),
-                record.get("business_impact", ""),
-                record.get("rollback_method", ""),
-                record.get("key_params", ""),
-                record.get("change_summary", ""),
-                record.get("docx_path", ""),
-            ]
-            version_fill = VERSION_FILLS.get(record.get("version", 1), PatternFill())
-            for col_idx, value in enumerate(values, 1):
-                cell = ws.cell(row=row_idx, column=col_idx, value=value)
-                cell.font = BODY_FONT
-                cell.alignment = BODY_ALIGNMENT
-                cell.border = THIN_BORDER
-                if record.get("version", 1) > 1:
-                    cell.fill = version_fill
-
-        for col_idx, width in enumerate(EXCEL_COL_WIDTHS, 1):
-            ws.column_dimensions[get_column_letter(col_idx)].width = min(width, 50)
-
-        ws.auto_filter.ref = ws.dimensions
-        ws.freeze_panes = "A2"
-
-        wb.save(str(output_path))
-
-    def delete_old_version_files(self, start_date: str = "", end_date: str = "") -> dict:
-        """Delete files for non-latest versions within the date range.
-
-        Returns counts of deleted version dirs and affected series.
-        """
-        filters = {}
-        if start_date:
-            filters["start_date"] = start_date
-        if end_date:
-            filters["end_date"] = end_date
-        records = self.query_summary(filters)
-
-        # Group by series_id, find latest version per series.
-        series_latest: dict[str, int] = {}
-        for r in records:
-            sid = r["series_id"]
-            ver = r["version"]
-            if sid not in series_latest or ver > series_latest[sid]:
-                series_latest[sid] = ver
-
-        deleted = 0
-        with sqlite3.connect(str(self.db_path)) as conn:
-            for r in records:
-                sid = r["series_id"]
-                if r["version"] >= series_latest[sid]:
-                    continue
-                self._remove_version_files(r, conn)
-                deleted += 1
-            conn.commit()
-
-        self.rebuild_summary_excel()
-        return {"deleted_count": deleted, "series_affected": len(series_latest)}
-
-    def delete_all_files(self, start_date: str = "", end_date: str = "") -> dict:
-        """Delete all version files within the date range, keeping DB records."""
-        filters = {}
-        if start_date:
-            filters["start_date"] = start_date
-        if end_date:
-            filters["end_date"] = end_date
-        records = self.query_summary(filters)
-
-        with sqlite3.connect(str(self.db_path)) as conn:
-            for r in records:
-                self._remove_version_files(r, conn)
-            conn.commit()
-
-        self.rebuild_summary_excel()
-        return {"deleted_count": len(records)}
-
-    def _remove_version_files(self, record: dict, conn: sqlite3.Connection) -> None:
-        """Remove physical files and delete the record from archive_records (archive_log untouched)."""
-        docx_path = record.get("docx_path", "")
-        json_path = record.get("json_path", "")
-        version_dir = Path(docx_path).parent if docx_path else None
-
-        # Remove files.
-        for path_str in (docx_path, json_path):
-            if path_str:
-                p = Path(path_str)
-                if p.exists():
-                    try:
-                        p.unlink()
-                    except OSError:
-                        pass
-
-        # Remove version directory if empty, plus any diff markdown files.
-        if version_dir and version_dir.exists():
-            for leftover in version_dir.glob("diff_from_*.md"):
-                try:
-                    leftover.unlink()
-                except OSError:
-                    pass
-            try:
-                remaining = list(version_dir.iterdir())
-                if not remaining:
-                    version_dir.rmdir()
-                    # Try to clean up parent date directory too.
-                    date_dir = version_dir.parent
-                    if date_dir != self.root and not any(date_dir.iterdir()):
-                        date_dir.rmdir()
-            except OSError:
-                pass
-
-        # Delete from active records; archive_log keeps the immutable trace.
-        conn.execute("DELETE FROM archive_records WHERE id = ?", [record["id"]])
-
-    # ── internal helpers ────────────────────────────────────────────
-
-    def _migrate_series_date(self, series_id: str, old_date: str, new_date: str):
-        """Move all series version directories from old_date to new_date folder."""
-        if old_date == new_date:
-            return
-        old_dir = self.root / old_date
-        new_dir = self.root / new_date
-        if not old_dir.exists():
-            return
-        new_dir.mkdir(parents=True, exist_ok=True)
-        # Move version dirs that belong to this series and update both tables.
-        with sqlite3.connect(str(self.db_path)) as conn:
-            rows = conn.execute(
-                "SELECT id, docx_path, json_path FROM archive_records WHERE series_id = ?",
-                [series_id],
-            ).fetchall()
-            for row_id, docx_path, json_path in rows:
-                old_docx = Path(docx_path)
-                old_json = Path(json_path)
-                # Move the version directory.
-                version_dir = old_docx.parent
-                if version_dir.exists() and version_dir.parent == old_dir:
-                    dest = new_dir / version_dir.name
-                    if not dest.exists():
-                        shutil.move(str(version_dir), str(dest))
-                new_docx = str(docx_path).replace(str(old_dir), str(new_dir))
-                new_json = str(json_path).replace(str(old_dir), str(new_dir))
-                for tbl in ("archive_records", "archive_log"):
-                    conn.execute(
-                        f"UPDATE {tbl} SET docx_path = ?, json_path = ? "
-                        "WHERE series_id = ? AND docx_path = ?",
-                        [new_docx, new_json, series_id, docx_path],
-                    )
-            conn.commit()
-        # Clean up empty old date directory.
-        try:
-            remaining = list(old_dir.iterdir())
-            if not remaining:
-                old_dir.rmdir()
-        except OSError:
-            pass
-
-    def _already_archived(self, file_id: str) -> bool:
-        with sqlite3.connect(str(self.db_path)) as conn:
-            row = conn.execute(
-                "SELECT 1 FROM archive_log WHERE file_id = ? LIMIT 1",
-                [file_id],
-            ).fetchone()
-            return row is not None
-
-    def _match_series(self, title: str, system_name: str, action: str,
-                      product_type: str, schedule_start: str = "") -> tuple[str, int, Optional[str]]:
-        """Three-tier matching with product-type guard and 5-day window.
-
-        Tier 1: exact title match.
-        Tier 2: fuzzy system+action — requires same product_type, similarity
-                above 0.85, and schedule_start within 5 days of the latest
-                version in the series.
-        Tier 3: new series.
-        """
-        new_schedule_date = _maintenance_date({"schedule_start": schedule_start})
-
-        with sqlite3.connect(str(self.db_path)) as conn:
-            conn.row_factory = sqlite3.Row
-
-            # Tier 1: exact title match — also enforce 5-day window.
-            row = conn.execute(
-                "SELECT r.series_id, MAX(r.version) as max_ver, r.file_id, r.schedule_start "
-                "FROM archive_records r "
-                "INNER JOIN ("
-                "  SELECT series_id, MAX(version) as max_v "
-                "  FROM archive_records WHERE title = ? GROUP BY series_id"
-                ") latest ON r.series_id = latest.series_id AND r.version = latest.max_v "
-                "WHERE r.title = ? "
-                "GROUP BY r.series_id ORDER BY max_ver DESC LIMIT 1",
-                [title, title],
-            ).fetchone()
-            if row:
-                old_date = _maintenance_date({"schedule_start": row["schedule_start"] or ""})
-                try:
-                    old_dt = datetime.strptime(old_date, "%Y-%m-%d")
-                    new_dt = datetime.strptime(new_schedule_date, "%Y-%m-%d")
-                    if abs((new_dt - old_dt).days) <= 5:
-                        return row["series_id"], row["max_ver"] + 1, row["file_id"]
-                except ValueError:
-                    return row["series_id"], row["max_ver"] + 1, row["file_id"]
-                # Title matches but dates too far apart — fall through to Tier 2.
-
-            # Tier 2: fuzzy system+action — product_type must match.
-            all_rows = conn.execute(
-                "SELECT r.series_id, r.system_name, r.action, r.product_type, "
-                "       r.schedule_start, MAX(r.version) as max_ver, r.file_id "
-                "FROM archive_records r "
-                "INNER JOIN ("
-                "  SELECT series_id, MAX(version) as max_v "
-                "  FROM archive_records GROUP BY series_id"
-                ") latest ON r.series_id = latest.series_id AND r.version = latest.max_v "
-                "GROUP BY r.series_id",
-            ).fetchall()
-            best_ratio = 0
-            best_match = None
-            target = f"{system_name}{action}"
-            for r in all_rows:
-                # Product type guard — different products are never the same series.
-                if r["product_type"] != product_type:
-                    continue
-                # 5-day window — same-named monthly maintenance is a different job.
-                old_date = _maintenance_date({"schedule_start": r["schedule_start"] or ""})
-                try:
-                    old_dt = datetime.strptime(old_date, "%Y-%m-%d")
-                    new_dt = datetime.strptime(new_schedule_date, "%Y-%m-%d")
-                    if abs((new_dt - old_dt).days) > 5:
-                        continue
-                except ValueError:
-                    pass  # Unparseable dates — don't filter out.
-                candidate = f"{r['system_name']}{r['action']}"
-                ratio = SequenceMatcher(None, target.lower(), candidate.lower()).ratio()
-                if ratio > 0.85 and ratio > best_ratio:
-                    best_ratio = ratio
-                    best_match = r
-            if best_match:
-                return best_match["series_id"], best_match["max_ver"] + 1, best_match["file_id"]
-
-            # Tier 3: new series.
-            key = f"{system_name}|{action}|{product_type}"
-            series_hash = hashlib.md5(key.encode()).hexdigest()[:10]
-            new_id = f"AR-{_today().replace('-', '')}-{series_hash}"
-            return new_id, 1, None
-
-    _INSERT_SQL = """
-        INSERT INTO {table} (
-            series_id, version, file_id, title, product_type, system_name, action,
-            network, location, org, resource_set,
-            schedule_start, schedule_end, schedule_start_norm,
-            provider, executor, reviewer, security_officer,
-            business_impact, rollback_method, key_params, change_summary,
-            archive_date, downloaded_at, docx_path, json_path, parent_file_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """
-
-    def _insert_record(self, record: dict):
-        schedule_start_norm = _maintenance_date({"schedule_start": record.get("schedule_start", "")})
+    for row_index, record in enumerate(records, 2):
         values = [
-            record["series_id"], record["version"], record["file_id"], record["title"],
-            record["product_type"], record["system_name"], record["action"],
-            record["network"], record["location"], record["org"], record["resource_set"],
-            record["schedule_start"], record["schedule_end"], schedule_start_norm,
-            record["provider"], record["executor"], record["reviewer"], record["security_officer"],
-            record["business_impact"], record["rollback_method"], record["key_params"],
-            record["change_summary"],
-            record["archive_date"], record["downloaded_at"],
-            record["docx_path"], record["json_path"], record.get("parent_file_id"),
+            row_index - 1, record.get("archive_date", ""), f"v{record.get('version', 1)}",
+            record.get("product_type", ""), record.get("system_name", ""), record.get("action", ""),
+            record.get("title", ""), record.get("network", ""), record.get("location", ""),
+            record.get("org", ""), record.get("resource_set", ""), record.get("schedule_start", ""),
+            record.get("schedule_end", ""), record.get("provider", ""), record.get("executor", ""),
+            record.get("reviewer", ""), record.get("security_officer", ""), record.get("business_impact", ""),
+            record.get("rollback_method", ""), record.get("key_params", ""), record.get("change_summary", ""),
+            record.get("docx_path", ""),
         ]
-        with sqlite3.connect(str(self.db_path)) as conn:
-            conn.execute(self._INSERT_SQL.format(table="archive_records"), values)
-            conn.execute(self._INSERT_SQL.format(table="archive_log"), values)
-            conn.commit()
+        for column, value in enumerate(values, 1):
+            cell = worksheet.cell(row=row_index, column=column, value=value)
+            cell.font = BODY_FONT
+            cell.alignment = BODY_ALIGNMENT
+            cell.border = THIN_BORDER
+            if record.get("version", 1) > 1:
+                cell.fill = VERSION_FILLS.get(record.get("version", 1), PatternFill())
 
-    def _load_snapshot(self, file_id: str) -> Optional[dict]:
-        """Load a plan snapshot by file_id from the in-memory store or archive records."""
-        data = _generated_documents.get(file_id)
-        if data:
-            return deepcopy(data)
-        with sqlite3.connect(str(self.db_path)) as conn:
-            row = conn.execute(
-                "SELECT json_path FROM archive_records WHERE file_id = ? LIMIT 1",
-                [file_id],
-            ).fetchone()
-            if row:
-                return self._load_snapshot_by_path(row[0])
-        return None
-
-    def _load_snapshot_by_path(self, json_path: str) -> Optional[dict]:
-        path = Path(json_path)
-        if path.exists():
-            try:
-                return json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                return None
-        return None
-
-    def _compute_section_diffs(self, old_data: dict, new_data: dict) -> list[dict]:
-        diffs = []
-        try:
-            old_secs_map = {}
-            for s in old_data.get("document", {}).get("sections", []):
-                if isinstance(s, dict) and s.get("heading"):
-                    old_secs_map[_norm_heading(s["heading"])] = s
-            new_secs_map = {}
-            for s in new_data.get("document", {}).get("sections", []):
-                if isinstance(s, dict) and s.get("heading"):
-                    new_secs_map[_norm_heading(s["heading"])] = s
-
-            all_names = list(dict.fromkeys(list(old_secs_map.keys()) + list(new_secs_map.keys())))
-            for name in all_names:
-                o_sigs = _block_sigs(old_secs_map[name]) if name in old_secs_map else []
-                n_sigs = _block_sigs(new_secs_map[name]) if name in new_secs_map else []
-
-                if not o_sigs and not n_sigs:
-                    continue
-                if o_sigs == n_sigs:
-                    status = "unchanged"
-                elif not o_sigs:
-                    status = "added"
-                elif not n_sigs:
-                    status = "removed"
-                else:
-                    o_set = set(o_sigs)
-                    n_set = set(n_sigs)
-                    changed = len(o_set ^ n_set)
-                    if changed == 0:
-                        status = "unchanged"
-                    elif changed <= 2:
-                        status = "modified"
-                    else:
-                        status = "modified"
-
-                display_name = ""
-                if name in new_secs_map:
-                    display_name = new_secs_map[name].get("heading", "")
-                elif name in old_secs_map:
-                    display_name = old_secs_map[name].get("heading", "")
-
-                diffs.append({
-                    "heading": display_name,
-                    "status": status,
-                })
-        except Exception:
-            pass
-        return diffs
+    for column, width in enumerate(EXCEL_COL_WIDTHS, 1):
+        worksheet.column_dimensions[get_column_letter(column)].width = min(width, 50)
+    worksheet.auto_filter.ref = worksheet.dimensions
+    worksheet.freeze_panes = "A2"
+    workbook.save(str(output_path))
 
 
-# ── singleton ────────────────────────────────────────────────────────
-_archive_store: Optional[Any] = None
+_archive_store = None
 
 
-def get_archive_store() -> Any:
+def get_archive_store():
+    """Return the project's single RDS + OSS archive implementation."""
     global _archive_store
     if _archive_store is None:
-        backend = os.getenv("PLAN_ARCHIVE_BACKEND", "local").strip().lower()
-        if backend == "rds_oss":
-            from services.remote_plan_archive import RemoteArchiveStore
+        from services.remote_plan_archive import RemoteArchiveStore
 
-            _archive_store = RemoteArchiveStore()
-        else:
-            _archive_store = ArchiveStore()
+        _archive_store = RemoteArchiveStore()
     return _archive_store
-
-
-def reset_archive_store() -> None:
-    """Reset the singleton so the next call to get_archive_store() creates a new instance."""
-    global _archive_store
-    _archive_store = None

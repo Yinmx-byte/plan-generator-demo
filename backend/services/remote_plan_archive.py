@@ -14,8 +14,8 @@ import alibabacloud_oss_v2 as oss
 import pymysql
 
 from services.plan_archive import (
-    ArchiveStore,
     _compute_diff_summary,
+    _compute_section_diffs,
     _compute_state_diff,
     _extract_action,
     _extract_impact,
@@ -28,11 +28,12 @@ from services.plan_archive import (
     _maintenance_date,
     _now_iso,
     _today,
+    write_summary_excel,
 )
 from services.plan_generation import _generated_documents, safe_docx_filename
 
 
-class RemoteArchiveStore(ArchiveStore):
+class RemoteArchiveStore:
     """Persist archive metadata in RDS and generated artifacts in OSS.
 
     ``docx_path`` and ``json_path`` retain their existing record names for API
@@ -296,8 +297,11 @@ class RemoteArchiveStore(ArchiveStore):
             "old_downloaded_at": old["downloaded_at"],
             "new_downloaded_at": new["downloaded_at"],
             "summary": _compute_diff_summary(old_data, new_data),
-            "section_diffs": self._compute_section_diffs(old_data, new_data),
+            "section_diffs": _compute_section_diffs(old_data, new_data),
         }
+
+    def rebuild_summary_excel(self, output_path: Optional[Path] = None, latest_only: bool = False) -> None:
+        write_summary_excel(self.query_summary(latest_only=latest_only), output_path or self.excel_path)
 
     def delete_old_version_files(self, start_date: str = "", end_date: str = "") -> dict:
         records = self.query_summary(_date_filters(start_date, end_date))

@@ -1983,9 +1983,6 @@ function initArchivePage() {
   const filterBtn = document.getElementById('archiveFilterBtn');
   const filterResetBtn = document.getElementById('archiveFilterResetBtn');
   const downloadExcelBtn = document.getElementById('archiveDownloadExcelBtn');
-  const configDisplay = document.getElementById('archiveConfigDisplay');
-  const configSaveBtn = document.getElementById('archiveConfigSaveBtn');
-  const rootInput = document.getElementById('archiveRootInput');
   const seriesDialog = document.getElementById('archiveSeriesDialog');
   const seriesCloseBtn = document.getElementById('archiveSeriesCloseBtn');
   const diffDialog = document.getElementById('archiveDiffDialog');
@@ -2110,18 +2107,6 @@ function initArchivePage() {
     diffDialog?.showModal();
   }
 
-  async function loadConfig() {
-    try {
-      const resp = await fetch('/api/archive/config');
-      if (!resp.ok) return;
-      const data = await resp.json();
-      if (rootInput) rootInput.value = data.archive_root || '';
-      if (configDisplay) configDisplay.textContent = `归档目录: ${data.archive_root}`;
-    } catch (_err) {
-      // Silently ignore fetch errors on page init.
-    }
-  }
-
   filterBtn?.addEventListener('click', loadSummary);
   filterResetBtn?.addEventListener('click', () => {
     ['archiveFilterSystem', 'archiveFilterPerson', 'archiveFilterStartDate', 'archiveFilterEndDate'].forEach((id) => {
@@ -2137,16 +2122,6 @@ function initArchivePage() {
   downloadExcelBtn?.addEventListener('click', () => {
     const lp = latestOnlyCb?.checked ? '?latest_only=true' : '';
     window.open('/api/archive/summary/excel' + lp, '_blank');
-  });
-  configSaveBtn?.addEventListener('click', async () => {
-    const root = rootInput?.value.trim();
-    if (!root) return;
-    await fetch('/api/archive/config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ archive_root: root }),
-    });
-    loadConfig();
   });
   seriesCloseBtn?.addEventListener('click', () => seriesDialog?.close());
   diffCloseBtn?.addEventListener('click', () => diffDialog?.close());
@@ -2226,7 +2201,6 @@ function initArchivePage() {
   });
 
   loadSummary();
-  loadConfig();
 }
 
 async function resetChat() {
