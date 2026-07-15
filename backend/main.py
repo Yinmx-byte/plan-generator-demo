@@ -25,6 +25,7 @@ from rag import get_knowledge_base
 from api.admin_routes import router as admin_router
 from api.archive_routes import router as archive_router
 from api.cloud_routes import router as cloud_router
+from api.quality_reference_routes import router as quality_reference_router
 from agents.master_agent import (
     MasterAgentRuntime,
     get_simple_direct_reply,
@@ -87,6 +88,7 @@ class PlanTestRequest(BaseModel):
     message: str = ""
     state: Optional[dict[str, Any]] = None
     allow_partial: bool = False
+    target_skill_name: str = ""
 
 
 class GeneratedDocumentUpdateRequest(BaseModel):
@@ -221,11 +223,15 @@ async def stop_page_agent_current_task():
 app.include_router(admin_router)
 app.include_router(archive_router)
 app.include_router(cloud_router)
+app.include_router(quality_reference_router)
 
 
 @app.post("/api/dev/plan-test")
 async def dev_plan_test(request: PlanTestRequest):
     """Development-only quick path: requirement text/state -> DOCX."""
+    target_skill_name = request.target_skill_name.strip()
+    if target_skill_name and get_skill_registry().get(target_skill_name) is None:
+        raise HTTPException(status_code=400, detail="质量测试指定的目标 Skill 不存在")
     state = default_form_state()
     if request.state:
         merge_updates(state, request.state)
@@ -246,7 +252,10 @@ async def dev_plan_test(request: PlanTestRequest):
             "extracted": extracted.get("updates", {}),
         }
 
-    orchestration = await build_generation_orchestration_context(state)
+    orchestration = await build_generation_orchestration_context(
+        state,
+        target_skill_name=target_skill_name,
+    )
     file_id, output_path, filename = await generate_docx_from_state(
         state,
         orchestration=orchestration,

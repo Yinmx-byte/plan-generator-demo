@@ -77,6 +77,25 @@ PLAN_ARCHIVE_OSS_REGION=cn-beijing
 PLAN_ARCHIVE_OSS_PREFIX=maintenance-plan-archive
 ```
 
+Skill 质量迭代使用同一 RDS 中的 `quality_reference_documents` 表保存优质方案元数据，原始 DOCX 存放在独立的私有 OSS Bucket。配置示例：
+
+```env
+QUALITY_REFERENCE_OSS_BUCKET=high-quality-plan
+QUALITY_REFERENCE_OSS_REGION=cn-beijing
+QUALITY_REFERENCE_OSS_PREFIX=quality-references
+QUALITY_REFERENCE_TOP_K=5
+QUALITY_EVALUATOR_MODEL_NAME=deepseek-v4-pro
+QUALITY_EVALUATOR_MAX_TOKENS=6000
+```
+
+首次导入分类后的历史方案：
+
+```powershell
+python quality_iterator/scripts/import_quality_references.py "D:\个人工作\2026\微创项目\整理后文档\检修方案-整理"
+```
+
+评估总分由确定性规则（40%）、同产品同动作优质文档对比（30%）和独立评估 Agent（30%）组成。产品 Skill 不参与定义自己的评分标准，只接收评估缺陷形成的候选修改。
+
 ### 3. 启动服务
 
 ```bash

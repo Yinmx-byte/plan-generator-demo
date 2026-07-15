@@ -43,7 +43,7 @@ def download_file(base_url: str, download_url: str, output_dir: Path, filename: 
 def run_evaluation(
     reference_dir: str,
     candidate_docx: Path,
-    source_skill: str | None,
+    state: dict,
     output: str | None,
     timeout: int,
 ) -> dict:
@@ -55,9 +55,9 @@ def run_evaluation(
         reference_dir,
         "--candidate-docx",
         str(candidate_docx),
+        "--state-json",
+        json.dumps(state, ensure_ascii=False),
     ]
-    if source_skill:
-        command.extend(["--source-skill", source_skill])
     if output:
         command.extend(["--output", output])
 
@@ -106,10 +106,12 @@ def main() -> None:
     parser.add_argument("--evaluation-timeout", type=int, default=120)
     args = parser.parse_args()
 
+    state = read_state(args)
     payload = {
         "message": args.message,
-        "state": read_state(args),
+        "state": state,
         "allow_partial": args.allow_partial,
+        "target_skill_name": Path(args.source_skill).parent.name if args.source_skill else "",
     }
     started_at = time.time()
     plan_result = post_json(args.api_url, payload, args.request_timeout)
@@ -138,7 +140,7 @@ def main() -> None:
     evaluation = run_evaluation(
         args.reference_dir,
         candidate_docx,
-        args.source_skill,
+        state,
         args.evaluation_output,
         args.evaluation_timeout,
     )

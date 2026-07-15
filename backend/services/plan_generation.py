@@ -184,7 +184,10 @@ def update_generated_document(file_id: str, data: dict[str, Any]) -> dict[str, A
     return get_generated_document(file_id) or data
 
 
-async def build_generation_orchestration_context(state: dict[str, str]) -> dict[str, Any]:
+async def build_generation_orchestration_context(
+    state: dict[str, str],
+    target_skill_name: str = "",
+) -> dict[str, Any]:
     rag_chunks: list[str] = []
     knowledge_base = get_knowledge_base(SKILLS_ROOT)
     rag_status = "disabled"
@@ -237,8 +240,17 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
         rag_context = "当前未检索到 RAG 参考资料。请确认百炼知识库配置、远程文档解析状态、索引任务状态和检索阈值。"
 
     skill_prompt = get_skill_registry().get_agent_skill_prompt()
+    target_skill_context = ""
+    skill_selection_mode = "agentscope_react_auto"
+    if target_skill_name:
+        skill_selection_mode = "quality_test_target_skill"
+        target_skill_context = (
+            "## 质量测试目标 Skill\n"
+            f"本次候选文档专门用于评估 `{target_skill_name}`。必须先通过 read_file 读取该 Skill 的 SKILL.md，"
+            "并以它作为本次产品/动作规则来源；仍需同时读取通用 composer Skill。\n\n"
+        )
     return {
-        "skill_selection_mode": "agentscope_react_auto",
+        "skill_selection_mode": skill_selection_mode,
         "rag_enabled": knowledge_base is not None,
         "rag_status": rag_status,
         "rag_error": rag_error,
@@ -247,6 +259,7 @@ async def build_generation_orchestration_context(state: dict[str, str]) -> dict[
             "## 编排上下文：Skill 加载方式\n"
             "Skill 选择完全交给 AgentScope 注册信息和 ReActAgent 自主判断。所有 Skill 已通过 AgentScope Toolkit.register_agent_skill 注册，"
             "请根据 AgentScope 暴露的 Skill name/description 自主判断需要读取哪些 SKILL.md。\n\n"
+            f"{target_skill_context}"
             "## AgentScope Skill 摘要\n"
             f"{skill_prompt}\n\n"
             "## 编排上下文：RAG 参考资料\n"

@@ -971,6 +971,19 @@ button.ghost {
   display: grid;
   gap: 6px;
 }
+.iterator-reference-source,
+.document-reference-source {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+.iterator-reference-source small {
+  color: var(--muted);
+}
 .iterator-parameter-bar {
   display: flex;
   width: min(100%, 980px);
@@ -1216,6 +1229,21 @@ body.iterator-page .page-host {
   display: block;
   margin-top: 4px;
   font-size: 18px;
+}
+.component-score-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.reference-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.reference-chip-list span {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--ink-soft);
+  font-size: 13px;
 }
 .finding-list {
   display: grid;

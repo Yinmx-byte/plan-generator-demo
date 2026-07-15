@@ -43,7 +43,6 @@ let documentTitleEl = null;
 let documentDownloadLink = null;
 let documentEditStatus = null;
 let documentDialog = null;
-let documentEvalReferenceDir = null;
 let documentEvalSkillSelect = null;
 let documentEvaluationResult = null;
 let documentVisualDirty = false;
@@ -91,8 +90,17 @@ const evaluationDimensionLabels = {
   risk: '风险评估',
   operation: '实施步骤',
   rollback: '回滚闭环',
-  contract: '质量契约',
+  personnel: '人员信息',
   format: '文档格式',
+  reference_structure: '参考结构匹配',
+  reference_operation_granularity: '参考步骤粒度',
+  reference_risk_coverage: '参考风险覆盖',
+  reference_format: '参考格式匹配',
+  executability: '模型：可执行性',
+  empty_language: '模型：有效表达',
+  requirement_fidelity: '模型：需求忠实度',
+  risk_rollback_relevance: '模型：风险回滚相关性',
+  reference_leakage: '模型：参考信息隔离',
 };
 
 const evaluationCategoryLabels = {
@@ -100,7 +108,9 @@ const evaluationCategoryLabels = {
   risk: '风险评估',
   operation: '实施步骤',
   rollback: '回滚步骤',
-  contract: '质量契约',
+  deterministic: '确定性规则',
+  reference_comparison: '优质文档对比',
+  model_review: '模型评审',
   format: '版式格式',
   finding: '问题',
 };
@@ -1132,11 +1142,6 @@ async function evaluateCurrentDocument() {
     setDocumentEditorState('未加载', '请先生成或打开一份 DOCX。');
     return;
   }
-  const referenceDir = documentEvalReferenceDir?.value?.trim();
-  if (!referenceDir) {
-    setDocumentEditorState('缺少参考目录', '请填写优质文档目录。');
-    return;
-  }
   if (documentEvaluationResult) {
     documentEvaluationResult.innerHTML = '<div class="item-card"><div class="item-title">正在评估当前 DOCX...</div></div>';
   }
@@ -1146,7 +1151,6 @@ async function evaluateCurrentDocument() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        reference_dir: referenceDir,
         skill_name: documentEvalSkillSelect?.value || '',
       }),
     });
@@ -1255,7 +1259,6 @@ function initPlanPage() {
   documentDownloadLink = document.getElementById('documentDownloadLink');
   documentEditStatus = document.getElementById('documentEditStatus');
   documentDialog = document.getElementById('documentDialog');
-  documentEvalReferenceDir = document.getElementById('documentEvalReferenceDir');
   documentEvalSkillSelect = document.getElementById('documentEvalSkillSelect');
   documentEvaluationResult = document.getElementById('documentEvaluationResult');
   const formatDocumentJsonBtn = document.getElementById('formatDocumentJsonBtn');
@@ -1562,7 +1565,7 @@ function initKnowledgePage() {
 
 async function initIteratorPage() {
   const skillSelect = document.getElementById('iteratorSkillSelect');
-  const referenceInput = document.getElementById('iteratorReferenceDir');
+  const referenceStatus = document.getElementById('iteratorReferenceStatus');
   const stateInput = document.getElementById('iteratorStateJson');
   const stateFieldsEl = document.getElementById('iteratorStateFields');
   const stateDialog = document.getElementById('iteratorStateDialog');
@@ -1650,12 +1653,19 @@ async function initIteratorPage() {
   } catch (err) {
     statusEl.textContent = 'Skill 加载失败：' + err.message;
   }
+  try {
+    const response = await fetch('/api/quality-references/status');
+    const status = await response.json();
+    if (!response.ok) throw new Error(formatApiError(status.detail || '读取失败'));
+    if (referenceStatus) referenceStatus.textContent = `${status.bucket} · ${status.active_documents} 份有效文档`;
+  } catch (err) {
+    if (referenceStatus) referenceStatus.textContent = `远程参考库不可用：${err.message}`;
+  }
 
   async function runIterator() {
     const skillName = skillSelect.value;
-    const referenceDir = referenceInput.value.trim();
-    if (!skillName || !referenceDir) {
-      statusEl.textContent = '请选择 Skill 并填写优质文档目录';
+    if (!skillName) {
+      statusEl.textContent = '请选择待评估 Skill';
       return;
     }
     const state = syncIteratorState();
@@ -1674,7 +1684,6 @@ async function initIteratorPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           skill_name: skillName,
-          reference_dir: referenceDir,
           message: '',
           state_json: stateInput.value.trim(),
           allow_partial: allowPartialInput.checked,
@@ -1781,6 +1790,14 @@ function labelEvaluationMode(mode) {
   return mode || '未知模式';
 }
 
+function labelEvaluationComponent(key) {
+  return {
+    deterministic: '确定性规则（40%）',
+    reference_comparison: '高质量文档对比（30%）',
+    model_review: '独立模型评审（30%）',
+  }[key] || key;
+}
+
 function localizeEvaluationText(text) {
   return String(text || '')
     .replaceAll('Generated DOCX', '生成文档')
@@ -1791,7 +1808,6 @@ function localizeEvaluationText(text) {
     .replaceAll('source_skill', '源 Skill')
     .replaceAll('generated_docx', '生成文档评估')
     .replaceAll('findings', '问题列表')
-    .replaceAll('contract', '质量契约')
     .replaceAll('create', '创建场景');
 }
 
@@ -1800,6 +1816,8 @@ function renderIteratorResult(container, payload) {
   const evaluation = result.evaluation || result;
   const findings = evaluation.findings || [];
   const scores = evaluation.dimension_scores || {};
+  const componentScores = evaluation.component_scores || {};
+  const references = payload.reference_documents || [];
   const candidateDocx = result.candidate_docx || evaluation.candidate?.path || '';
   const draft = payload.draft || {};
   const skillName = payload.skill?.name || '';
@@ -1816,6 +1834,14 @@ function renderIteratorResult(container, payload) {
       <div class="score-tile">
         <span>发现问题</span>
         <strong>${findings.length}</strong>
+      </div>
+    </div>
+    <div class="iterator-section">
+      <h4>加权评分构成</h4>
+      <div class="dimension-grid component-score-grid">
+        ${Object.entries(componentScores).map(([key, value]) => `
+          <div><span>${escapeHtml(labelEvaluationComponent(key))}</span><strong>${escapeHtml(value)}</strong></div>
+        `).join('') || '<p>暂无评分构成。</p>'}
       </div>
     </div>
     <div class="iterator-section">
@@ -1845,6 +1871,12 @@ function renderIteratorResult(container, payload) {
       <h4>改进建议</h4>
       <p>${escapeHtml(localizeEvaluationText(evaluation.recommended_patch_summary || '暂无改进建议。'))}</p>
       ${candidateDocx ? `<p class="status-text">候选文档：${escapeHtml(candidateDocx)}</p>` : ''}
+    </div>
+    <div class="iterator-section">
+      <h4>本次匹配的高质量方案</h4>
+      <div class="reference-chip-list">
+        ${references.map((item) => `<span>${escapeHtml(item.title || item.source_filename || '')} · ${escapeHtml(item.operation_type || 'general')}</span>`).join('') || '<p>未返回参考文档元数据。</p>'}
+      </div>
     </div>
     <div class="iterator-section iterator-draft-section">
       <div class="item-card-head">

@@ -18,7 +18,11 @@ from pydantic import BaseModel
 from rag import get_knowledge_base, reset_knowledge_base
 from rag import bailian_admin
 from runtime import ROOT, SKILLS_ROOT, get_skill_registry, reset_skill_runtime
-from services.plan_generation import get_generated_file
+from services.plan_generation import get_generated_file, get_generated_state
+from services.quality_reference_store import (
+    derive_query_metadata,
+    get_quality_reference_store,
+)
 
 router = APIRouter()
 
@@ -39,7 +43,6 @@ class SkillRollbackRequest(BaseModel):
 
 class SkillIteratorRequest(BaseModel):
     skill_name: str
-    reference_dir: str
     message: str = ""
     state_json: str = ""
     allow_partial: bool = False
@@ -47,7 +50,6 @@ class SkillIteratorRequest(BaseModel):
 
 
 class GeneratedDocumentEvaluationRequest(BaseModel):
-    reference_dir: str
     skill_name: str = ""
 
 
@@ -258,19 +260,17 @@ def build_iterator_skill_draft(skill, current_content: str, result: dict) -> dic
         return {"has_changes": False, "content": current_content, "diff": "", "suggested_version": ""}
     summary = evaluation.get("recommended_patch_summary") or ""
     score = evaluation.get("score")
-    dimension_scores = evaluation.get("dimension_scores") or {}
+    dimension_scores = evaluation.get("component_scores") or evaluation.get("dimension_scores") or {}
     suggestions: list[str] = []
+    seen_suggestions: set[str] = set()
     for finding in findings:
-        message = str(finding.get("message") or "").strip()
         change = str(finding.get("suggested_skill_change") or "").strip()
         category = str(finding.get("category") or "quality").strip()
         severity = str(finding.get("severity") or "medium").strip()
-        if not message and not change:
+        if not change or change in seen_suggestions:
             continue
-        suggestions.append(
-            f"- 【{severity}/{category}】{message}"
-            + (f"\n  - Skill 调整建议：{change}" if change else "")
-        )
+        seen_suggestions.add(change)
+        suggestions.append(f"- 【{severity}/{category}】{change}")
     if not suggestions and not summary:
         return {"has_changes": False, "content": current_content, "diff": "", "suggested_version": ""}
 
@@ -526,33 +526,31 @@ def run_iterator_subprocess(command: list[str], timeout: int = 420) -> dict:
         ) from exc
 
 
-def skill_product_hint(skill_name: str) -> str:
-    lowered = skill_name.lower()
-    for product in ("ecs", "slb", "oss", "rds", "redis", "mq", "polardb", "k8s"):
-        if product in lowered:
-            return product
-    return ""
+def parse_iterator_state(raw: str) -> dict:
+    if not raw.strip():
+        return {}
+    try:
+        state = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="结构化测试参数不是合法 JSON") from exc
+    if not isinstance(state, dict):
+        raise HTTPException(status_code=400, detail="结构化测试参数必须是 JSON 对象")
+    return state
 
 
-def resolve_iterator_reference_dir(reference_dir: Path, skill_name: str) -> Path:
-    if any(path.suffix.lower() == ".docx" and not path.name.startswith("~$") for path in reference_dir.iterdir()):
-        return reference_dir
-    product = skill_product_hint(skill_name)
-    doc_dirs = sorted(
-        {
-            path.parent
-            for path in reference_dir.rglob("*.docx")
-            if not path.name.startswith("~$")
-        },
-        key=lambda item: (len(item.parts), str(item)),
+def prepare_quality_references(state: dict, skill_name: str) -> tuple[Path, list[dict], dict]:
+    store = get_quality_reference_store()
+    metadata = derive_query_metadata(state, skill_name)
+    records = store.select_references(
+        metadata,
+        limit=int(os.getenv("QUALITY_REFERENCE_TOP_K", "5")),
     )
-    if not doc_dirs:
-        raise HTTPException(status_code=400, detail="优质文档路径下未找到可评估的 docx 文件")
-    if product:
-        for path in doc_dirs:
-            if product.lower() in str(path).lower():
-                return path
-    return doc_dirs[0]
+    if not records:
+        raise HTTPException(
+            status_code=400,
+            detail=f"远程优质方案库未匹配到同类文档：product={metadata['product_type'] or '-'} action={metadata['operation_type']}",
+        )
+    return store.materialize(records), records, metadata
 
 
 @router.get("/api/skill-iterator/rules")
@@ -566,48 +564,53 @@ async def get_skill_iterator_rules():
 @router.post("/api/skill-iterator/run")
 async def run_skill_iterator(request_body: SkillIteratorRequest, request: Request):
     skill = get_skill_or_404(request_body.skill_name)
-    reference_dir = Path(request_body.reference_dir)
-    if not reference_dir.exists() or not reference_dir.is_dir():
-        raise HTTPException(status_code=400, detail="优质文档路径不存在或不是目录")
-    resolved_reference_dir = resolve_iterator_reference_dir(reference_dir, skill.name)
     source_skill = skill.path / "SKILL.md"
     ensure_within_directory(SKILLS_ROOT, source_skill)
     output_dir = ROOT.parent / "docs" / "iterator-output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    has_generation_input = bool(request_body.message.strip() or request_body.state_json.strip())
+    state = parse_iterator_state(request_body.state_json)
+    has_generation_input = bool(request_body.message.strip() or state)
     if not has_generation_input:
         raise HTTPException(status_code=400, detail="请填写结构化测试参数后再生成并评估文档")
 
-    script = iterator_script_path("generate_and_evaluate_plan.py")
-    api_url = request_body.api_url.strip() or str(request.base_url).rstrip("/") + "/api/dev/plan-test"
-    command = [
-        sys.executable,
-        str(script),
-        "--api-url",
-        api_url,
-        "--reference-dir",
-        str(resolved_reference_dir),
-        "--source-skill",
-        str(source_skill),
-        "--output-dir",
-        str(output_dir),
-    ]
-    if request_body.message.strip():
-        command.extend(["--message", request_body.message.strip()])
-    if request_body.state_json.strip():
-        command.extend(["--state-json", request_body.state_json.strip()])
-    if request_body.allow_partial:
-        command.append("--allow-partial")
+    reference_dir, reference_records, match_metadata = await run_blocking(
+        prepare_quality_references,
+        state,
+        skill.name,
+    )
+    try:
+        script = iterator_script_path("generate_and_evaluate_plan.py")
+        api_url = request_body.api_url.strip() or str(request.base_url).rstrip("/") + "/api/dev/plan-test"
+        command = [
+            sys.executable,
+            str(script),
+            "--api-url",
+            api_url,
+            "--reference-dir",
+            str(reference_dir),
+            "--source-skill",
+            str(source_skill),
+            "--output-dir",
+            str(output_dir),
+        ]
+        if request_body.message.strip():
+            command.extend(["--message", request_body.message.strip()])
+        if state:
+            command.extend(["--state-json", json.dumps(state, ensure_ascii=False)])
+        if request_body.allow_partial:
+            command.append("--allow-partial")
 
-    result = await run_blocking(run_iterator_subprocess, command)
+        result = await run_blocking(run_iterator_subprocess, command)
+    finally:
+        shutil.rmtree(reference_dir, ignore_errors=True)
     draft = build_iterator_skill_draft(skill, read_skill_markdown(skill), result)
     return {
         "status": "ok",
         "mode": "generated_docx",
         "skill": skill_payload(skill),
-        "reference_dir": str(reference_dir),
-        "resolved_reference_dir": str(resolved_reference_dir),
+        "reference_match": match_metadata,
+        "reference_documents": reference_records,
         "draft": draft,
         "result": result,
     }
@@ -618,43 +621,40 @@ async def evaluate_generated_document(file_id: str, request_body: GeneratedDocum
     candidate_docx = get_generated_file(file_id)
     if candidate_docx is None:
         raise HTTPException(status_code=404, detail="生成文档不存在或已过期")
-    reference_dir = Path(request_body.reference_dir)
-    if not reference_dir.exists() or not reference_dir.is_dir():
-        raise HTTPException(status_code=400, detail="优质文档路径不存在或不是目录")
-
-    source_skill = None
     skill_payload_data = None
     if request_body.skill_name.strip():
         skill = get_skill_or_404(request_body.skill_name.strip())
-        source_skill_path = skill.path / "SKILL.md"
-        ensure_within_directory(SKILLS_ROOT, source_skill_path)
-        source_skill = str(source_skill_path)
         skill_payload_data = skill_payload(skill)
 
-    resolved_reference_dir = resolve_iterator_reference_dir(
-        reference_dir,
+    state = get_generated_state(file_id) or {}
+    reference_dir, reference_records, match_metadata = await run_blocking(
+        prepare_quality_references,
+        state,
         request_body.skill_name.strip(),
     )
-    script = iterator_script_path("evaluate_plan_quality.py")
-    command = [
-        sys.executable,
-        str(script),
-        "--reference-dir",
-        str(resolved_reference_dir),
-        "--candidate-docx",
-        str(candidate_docx),
-    ]
-    if source_skill:
-        command.extend(["--source-skill", source_skill])
-    result = await run_blocking(run_iterator_subprocess, command)
+    try:
+        script = iterator_script_path("evaluate_plan_quality.py")
+        command = [
+            sys.executable,
+            str(script),
+            "--reference-dir",
+            str(reference_dir),
+            "--candidate-docx",
+            str(candidate_docx),
+            "--state-json",
+            json.dumps(state, ensure_ascii=False),
+        ]
+        result = await run_blocking(run_iterator_subprocess, command)
+    finally:
+        shutil.rmtree(reference_dir, ignore_errors=True)
     return {
         "status": "ok",
         "mode": "generated_docx",
         "file_id": file_id,
         "candidate_docx": str(candidate_docx),
         "skill": skill_payload_data,
-        "reference_dir": str(reference_dir),
-        "resolved_reference_dir": str(resolved_reference_dir),
+        "reference_match": match_metadata,
+        "reference_documents": reference_records,
         "result": result,
     }
 
