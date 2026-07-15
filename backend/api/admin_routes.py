@@ -564,8 +564,6 @@ async def get_skill_iterator_rules():
 @router.post("/api/skill-iterator/run")
 async def run_skill_iterator(request_body: SkillIteratorRequest, request: Request):
     skill = get_skill_or_404(request_body.skill_name)
-    source_skill = skill.path / "SKILL.md"
-    ensure_within_directory(SKILLS_ROOT, source_skill)
     output_dir = ROOT.parent / "docs" / "iterator-output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -589,8 +587,8 @@ async def run_skill_iterator(request_body: SkillIteratorRequest, request: Reques
             api_url,
             "--reference-dir",
             str(reference_dir),
-            "--source-skill",
-            str(source_skill),
+            "--target-skill-name",
+            skill.name,
             "--output-dir",
             str(output_dir),
         ]

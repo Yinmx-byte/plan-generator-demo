@@ -1801,11 +1801,9 @@ function labelEvaluationComponent(key) {
 function localizeEvaluationText(text) {
   return String(text || '')
     .replaceAll('Generated DOCX', '生成文档')
-    .replaceAll('Static preflight', '静态预检')
     .replaceAll('candidate DOCX', '候选文档')
     .replaceAll('Candidate DOCX', '候选文档')
     .replaceAll('source skill', '源 Skill')
-    .replaceAll('source_skill', '源 Skill')
     .replaceAll('generated_docx', '生成文档评估')
     .replaceAll('findings', '问题列表')
     .replaceAll('create', '创建场景');

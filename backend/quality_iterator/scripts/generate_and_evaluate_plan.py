@@ -99,7 +99,7 @@ def main() -> None:
     parser.add_argument("--message", default="")
     parser.add_argument("--allow-partial", action="store_true")
     parser.add_argument("--reference-dir", required=True)
-    parser.add_argument("--source-skill")
+    parser.add_argument("--target-skill-name", default="")
     parser.add_argument("--output-dir", default=str(Path.cwd() / "iterator-output"))
     parser.add_argument("--evaluation-output")
     parser.add_argument("--request-timeout", type=int, default=240)
@@ -111,7 +111,7 @@ def main() -> None:
         "message": args.message,
         "state": state,
         "allow_partial": args.allow_partial,
-        "target_skill_name": Path(args.source_skill).parent.name if args.source_skill else "",
+        "target_skill_name": args.target_skill_name.strip(),
     }
     started_at = time.time()
     plan_result = post_json(args.api_url, payload, args.request_timeout)

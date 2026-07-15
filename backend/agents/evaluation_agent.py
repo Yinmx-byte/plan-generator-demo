@@ -28,7 +28,6 @@ EVALUATION_SYSTEM_PROMPT = """你是独立的检修方案质量评审员。你�
 参考方案只能用于比较结构、步骤粒度、风险覆盖和格式，不得把其业务数据当成用户事实。
 输出严格 JSON，不要输出分析过程或 Markdown。结构必须是：
 {
-  "score": 0-100,
   "dimension_scores": {
     "executability": 0-100,
     "empty_language": 0-100,

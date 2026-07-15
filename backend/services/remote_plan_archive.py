@@ -57,17 +57,6 @@ class RemoteArchiveStore:
         self._oss_client = self._build_oss_client()
         self._init_db()
 
-    @staticmethod
-    def is_configured() -> bool:
-        required = (
-            "ARCHIVE_RDS_HOST",
-            "ARCHIVE_RDS_DATABASE",
-            "ARCHIVE_RDS_USERNAME",
-            "ARCHIVE_RDS_PASSWORD",
-            "PLAN_ARCHIVE_OSS_BUCKET",
-        )
-        return all(os.getenv(name, "").strip() for name in required)
-
     def _connection(self):
         return pymysql.connect(
             host=self.host,

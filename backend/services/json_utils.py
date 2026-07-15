@@ -1,10 +1,7 @@
 """JSON and AgentScope response parsing helpers."""
 
 import json
-import re
 from typing import Any
-
-from agentscope.tool import ToolResponse
 
 def extract_json(text: Any) -> dict:
     """从 LLM 返回的文本中提取 JSON。"""

@@ -119,16 +119,6 @@ class QualityReferenceStore:
         self._oss_client = self._build_oss_client()
         self._init_db()
 
-    @staticmethod
-    def is_configured() -> bool:
-        required = (
-            "ARCHIVE_RDS_HOST",
-            "ARCHIVE_RDS_DATABASE",
-            "ARCHIVE_RDS_USERNAME",
-            "ARCHIVE_RDS_PASSWORD",
-        )
-        return all(os.getenv(name, "").strip() for name in required)
-
     def _connection(self):
         return pymysql.connect(
             host=self.host,
@@ -371,6 +361,7 @@ class QualityReferenceStore:
                 result[key] = result[key].isoformat(timespec="seconds")
         result["benchmark_enabled"] = bool(result.get("benchmark_enabled", True))
         result.pop("checksum_sha256", None)
+        result.pop("match_score", None)
         return result
 
 

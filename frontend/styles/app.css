@@ -1064,26 +1064,16 @@ button.ghost {
   background: #fff;
 }
 .iterator-json-pane summary,
-.iterator-state-panel summary,
 .document-evaluation-pane summary {
   cursor: pointer;
   font-size: 13px;
   font-weight: 800;
 }
-.iterator-state-panel,
 .document-evaluation-pane {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: linear-gradient(180deg, #ffffff 0%, #f9fbfc 100%);
-}
-.iterator-state-panel {
-  overflow: hidden;
-}
-.iterator-state-panel[open] {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  max-height: min(38vh, 390px);
 }
 .iterator-state-grid {
   margin-top: 0;

@@ -9,10 +9,10 @@ from datetime import datetime
 
 try:
     from docx import Document
-    from docx.shared import Pt, Cm, Inches, RGBColor
+    from docx.shared import Pt, Cm, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml.ns import qn, nsdecls
-    from docx.oxml import parse_xml, OxmlElement
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
 except ImportError:
     print("请先安装 python-docx: pip install python-docx")
     sys.exit(1)

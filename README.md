@@ -174,7 +174,7 @@ ALLOW_FALLBACK_PLAN=true
 - `GET /api/cloud/ecs-vpc-info`：旧版兼容入口，仍可查询 ECS/VPC/VSwitch/实例归属和使用率信息。
 - `GET /api/dev/cloud-query-test`：开发验证接口，默认验证产品/指标映射、缺参追问和资源产品聚合；设置 `run_live=true` 后会在当前环境有 AK/SK 时执行真实只读云查询。
 - `POST /api/page-agent/task/stream`：通过项目内置 Page Agent MCP 执行浏览器任务，并流式返回中间事件。
-- `POST /api/skill-iterator/run`：调用项目内置质量迭代脚本，执行静态预检或“生成 DOCX 后评估”。
+- `POST /api/skill-iterator/run`：调用项目内置质量迭代脚本，生成候选 DOCX 后执行三段式质量评估。
 
 ### 管理接口
 
