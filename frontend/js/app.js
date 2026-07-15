@@ -512,7 +512,7 @@ async function loadPage(page) {
   setActiveNav(page);
   pageTitle.textContent = pageMeta[page].title;
   pageEyebrow.textContent = pageMeta[page].eyebrow;
-  const resp = await fetch(`/pages/${page}.html`);
+  const resp = await fetch(`/pages/${page}.html`, { cache: 'no-store' });
   pageHost.innerHTML = await resp.text();
 
   try {
