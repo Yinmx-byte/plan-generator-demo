@@ -251,8 +251,14 @@ def bump_skill_version(content: str) -> tuple[str, str]:
 
 def build_iterator_skill_draft(skill, current_content: str, result: dict) -> dict:
     evaluation = result.get("evaluation") or result
+    if evaluation.get("evaluation_mode") != "generated_docx":
+        return {"has_changes": False, "content": current_content, "diff": "", "suggested_version": ""}
     findings = evaluation.get("findings") or []
+    if not findings:
+        return {"has_changes": False, "content": current_content, "diff": "", "suggested_version": ""}
     summary = evaluation.get("recommended_patch_summary") or ""
+    score = evaluation.get("score")
+    dimension_scores = evaluation.get("dimension_scores") or {}
     suggestions: list[str] = []
     for finding in findings:
         message = str(finding.get("message") or "").strip()
@@ -277,6 +283,11 @@ def build_iterator_skill_draft(skill, current_content: str, result: dict) -> dic
         "",
         "以下内容来自生成文档与优质历史方案的对比评估。应用前请人工审阅差异，确认不会把一次测试样例的个性化内容固化进通用 Skill。",
     ]
+    if score is not None:
+        block.extend(["", f"生成文档总分：{score}"])
+    if dimension_scores:
+        score_text = "、".join(f"{name}={value}" for name, value in dimension_scores.items())
+        block.extend(["", f"分项得分：{score_text}"])
     if summary:
         block.extend(["", f"总体建议：{summary}"])
     if suggestions:
@@ -565,43 +576,35 @@ async def run_skill_iterator(request_body: SkillIteratorRequest, request: Reques
     output_dir.mkdir(parents=True, exist_ok=True)
 
     has_generation_input = bool(request_body.message.strip() or request_body.state_json.strip())
-    if has_generation_input:
-        script = iterator_script_path("generate_and_evaluate_plan.py")
-        api_url = request_body.api_url.strip() or str(request.base_url).rstrip("/") + "/api/dev/plan-test"
-        command = [
-            sys.executable,
-            str(script),
-            "--api-url",
-            api_url,
-            "--reference-dir",
-            str(resolved_reference_dir),
-            "--source-skill",
-            str(source_skill),
-            "--output-dir",
-            str(output_dir),
-        ]
-        if request_body.message.strip():
-            command.extend(["--message", request_body.message.strip()])
-        if request_body.state_json.strip():
-            command.extend(["--state-json", request_body.state_json.strip()])
-        if request_body.allow_partial:
-            command.append("--allow-partial")
-    else:
-        script = iterator_script_path("evaluate_plan_quality.py")
-        command = [
-            sys.executable,
-            str(script),
-            "--reference-dir",
-            str(resolved_reference_dir),
-            "--candidate-skill",
-            str(source_skill),
-        ]
+    if not has_generation_input:
+        raise HTTPException(status_code=400, detail="请填写结构化测试参数后再生成并评估文档")
+
+    script = iterator_script_path("generate_and_evaluate_plan.py")
+    api_url = request_body.api_url.strip() or str(request.base_url).rstrip("/") + "/api/dev/plan-test"
+    command = [
+        sys.executable,
+        str(script),
+        "--api-url",
+        api_url,
+        "--reference-dir",
+        str(resolved_reference_dir),
+        "--source-skill",
+        str(source_skill),
+        "--output-dir",
+        str(output_dir),
+    ]
+    if request_body.message.strip():
+        command.extend(["--message", request_body.message.strip()])
+    if request_body.state_json.strip():
+        command.extend(["--state-json", request_body.state_json.strip()])
+    if request_body.allow_partial:
+        command.append("--allow-partial")
 
     result = await run_blocking(run_iterator_subprocess, command)
     draft = build_iterator_skill_draft(skill, read_skill_markdown(skill), result)
     return {
         "status": "ok",
-        "mode": "generated_docx" if has_generation_input else "skill_static_preflight",
+        "mode": "generated_docx",
         "skill": skill_payload(skill),
         "reference_dir": str(reference_dir),
         "resolved_reference_dir": str(resolved_reference_dir),

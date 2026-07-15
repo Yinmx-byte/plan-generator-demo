@@ -58,25 +58,25 @@ ACTION_ALIASES = {
 def get_quality_rule_catalog() -> dict:
     """Expose the evaluator's current checks for the user-facing rule viewer."""
     return {
-        "static_preflight": {
-            "title": "静态预检规则",
-            "description": "不调用模型、不生成 DOCX。预检读取当前 SKILL.md，检查规则本身是否覆盖后续生成所需的关键约束。",
+        "writeback": {
+            "title": "Skill 写回规则",
+            "description": "只有实际生成 DOCX 并完成文档评分后，才会根据文档缺陷生成 Skill 候选更新；不会直接按静态检查结果修改 Skill。",
             "items": [
                 {
-                    "title": "质量评估契约",
-                    "detail": "读取 Skill 中“质量评估契约”章节，并按通用规则及当前动作场景（如创建、回收、扩缩容、重启）选择检查项。",
+                    "title": "以生成结果为依据",
+                    "detail": "候选更新只使用生成 DOCX 的分项得分、缺失章节、风险覆盖、操作可执行性、回滚闭环和格式问题。",
                 },
                 {
-                    "title": "文档结构约束",
-                    "detail": "检查 Skill 是否覆盖标准方案章节：背景、检修类型、现场环境、实施计划、风险评估、实施步骤与回滚步骤。",
+                    "title": "缺陷反推规则",
+                    "detail": "把文档问题改写为通用生成约束，避免把本次实例名、人员、时间等测试样例内容固化进 Skill。",
                 },
                 {
-                    "title": "关键操作闭环",
-                    "detail": "检查备份、检修前验证、检修操作、检修后验证，以及回滚操作、回滚后验证等要求是否写入 Skill。",
+                    "title": "候选版本而非直接覆盖",
+                    "detail": "系统生成带版本号和差异对比的候选 SKILL.md，只有用户确认应用后才写回，并保留可回退快照。",
                 },
                 {
-                    "title": "风险与格式约束",
-                    "detail": "检查影响范围、危险点分析、安全措施、授权、备份、验证、双人复核等风险要求；通用编排 Skill 还检查 JSON、章节块、表格与首页规则。",
+                    "title": "低分项优先",
+                    "detail": "优先处理高严重度问题和明显低分维度；无文档缺陷时不自动生成 Skill 修改。",
                 },
             ],
         },
@@ -164,20 +164,17 @@ def read_references(reference_dir: Path) -> list[DocProfile]:
 
 
 def text_from_candidate(args: argparse.Namespace) -> tuple[str, dict]:
-    if args.candidate_docx:
-        profile = read_docx(Path(args.candidate_docx))
-        return profile.text, {
-            "type": "docx",
-            "path": profile.path,
-            "headings": profile.headings,
-            "tables": profile.table_count,
-            "source_skill": args.source_skill or args.candidate_skill,
-            "reference_dir": args.reference_dir,
-        }
-    if args.candidate_skill:
-        path = Path(args.candidate_skill)
-        return path.read_text(encoding="utf-8"), {"type": "skill", "path": str(path)}
-    raise SystemExit("Provide --candidate-skill or --candidate-docx")
+    if not args.candidate_docx:
+        raise SystemExit("Provide --candidate-docx")
+    profile = read_docx(Path(args.candidate_docx))
+    return profile.text, {
+        "type": "docx",
+        "path": profile.path,
+        "headings": profile.headings,
+        "tables": profile.table_count,
+        "source_skill": args.source_skill,
+        "reference_dir": args.reference_dir,
+    }
 
 
 def coverage(items: Iterable[str], text: str) -> tuple[int, list[str]]:
@@ -279,8 +276,6 @@ def dedupe(items: list[str]) -> list[str]:
 
 def select_contract_groups(contract: dict, candidate_meta: dict, candidate_text: str) -> dict[str, list[str]]:
     checks = contract.get("checks") or {}
-    if candidate_meta.get("type") == "skill":
-        return checks
     selected = {}
     if checks.get("common"):
         selected["common"] = checks["common"]
@@ -316,8 +311,7 @@ def build_findings(
     contract_found: bool,
 ) -> list[dict]:
     findings = []
-    is_generated_docx = candidate_meta.get("type") == "docx"
-    target_name = "生成结果 DOCX" if is_generated_docx else "候选 Skill"
+    target_name = "生成结果 DOCX"
     if heading_missing:
         findings.append(
             {
@@ -383,7 +377,6 @@ def main() -> None:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser()
     parser.add_argument("--reference-dir", required=True)
-    parser.add_argument("--candidate-skill")
     parser.add_argument("--candidate-docx")
     parser.add_argument("--source-skill")
     parser.add_argument("--output")
@@ -421,18 +414,9 @@ def main() -> None:
         ["影响范围", "危险点分析", "安全措施", "授权", "备份", "验证", "双人复核"],
         candidate_text,
     )
-    if candidate_meta["type"] == "skill":
-        if "maintenance-plan-composer" in candidate_meta.get("path", ""):
-            format_score, _format_missing = coverage(
-                ["JSON", "document.sections", "blocks", "表格", "首页"],
-                candidate_text,
-            )
-        else:
-            format_score = 100
-    else:
-        format_score = min(100, 40 + candidate_meta.get("tables", 0) * 20)
-        if duplicate_numbering:
-            format_score = min(format_score, 85)
+    format_score = min(100, 40 + candidate_meta.get("tables", 0) * 20)
+    if duplicate_numbering:
+        format_score = min(format_score, 85)
 
     findings = build_findings(
         heading_missing + operation_missing + rollback_missing + risk_missing,
@@ -453,17 +437,11 @@ def main() -> None:
     }
     score = round(sum(dimension_scores.values()) / len(dimension_scores))
 
-    evaluation_mode = "generated_docx" if candidate_meta["type"] == "docx" else "skill_static_preflight"
+    evaluation_mode = "generated_docx"
     if findings:
-        if evaluation_mode == "generated_docx":
-            patch_summary = "生成结果存在缺陷；应将 findings 中的缺失章节、动作特异性风险、可执行实施步骤和回滚闭环要求回写到 source_skill。"
-        else:
-            patch_summary = "静态预检发现源 Skill 规则缺失；修复后仍需生成 DOCX 并进行 generated_docx 评估。"
+        patch_summary = "生成结果存在缺陷；应将 findings 中的缺失章节、动作特异性风险、可执行实施步骤和回滚闭环要求回写到 source_skill。"
     else:
-        if evaluation_mode == "generated_docx":
-            patch_summary = "生成结果已覆盖当前规则检查项，暂不建议自动修改源 Skill；可抽样人工复核措辞和格式。"
-        else:
-            patch_summary = "源 Skill 静态规则覆盖良好；下一步必须评估实际生成 DOCX 的质量。"
+        patch_summary = "生成结果已覆盖当前规则检查项，暂不建议自动修改源 Skill；可抽样人工复核措辞和格式。"
 
     result = {
         "evaluation_mode": evaluation_mode,

@@ -1570,10 +1570,9 @@ async function initIteratorPage() {
   const stateSummaryEl = document.getElementById('iteratorStateSummary');
   const allowPartialInput = document.getElementById('iteratorAllowPartial');
   const runBtn = document.getElementById('runIteratorBtn');
-  const preflightBtn = document.getElementById('runIteratorPreflightBtn');
   const clearStateBtn = document.getElementById('clearIteratorStateBtn');
   const fillSampleBtn = document.getElementById('fillIteratorSampleBtn');
-  const preflightRulesBtn = document.getElementById('openIteratorPreflightRulesBtn');
+  const writebackRulesBtn = document.getElementById('openIteratorWritebackRulesBtn');
   const scoringRulesBtn = document.getElementById('openIteratorScoringRulesBtn');
   const rulesDialog = document.getElementById('iteratorRulesDialog');
   const rulesTitleEl = document.getElementById('iteratorRulesTitle');
@@ -1643,7 +1642,7 @@ async function initIteratorPage() {
     }
   }
 
-  preflightRulesBtn?.addEventListener('click', () => showIteratorRules('static_preflight'));
+  writebackRulesBtn?.addEventListener('click', () => showIteratorRules('writeback'));
   scoringRulesBtn?.addEventListener('click', () => showIteratorRules('scoring'));
 
   try {
@@ -1652,7 +1651,7 @@ async function initIteratorPage() {
     statusEl.textContent = 'Skill 加载失败：' + err.message;
   }
 
-  async function runIterator({ preflight = false } = {}) {
+  async function runIterator() {
     const skillName = skillSelect.value;
     const referenceDir = referenceInput.value.trim();
     if (!skillName || !referenceDir) {
@@ -1660,16 +1659,13 @@ async function initIteratorPage() {
       return;
     }
     const state = syncIteratorState();
-    if (!preflight) {
-      const validationMessage = validateIteratorGenerationInput(state);
-      if (validationMessage) {
-        statusEl.textContent = validationMessage;
-        return;
-      }
+    const validationMessage = validateIteratorGenerationInput(state);
+    if (validationMessage) {
+      statusEl.textContent = validationMessage;
+      return;
     }
     runBtn.disabled = true;
-    if (preflightBtn) preflightBtn.disabled = true;
-    statusEl.textContent = preflight ? '正在进行 Skill 静态预检...' : '正在生成候选文档并评估...';
+    statusEl.textContent = '正在生成候选文档并评估...';
     modeEl.textContent = '运行中';
     resultsEl.innerHTML = '<div class="item-card"><div class="item-title">正在生成/评估，请稍候...</div></div>';
     try {
@@ -1680,13 +1676,13 @@ async function initIteratorPage() {
           skill_name: skillName,
           reference_dir: referenceDir,
           message: '',
-          state_json: preflight ? '' : stateInput.value.trim(),
+          state_json: stateInput.value.trim(),
           allow_partial: allowPartialInput.checked,
         }),
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(formatApiError(data.detail || data.message || '评估失败'));
-      modeEl.textContent = data.mode === 'generated_docx' ? '生成结果评估' : '静态预检';
+      modeEl.textContent = '生成结果评估';
       statusEl.textContent = '评估完成';
       renderIteratorResult(resultsEl, data);
     } catch (err) {
@@ -1695,12 +1691,10 @@ async function initIteratorPage() {
       resultsEl.innerHTML = `<div class="msg error">评估失败：${escapeHtml(err.message)}</div>`;
     } finally {
       runBtn.disabled = false;
-      if (preflightBtn) preflightBtn.disabled = false;
     }
   }
 
-  runBtn.addEventListener('click', () => runIterator({ preflight: false }));
-  preflightBtn?.addEventListener('click', () => runIterator({ preflight: true }));
+  runBtn.addEventListener('click', runIterator);
 }
 
 function formatApiError(detail) {
@@ -1784,7 +1778,6 @@ function labelEvaluationSeverity(key) {
 
 function labelEvaluationMode(mode) {
   if (mode === 'generated_docx') return '生成文档评估';
-  if (mode === 'skill_static_preflight') return 'Skill 静态预检';
   return mode || '未知模式';
 }
 
