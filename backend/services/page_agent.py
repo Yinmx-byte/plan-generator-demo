@@ -173,6 +173,12 @@ async def run_page_agent_task(task: str) -> str:
     return result or "Page Agent 执行完成，但未返回文本结果。"
 
 
+async def stop_page_agent_task() -> str:
+    """Request cancellation of the active Page Agent task through MCP."""
+    result = await call_page_agent_tool("stop_task")
+    return result or "已发送 Page Agent 中断请求。"
+
+
 # ── API 路由 ────────────────────────────────────────────────────
 
 
