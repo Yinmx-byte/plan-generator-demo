@@ -75,6 +75,11 @@ ARCHIVE_RDS_PASSWORD=xxx
 PLAN_ARCHIVE_OSS_BUCKET=your-private-bucket
 PLAN_ARCHIVE_OSS_REGION=cn-beijing
 PLAN_ARCHIVE_OSS_PREFIX=maintenance-plan-archive
+
+# Skill 远程版本库。复用上面的 RDS，完整 Skill 包存入独立 OSS Bucket。
+ITERATED_SKILL_OSS_BUCKET=iterated-skill
+ITERATED_SKILL_OSS_REGION=cn-beijing
+ITERATED_SKILL_OSS_PREFIX=skill-versions
 ```
 
 Skill 质量迭代使用同一 RDS 中的 `quality_reference_documents` 表保存优质方案元数据，原始 DOCX 存放在独立的私有 OSS Bucket。配置示例：
@@ -124,7 +129,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 ## 核心模块
 
-- **Skill**：每类检修方案的稳定规则、章节结构、风险项、实施步骤约束和工具调用原则放在 `backend/skills/`。
+- **Skill**：每类检修方案的稳定规则、章节结构、风险项、实施步骤约束和工具调用原则以 OSS 为远程版本源，RDS 的 `iterated_skill_versions` 表保存版本元数据；`backend/.runtime_skills/` 是 AgentScope 运行时缓存，`backend/skills/` 仅作为首次启动的仓库种子。
 - **百炼 RAG**：历史检修方案、通用模板和阿里云参考资料通过百炼知识库管理，业务生成链路通过 Retrieve API 获取切片。
 - **阿里云只读资源查询**：通过阿里云官方 Python SDK 查询 ECS/VPC/VSwitch/实例归属信息、CloudMonitor 使用率指标和 Resource Center 可访问产品统计。`cloud_query` 工具组已拆分为资源清单、监控指标、资源组产品统计三类工具，指标名称和中文别名由 `backend/config/cloud_query_catalog.yaml` 统一配置，用于智能问数、生成前资源核对和验证前检查。
 - **MCP / Page Agent**：`backend/mcp_servers/page_agent/` 内置了项目使用的 Page Agent MCP 适配包，支持 `execute_task_async` 与 `get_task_events`，前端可流式展示浏览器自动化过程；`backend/mcp_servers.json` 默认指向该项目内路径，不依赖外部 Page Agent 项目。
@@ -182,6 +187,9 @@ ALLOW_FALLBACK_PLAN=true
 - `POST /api/skills/upload`：上传 Skill。
 - `GET /api/skills/{skill_name}`：查看 Skill 内容。
 - `PUT /api/skills/{skill_name}`：更新 `SKILL.md`。
+- `GET /api/skills/{skill_name}/versions`：查看 RDS 中的远程 Skill 版本记录。
+- `POST /api/skills/{skill_name}/rollback`：从 OSS 恢复指定完整 Skill 包，并将回退结果重新发布为当前版本。
+- `GET /api/skill-storage/status`：查看远程 Skill 数据表、OSS Bucket、版本数和当前生效 Skill 数。
 - `GET /api/bailian/knowledge/status`：查看百炼 RAG 配置状态。
 - `GET /api/bailian/files`：查看默认百炼类目下的文件。
 - `POST /api/bailian/files/upload`：上传知识文档。
@@ -212,6 +220,7 @@ node --check frontend/js/app.js
 
 - 页面样式或交互修改后，启动服务并截图验证改动区域。临时截图可放在被忽略的 `docs/` 目录，不进入 Git。
 - 所有文件上传入口统一使用拖拽上传区样式，避免回退为普通文件输入框。
+- 质量迭代页的产品示例参数统一维护在 `frontend/data/iterator-samples.json`，新增检修方案 Skill 时应同步增加对应示例。
 
 ### 后端/API
 

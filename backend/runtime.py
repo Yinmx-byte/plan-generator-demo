@@ -20,7 +20,8 @@ from scripts.generate_plan import build_document
 from skills_runtime import SkillRegistry
 
 ROOT = Path(__file__).parent
-SKILLS_ROOT = ROOT / "skills"
+SKILLS_SEED_ROOT = ROOT / "skills"
+SKILLS_ROOT = Path(os.getenv("SKILLS_RUNTIME_ROOT", ROOT / ".runtime_skills"))
 
 load_dotenv(ROOT / ".env", override=True)
 
@@ -69,7 +70,7 @@ async def read_file(file_path: str) -> ToolResponse:
     resolved = requested.resolve()
     skills_root = SKILLS_ROOT.resolve()
     if not str(resolved).startswith(str(skills_root)):
-        raise ValueError("只能读取 backend/skills 目录下的 Skill 文件。")
+        raise ValueError("只能读取 Skill 运行时缓存目录下的文件。")
     if not resolved.is_file():
         raise FileNotFoundError(str(resolved))
     content = resolved.read_text(encoding="utf-8")

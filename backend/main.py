@@ -3,7 +3,7 @@
 
 流程：用户输入 → Master ReActAgent 自主规划 → Skill/RAG 依据准备 → Word 文档
 
-Skill 装卸：修改 backend/skills/ 目录下的 Skill，重启即生效。
+Skill 装卸：RDS/OSS 保存远程版本，backend/.runtime_skills/ 提供 AgentScope 本地缓存。
 """
 
 import json
@@ -34,6 +34,7 @@ from agents.master_agent import (
 from runtime import (
     ROOT,
     SKILLS_ROOT,
+    SKILLS_SEED_ROOT,
     close_mcp_clients,
     get_formatter,
     get_master_model,
@@ -41,6 +42,7 @@ from runtime import (
     get_skill_registry,
     get_toolkit,
     load_mcp_server_configs,
+    reset_skill_runtime,
 )
 from services.json_utils import get_response_text
 from services.plan_generation import (
@@ -66,6 +68,7 @@ from services.requirements import (
     find_missing_fields,
     merge_updates,
 )
+from services.remote_skill_store import get_remote_skill_store, mirror_seed_skills
 
 # ── Skill 注册 ──────────────────────────────────────────────────
 _rag_enabled: bool = False
@@ -117,6 +120,17 @@ def get_master_agent_runtime() -> MasterAgentRuntime:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global _rag_enabled
+    try:
+        sync_result = await asyncio.to_thread(
+            get_remote_skill_store().synchronize_runtime,
+            SKILLS_SEED_ROOT,
+            SKILLS_ROOT,
+        )
+        print(f"[AgentScope] 远程 Skill 缓存同步完成: {sync_result}")
+    except Exception as exc:
+        copied = mirror_seed_skills(SKILLS_SEED_ROOT, SKILLS_ROOT)
+        print(f"[AgentScope] 远程 Skill 不可用，使用仓库缓存（新增 {copied} 个）: {exc}")
+    await reset_skill_runtime()
     registry = get_skill_registry()
     print(f"[AgentScope] 已注册 Skills: {[skill.name for skill in registry.skills]}")
     _rag_enabled = get_knowledge_base(SKILLS_ROOT) is not None

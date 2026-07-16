@@ -1,0 +1,121 @@
+{
+  "defaults": {
+    "network": "内网",
+    "location": "国网亦庄数据中心二期运维专区",
+    "schedule_year": "2026年",
+    "schedule_start": "2026年8月12日 18:00",
+    "schedule_end": "2026年8月12日 20:00",
+    "provider": "张三",
+    "executor": "李四",
+    "reviewer": "王五",
+    "security_officer": "赵六",
+    "ascm_account": "ascm_demo",
+    "bastion_account": "bastion_demo"
+  },
+  "samples": {
+    "ecs-lifecycle-maintenance": {
+      "label": "ECS",
+      "background": "内网总部 ESB 组件因业务扩容需要新增 ECS 云服务器实例，需完成资源创建和配置确认。",
+      "maintenance_type": "配置变更",
+      "instances": "内网总部 ESB 组件创建 ECS 实例 | 数字化工作部 | 总部ESB组件系统资源集",
+      "tech_params": "实例名称：总部ESB-业务扩容-01、总部ESB-业务扩容-02；数量：2台；规格：4核16G；系统盘：100G；镜像：centos7.9-latest-v1；VPC：VPC10；交换机：总部ESB组件生产VSwitch；安全组：总部ESB组件系统生产安全组。",
+      "ops_detail": "变更前后需截图留痕，创建完成后核对实例状态、规格、网络、安全组和资源集归属，不涉及业务重启。"
+    },
+    "slb-maintenance-plan": {
+      "label": "SLB",
+      "background": "内网统一门户新增应用节点，需要创建 SLB 实例并配置监听和后端服务器组。",
+      "maintenance_type": "配置变更",
+      "instances": "内网统一门户创建 SLB | 数字化工作部 | 统一门户生产资源集",
+      "tech_params": "SLB名称：统一门户生产SLB-01；网络类型：私网；VPC：VPC10；VSwitch：统一门户生产VSwitch；监听协议：TCP；监听端口：443；后端端口：8443；健康检查：TCP。",
+      "ops_detail": "配置前核对后端 ECS 状态，完成后验证健康检查、监听状态和业务连通性，全程截图留痕。"
+    },
+    "oss-maintenance-plan": {
+      "label": "OSS",
+      "background": "内网数据交换平台需要新增 OSS Bucket 存储交换文件，并按安全要求配置权限和生命周期。",
+      "maintenance_type": "配置变更",
+      "instances": "内网数据交换平台创建 OSS Bucket | 数据管理部 | 数据交换生产资源集",
+      "tech_params": "Bucket名称：data-exchange-prod-01；地域：华北2（北京）；存储类型：标准存储；读写权限：私有；版本控制：开启；生命周期：180天转低频、365天删除。",
+      "ops_detail": "不得设置公共读写权限；创建后核对地域、ACL、版本控制和生命周期规则，并执行上传下载验证。"
+    },
+    "rds-maintenance-plan": {
+      "label": "RDS",
+      "background": "营销应用数据库容量不足，需要将 RDS MySQL 实例进行磁盘扩容。",
+      "maintenance_type": "数据库变更",
+      "instances": "营销应用 RDS 磁盘扩容 | 营销部 | 营销应用生产资源集",
+      "tech_params": "实例ID：rm-demo001；数据库引擎：MySQL 8.0；当前存储：500GB；目标存储：800GB；高可用类型：双机高可用；备份保留：7天。",
+      "ops_detail": "扩容前确认最近一次备份成功并记录连接数和磁盘使用率，扩容后验证实例状态、存储容量和业务连接。"
+    },
+    "redis-maintenance-plan": {
+      "label": "Redis",
+      "background": "统一认证系统 Redis 内存使用率持续偏高，需要将实例规格由 8GB 调整为 16GB。",
+      "maintenance_type": "组件扩缩容",
+      "instances": "统一认证 Redis 升配 | 数字化工作部 | 统一认证生产资源集",
+      "tech_params": "实例ID：r-demo001；当前规格：8GB主从版；目标规格：16GB主从版；连接地址保持不变；当前内存使用率：82%。",
+      "ops_detail": "变更前记录连接数、命中率和内存使用率，变更后核对实例状态、规格、连接地址及业务读写。"
+    },
+    "mq-maintenance-plan": {
+      "label": "MQ",
+      "background": "交易通知服务新增消息场景，需要创建 RocketMQ Topic 并完成生产消费验证。",
+      "maintenance_type": "配置变更",
+      "instances": "交易通知 RocketMQ Topic 创建 | 交易部 | 交易通知生产资源集",
+      "tech_params": "实例ID：MQ_INST_demo；Topic：TRADE_NOTICE_PROD；消息类型：普通消息；分区数：8；消费者组：GID_TRADE_NOTICE；消息保留：72小时。",
+      "ops_detail": "创建前确认命名和权限审批，完成后发送测试消息并验证生产、消费、堆积和监控状态。"
+    },
+    "polardb-maintenance-plan": {
+      "label": "PolarDB",
+      "background": "数据分析平台 PolarDB 集群存储使用率接近阈值，需要扩容存储空间。",
+      "maintenance_type": "数据库变更",
+      "instances": "数据分析 PolarDB 存储扩容 | 数据管理部 | 数据分析生产资源集",
+      "tech_params": "集群ID：pc-demo001；数据库引擎：MySQL 8.0；当前存储：1TB；目标存储：2TB；节点：1主2只读；备份策略保持不变。",
+      "ops_detail": "扩容前确认集群健康、备份和复制延迟，扩容后核对容量、节点状态、连接和关键查询。"
+    },
+    "k8s-worker-maintenance": {
+      "label": "K8s",
+      "background": "容器平台 worker 节点需要维护性重启，以处理操作系统补丁生效问题。",
+      "maintenance_type": "日常维护（原硬件设备）",
+      "instances": "生产 K8s 集群 worker-03 维护性重启 | 云平台运维处 | 容器平台生产资源集",
+      "tech_params": "集群：k8s-prod-01；节点：worker-03；节点IP：10.10.3.23；驱逐方式：kubectl drain；不可驱逐Pod：需人工确认；恢复方式：kubectl uncordon。",
+      "ops_detail": "重启前检查副本和PDB，先排空节点；重启后验证节点Ready、Pod回迁、网络和存储插件状态。"
+    },
+    "database-maintenance-plan": {
+      "label": "数据库",
+      "background": "业务系统新增应用节点，需要调整数据库访问白名单并验证连接。",
+      "maintenance_type": "数据库变更",
+      "instances": "业务数据库白名单调整 | 数字化工作部 | 业务系统生产资源集",
+      "tech_params": "数据库类型：MySQL；实例ID：db-demo001；新增白名单：10.20.8.31/32、10.20.8.32/32；端口：3306；原白名单保持不变。",
+      "ops_detail": "变更前导出原白名单，完成后验证新节点连接且非授权地址仍被拒绝；异常时恢复原配置。"
+    },
+    "component-scaling-plan": {
+      "label": "组件扩缩容",
+      "background": "报表服务访问量增长，需要将应用组件由 2 个副本扩容至 4 个副本。",
+      "maintenance_type": "组件扩缩容",
+      "instances": "报表服务组件扩容 | 数据管理部 | 报表平台生产资源集",
+      "tech_params": "应用：report-service；当前副本：2；目标副本：4；单副本规格：2核4GB；健康检查：/actuator/health；扩容策略：逐个拉起。",
+      "ops_detail": "扩容前记录负载和副本状态，扩容后验证全部副本健康、注册中心状态、负载分配和业务访问。"
+    },
+    "restart-maintenance-plan": {
+      "label": "重启",
+      "background": "接口服务节点运行时间较长，需要执行分批维护性重启以释放系统资源。",
+      "maintenance_type": "日常维护（原硬件设备）",
+      "instances": "接口服务节点分批重启 | 数字化工作部 | 接口平台生产资源集",
+      "tech_params": "节点：api-01、api-02；地址：10.30.1.11、10.30.1.12；重启顺序：先api-01后api-02；每批数量：1；观察时间：10分钟。",
+      "ops_detail": "逐台摘流、重启、验证并恢复流量，上一台验证通过后才能处理下一台，禁止同时重启。"
+    },
+    "generic-maintenance-plan": {
+      "label": "通用检修",
+      "background": "业务系统需要新增安全组入方向规则，以允许指定应用节点访问服务端口。",
+      "maintenance_type": "配置变更",
+      "instances": "业务系统安全组规则调整 | 数字化工作部 | 业务系统生产资源集",
+      "tech_params": "安全组：sg-demo001；方向：入方向；协议：TCP；端口：8443；授权对象：10.40.2.0/24；优先级：10；描述：业务应用访问。",
+      "ops_detail": "变更前导出原规则，完成后验证授权网段连通和非授权网段隔离，异常时删除新增规则。"
+    },
+    "maintenance-plan-composer": {
+      "label": "方案编排",
+      "background": "业务系统需要完成一项标准配置变更，并生成包含风险、实施、验证和回滚闭环的检修方案。",
+      "maintenance_type": "配置变更",
+      "instances": "业务系统标准配置变更 | 数字化工作部 | 业务系统生产资源集",
+      "tech_params": "变更对象：config-demo；当前值：old-value；目标值：new-value；生效方式：保存后即时生效。",
+      "ops_detail": "变更前导出原配置并截图，变更后验证目标值和业务状态，异常时恢复原配置。"
+    }
+  }
+}

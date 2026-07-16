@@ -66,25 +66,6 @@ const iteratorStateFields = [
   { key: 'ops_detail', label: '补充要求/操作约束', type: 'textarea' },
 ];
 
-const iteratorSampleState = {
-  background: '内网总部 ESB 组件因业务扩容需要新增 ECS 云服务器实例，项目组已提报问题工单，需通过本次检修完成资源创建和配置确认。',
-  maintenance_type: '配置变更',
-  network: '内网',
-  location: '国网亦庄数据中心二期运维专区',
-  instances: '内网总部 ESB 组件创建 ECS 实例 | 数字化工作部 | 总部ESB组件系统资源集',
-  schedule_year: '2026年',
-  schedule_start: '2026年5月25日 18:00',
-  schedule_end: '2026年5月25日 20:00',
-  provider: '张三',
-  executor: '李四',
-  reviewer: '王五',
-  security_officer: '赵六',
-  ascm_account: 'ascm_demo',
-  bastion_account: 'bastion_demo',
-  tech_params: '云环境：内网；实例名称：总部ESB-业务扩容-01、总部ESB-业务扩容-02；数量：2台；规格：4核16G；系统盘：100G；镜像：centos7.9-latest-v1；VPC：VPC10；交换机：总部ESB组件生产VSwitch；安全组：总部ESB组件系统生产安全组。',
-  ops_detail: '变更前后需截图留痕，创建完成后核对实例状态、规格、网络、安全组和资源集归属，不涉及业务重启。',
-};
-
 const evaluationDimensionLabels = {
   structure: '文档结构',
   risk: '风险评估',
@@ -696,7 +677,7 @@ async function rollbackSkillVersion(skillName) {
   const versionSelect = document.getElementById('skillVersionSelect');
   const status = document.getElementById('skillEditStatus');
   if (!versionSelect?.value) return;
-  if (!confirm('确认回退到选中的 Skill 历史版本？当前内容会先自动保存为快照。')) return;
+  if (!confirm('确认回退到选中的 Skill 历史版本？回退结果会作为新版本保存到远程版本库。')) return;
   try {
     const resp = await fetch(`/api/skills/${encodeURIComponent(skillName)}/rollback`, {
       method: 'POST',
@@ -1585,6 +1566,7 @@ async function initIteratorPage() {
   const modeEl = document.getElementById('iteratorMode');
   const resultsEl = document.getElementById('iteratorResults');
   if (!skillSelect || !runBtn) return;
+  let iteratorSamples = { defaults: {}, samples: {} };
 
   const syncIteratorState = () => {
     const state = updateIteratorStateJson(stateFieldsEl, stateInput);
@@ -1605,7 +1587,13 @@ async function initIteratorPage() {
     syncIteratorState();
   });
   fillSampleBtn?.addEventListener('click', () => {
-    fillIteratorState(stateFieldsEl, iteratorSampleState);
+    const sample = iteratorSamples.samples?.[skillSelect.value];
+    if (!sample) {
+      statusEl.textContent = '当前 Skill 暂无示例参数';
+      return;
+    }
+    const { label: _label, ...sampleState } = sample;
+    fillIteratorState(stateFieldsEl, { ...iteratorSamples.defaults, ...sampleState });
     syncIteratorState();
   });
 
@@ -1653,6 +1641,21 @@ async function initIteratorPage() {
   } catch (err) {
     statusEl.textContent = 'Skill 加载失败：' + err.message;
   }
+  try {
+    const response = await fetch('/data/iterator-samples.json', { cache: 'no-store' });
+    iteratorSamples = await response.json();
+    if (!response.ok) throw new Error('示例参数加载失败');
+  } catch (err) {
+    statusEl.textContent = err.message;
+  }
+  const updateSampleButton = () => {
+    if (!fillSampleBtn) return;
+    const sample = iteratorSamples.samples?.[skillSelect.value];
+    fillSampleBtn.textContent = sample?.label ? `填入 ${sample.label} 示例` : '当前 Skill 暂无示例';
+    fillSampleBtn.disabled = !sample;
+  };
+  skillSelect.addEventListener('change', updateSampleButton);
+  updateSampleButton();
   try {
     const response = await fetch('/api/quality-references/status');
     const status = await response.json();
@@ -1908,7 +1911,7 @@ function renderIteratorResult(container, payload) {
 
 async function applyIteratorDraft(container, skillName, content) {
   if (!skillName || !content) return;
-  if (!confirm('确定将候选内容应用到当前 Skill 吗？系统会先创建可回退快照。')) return;
+  if (!confirm('确定将候选内容应用到当前 Skill 吗？上一版本会保留在远程版本库中。')) return;
   const section = container.querySelector('.iterator-draft-section');
   try {
     const resp = await fetch(`/api/skills/${encodeURIComponent(skillName)}/apply`, {
@@ -1924,7 +1927,7 @@ async function applyIteratorDraft(container, skillName, content) {
     if (section) {
       section.innerHTML = `
         <h4>Skill 候选更新</h4>
-        <p>候选更新已应用，上一版本已保存为可回退快照。</p>
+        <p>候选更新已应用，上一版本已保留在远程版本库中。</p>
         <p class="status-text">当前版本：${escapeHtml(data.skill?.version ? `v${data.skill.version}` : '未标版本')}</p>
       `;
     }

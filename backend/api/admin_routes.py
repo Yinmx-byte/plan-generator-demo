@@ -23,6 +23,7 @@ from services.quality_reference_store import (
     derive_query_metadata,
     get_quality_reference_store,
 )
+from services.remote_skill_store import get_remote_skill_store
 
 router = APIRouter()
 
@@ -75,8 +76,6 @@ SKILL_DISPLAY_NAMES = {
     "generic-maintenance-plan": "通用兜底检修",
     "docx-document-editor": "DOCX 文档修订",
 }
-
-SKILL_VERSIONS_ROOT = ROOT / "skill_versions"
 
 INTERNAL_SKILL_NAMES = {
     "cloud-maintenance-master-workflow",
@@ -185,48 +184,6 @@ def validate_skill_markdown(content: str) -> str:
     return content + "\n"
 
 
-def skill_version_dir(skill_name: str) -> Path:
-    return SKILL_VERSIONS_ROOT / safe_skill_dir_name(skill_name)
-
-
-def snapshot_skill(skill, reason: str = "snapshot") -> dict:
-    content = read_skill_markdown(skill)
-    version_dir = skill_version_dir(skill.name)
-    version_dir.mkdir(parents=True, exist_ok=True)
-    version_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
-    md_path = version_dir / f"{version_id}.md"
-    meta_path = version_dir / f"{version_id}.json"
-    md_path.write_text(content, encoding="utf-8")
-    meta = {
-        "version_id": version_id,
-        "skill_name": skill.name,
-        "display_name": skill_payload(skill)["display_name"],
-        "skill_version": str(skill.metadata.get("version") or ""),
-        "reason": reason,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-        "path": str(md_path),
-    }
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    return meta
-
-
-def list_skill_version_snapshots(skill_name: str) -> list[dict]:
-    version_dir = skill_version_dir(skill_name)
-    if not version_dir.exists():
-        return []
-    snapshots: list[dict] = []
-    for meta_path in sorted(version_dir.glob("*.json"), reverse=True):
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            continue
-        md_path = version_dir / f"{meta_path.stem}.md"
-        if md_path.exists():
-            meta["path"] = str(md_path)
-            snapshots.append(meta)
-    return snapshots
-
-
 def make_unified_diff(old: str, new: str, fromfile: str = "current/SKILL.md", tofile: str = "candidate/SKILL.md") -> str:
     return "".join(
         difflib.unified_diff(
@@ -303,6 +260,25 @@ def build_iterator_skill_draft(skill, current_content: str, result: dict) -> dic
     }
 
 
+async def write_and_publish_skill(skill, content: str, reason: str):
+    current = read_skill_markdown(skill)
+    skill_file = skill_markdown_path(skill)
+    skill_file.write_text(content, encoding="utf-8")
+    await reset_skill_runtime()
+    updated = get_skill_or_404(skill.name)
+    try:
+        remote_version = await run_blocking(
+            get_remote_skill_store().publish_directory,
+            updated.path,
+            reason=reason,
+        )
+    except Exception as exc:
+        skill_file.write_text(current, encoding="utf-8")
+        await reset_skill_runtime()
+        raise HTTPException(status_code=500, detail=f"远程 Skill 保存失败：{exc}") from exc
+    return updated, remote_version
+
+
 @router.post("/api/skills/upload")
 async def upload_skill(
     file: UploadFile = File(...),
@@ -358,8 +334,27 @@ async def upload_skill(
         (target_dir / "SKILL.md").write_text(text, encoding="utf-8")
 
     await reset_skill_runtime()
+    uploaded_skill = next(
+        (
+            item
+            for item in get_skill_registry().skills
+            if item.path.resolve() == target_dir.resolve()
+        ),
+        None,
+    )
+    if uploaded_skill is None:
+        raise HTTPException(status_code=500, detail="上传后未能加载 Skill")
+    try:
+        remote_version = await run_blocking(
+            get_remote_skill_store().publish_directory,
+            uploaded_skill.path,
+            reason="upload",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Skill 已写入缓存，但远程保存失败：{exc}") from exc
     return {
         "status": "ok",
+        "remote_version": remote_version,
         "skills": [skill_payload(skill) for skill in get_skill_registry().skills],
     }
 
@@ -385,25 +380,18 @@ async def get_skill_detail(skill_name: str):
 async def update_skill_detail(skill_name: str, request: SkillUpdateRequest):
     skill = get_skill_or_404(skill_name)
     content = validate_skill_markdown(request.content)
-    snapshot = snapshot_skill(skill, request.reason or "manual-save")
-    if not content:
-        raise HTTPException(status_code=400, detail="Skill 内容不能为空")
-    if len(content) > 200_000:
-        raise HTTPException(status_code=400, detail="Skill 内容过大")
-    if "name:" not in content and "# " not in content:
-        raise HTTPException(status_code=400, detail="请保存有效的 SKILL.md 内容")
-    skill_file = skill_markdown_path(skill)
-    ensure_within_directory(SKILLS_ROOT, skill_file)
-    skill_file.write_text(content, encoding="utf-8")
-    await reset_skill_runtime()
-    updated = get_skill_or_404(skill_name)
+    updated, remote_version = await write_and_publish_skill(
+        skill,
+        content,
+        request.reason or "manual-save",
+    )
     return {
         "status": "ok",
         "name": updated.name,
         "display_name": skill_payload(updated)["display_name"],
         "description": updated.description,
         "version": str(updated.metadata.get("version") or ""),
-        "snapshot": snapshot,
+        "remote_version": remote_version,
         "path": str(updated.path),
     }
 
@@ -411,10 +399,22 @@ async def update_skill_detail(skill_name: str, request: SkillUpdateRequest):
 @router.get("/api/skills/{skill_name}/versions")
 async def list_skill_versions(skill_name: str):
     get_skill_or_404(skill_name)
+    try:
+        versions = await run_blocking(get_remote_skill_store().list_versions, skill_name)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"读取远程 Skill 版本失败：{exc}") from exc
     return {
         "skill_name": skill_name,
-        "versions": list_skill_version_snapshots(skill_name),
+        "versions": versions,
     }
+
+
+@router.get("/api/skill-storage/status")
+async def get_skill_storage_status():
+    try:
+        return await run_blocking(get_remote_skill_store().status)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"远程 Skill 存储不可用：{exc}") from exc
 
 
 @router.post("/api/skills/{skill_name}/draft")
@@ -437,14 +437,15 @@ async def apply_skill_draft(skill_name: str, request: SkillDraftRequest):
     skill = get_skill_or_404(skill_name)
     current = read_skill_markdown(skill)
     candidate = validate_skill_markdown(request.content)
-    snapshot = snapshot_skill(skill, request.reason or "apply-draft")
-    skill_markdown_path(skill).write_text(candidate, encoding="utf-8")
-    await reset_skill_runtime()
-    updated = get_skill_or_404(skill_name)
+    updated, remote_version = await write_and_publish_skill(
+        skill,
+        candidate,
+        request.reason or "apply-draft",
+    )
     return {
         "status": "ok",
         "skill": skill_payload(updated),
-        "snapshot": snapshot,
+        "remote_version": remote_version,
         "diff": make_unified_diff(current, candidate),
     }
 
@@ -452,21 +453,43 @@ async def apply_skill_draft(skill_name: str, request: SkillDraftRequest):
 @router.post("/api/skills/{skill_name}/rollback")
 async def rollback_skill_version(skill_name: str, request: SkillRollbackRequest):
     skill = get_skill_or_404(skill_name)
-    version_dir = skill_version_dir(skill.name)
-    version_file = version_dir / f"{safe_skill_dir_name(request.version_id)}.md"
-    ensure_within_directory(version_dir, version_file)
-    if not version_file.exists():
-        raise HTTPException(status_code=404, detail="Skill version snapshot not found")
-    restored = validate_skill_markdown(version_file.read_text(encoding="utf-8"))
-    snapshot = snapshot_skill(skill, f"rollback-before-{request.version_id}")
-    skill_markdown_path(skill).write_text(restored, encoding="utf-8")
-    await reset_skill_runtime()
-    updated = get_skill_or_404(skill_name)
+    backup_root = Path(tempfile.mkdtemp(prefix="skill-rollback-backup-"))
+    backup_dir = backup_root / skill.path.name
+    shutil.copytree(skill.path, backup_dir)
+    try:
+        await run_blocking(
+            get_remote_skill_store().restore_version,
+            skill.name,
+            request.version_id,
+            skill.path,
+        )
+        await reset_skill_runtime()
+        updated = get_skill_or_404(skill_name)
+        remote_version = await run_blocking(
+            get_remote_skill_store().publish_directory,
+            updated.path,
+            reason=f"rollback-to-{request.version_id}",
+            source_version_id=request.version_id,
+        )
+    except FileNotFoundError as exc:
+        if skill.path.exists():
+            shutil.rmtree(skill.path)
+        shutil.copytree(backup_dir, skill.path)
+        await reset_skill_runtime()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        if skill.path.exists():
+            shutil.rmtree(skill.path)
+        shutil.copytree(backup_dir, skill.path)
+        await reset_skill_runtime()
+        raise HTTPException(status_code=500, detail=f"Skill 回退失败：{exc}") from exc
+    finally:
+        shutil.rmtree(backup_root, ignore_errors=True)
     return {
         "status": "ok",
         "skill": skill_payload(updated),
         "restored_version_id": request.version_id,
-        "snapshot": snapshot,
+        "remote_version": remote_version,
     }
 
 
@@ -476,6 +499,10 @@ async def delete_skill(skill_name: str):
     ensure_within_directory(SKILLS_ROOT, skill.path)
     if skill.path == SKILLS_ROOT:
         raise HTTPException(status_code=400, detail="不能删除 Skill 根目录")
+    try:
+        await run_blocking(get_remote_skill_store().deactivate_skill, skill.name)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"远程 Skill 删除失败：{exc}") from exc
     shutil.rmtree(skill.path)
     await reset_skill_runtime()
     return {
@@ -779,9 +806,9 @@ async def retrieve_bailian(query: str = Query(default="", description="检索问
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-async def run_blocking(func, *args):
+async def run_blocking(func, *args, **kwargs):
     import asyncio
 
-    return await asyncio.to_thread(func, *args)
+    return await asyncio.to_thread(func, *args, **kwargs)
 
 
