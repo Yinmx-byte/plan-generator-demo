@@ -137,7 +137,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - **方案生成服务**：`services/plan_generation.py` 将写文档能力封装为 `compose_plan_json`、`validate_plan_json`、`render_docx` 三步；其中 `compose_plan_json` 内部仍使用专用 Plan ReActAgent，方便加载 Skill 和调用渲染检查工具。
 - **Word 渲染**：`scripts/generate_plan.py` 将已验证的内容 JSON 与通用格式契约合成为 `.docx`；默认格式位于 `skills/maintenance-plan-composer/references/document-style.json`，所有检修类型共用，渲染工具也支持显式传入 `style_contract`。
 - **远程知识库管理**：前端知识库页可上传/查看/删除百炼文档；上传或删除后会自动提交重建索引任务。
-- **方案归档**：`services/remote_plan_archive.py` 以 RDS 保存归档元数据、版本和审计记录，以 OSS 保存 DOCX、方案快照和版本差异。下载生成方案时会自动归档，归档文件可通过 `/api/archive/files/{record_id}/download` 下载。
+- **方案归档**：`services/remote_plan_archive.py` 以 RDS 保存归档元数据、版本和审计记录，以 OSS 保存 DOCX、方案快照和版本差异。只有主对话生成的正式方案在下载时自动归档；质量迭代、开发快测等候选文档不会进入归档。归档文件可通过 `/api/archive/files/{record_id}/download` 下载。
 
 ## Master Agent 工具组配置
 
@@ -172,7 +172,7 @@ ALLOW_FALLBACK_PLAN=true
 - `POST /api/agent/stream`：`/api/chat/stream` 的等价调试别名，便于单独观察 planner 链路。
 - `POST /api/chat/reset`：重置会话。
 - `GET /api/download/{file_id}`：下载生成的 Word 文档。
-- `POST /api/dev/plan-test`：开发快测入口，用需求文本或 state 快速生成 DOCX。
+- `POST /api/dev/plan-test`：开发与质量迭代快测入口，用需求文本或 state 快速生成候选 DOCX；该入口生成的文档不会进入正式方案归档。
 - `GET /api/cloud/inventory`：通过配置化工具层只读查询 ECS/VPC/VSwitch/实例归属等资源清单。
 - `GET /api/cloud/metrics`：通过配置化指标 key 查询 ECS CPU、内存、磁盘、网络等 CloudMonitor 指标。
 - `GET /api/cloud/resource-products`：通过 Resource Center 统计当前账号或指定资源组可访问资源涉及的产品类别。

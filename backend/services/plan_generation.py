@@ -30,6 +30,7 @@ from services.json_utils import extract_json, get_response_text
 _generated_files: dict[str, Path] = {}
 _generated_documents: dict[str, dict[str, Any]] = {}
 _generated_states: dict[str, dict[str, Any]] = {}
+_generated_origins: dict[str, str] = {}
 DEFAULT_DEPARTMENT = "云运营中心平台运维处"
 
 
@@ -172,6 +173,15 @@ def get_generated_document(file_id: str | None) -> Optional[dict[str, Any]]:
 def get_generated_state(file_id: str | None) -> Optional[dict[str, Any]]:
     state = _generated_states.get(file_id or "")
     return deepcopy(state) if state else None
+
+
+def get_generated_origin(file_id: str | None) -> str:
+    return _generated_origins.get(file_id or "", "unspecified")
+
+
+def is_archive_eligible(file_id: str | None) -> bool:
+    """Only plans produced by the main conversation enter formal archives."""
+    return get_generated_origin(file_id) == "main_chat"
 
 
 def update_generated_document(file_id: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -841,6 +851,7 @@ async def generate_docx_from_state(
     trace_callback=None,
     edit_instruction: str = "",
     previous_document_text: str = "",
+    document_origin: str = "unspecified",
 ) -> tuple[str, Path, str]:
     if orchestration is None:
         orchestration = await build_generation_orchestration_context(state)
@@ -852,7 +863,7 @@ async def generate_docx_from_state(
         previous_document_text=previous_document_text,
     )
     data = validate_plan_json(data, state, orchestration)
-    return render_docx(data, state)
+    return render_docx(data, state, document_origin=document_origin)
 
 
 async def compose_plan_json(
@@ -1021,7 +1032,12 @@ def validate_plan_json(
     return data
 
 
-def render_docx(data: dict[str, Any], state: Optional[dict[str, Any]] = None) -> tuple[str, Path, str]:
+def render_docx(
+    data: dict[str, Any],
+    state: Optional[dict[str, Any]] = None,
+    *,
+    document_origin: str = "unspecified",
+) -> tuple[str, Path, str]:
     """Render validated plan JSON into a Word document and register download."""
     data = normalize_document_metadata(deepcopy(data))
     doc = build_document(data)
@@ -1035,6 +1051,7 @@ def render_docx(data: dict[str, Any], state: Optional[dict[str, Any]] = None) ->
     doc.save(str(output_path))
     _generated_files[file_id] = output_path
     _generated_documents[file_id] = deepcopy(data)
+    _generated_origins[file_id] = document_origin.strip() or "unspecified"
     if state:
         _generated_states[file_id] = deepcopy(state)
 
@@ -1053,6 +1070,7 @@ def render_docx(data: dict[str, Any], state: Optional[dict[str, Any]] = None) ->
                 _generated_files.pop(old_id, None)
                 _generated_documents.pop(old_id, None)
                 _generated_states.pop(old_id, None)
+                _generated_origins.pop(old_id, None)
 
     return file_id, output_path, filename
 

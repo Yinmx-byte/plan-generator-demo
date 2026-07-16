@@ -51,7 +51,9 @@ from services.plan_generation import (
     generate_docx_from_state,
     get_generated_document,
     get_generated_file,
+    get_generated_origin,
     get_generated_state,
+    is_archive_eligible,
     render_docx,
     stamp_agent_change_summary,
     update_generated_document,
@@ -273,6 +275,7 @@ async def dev_plan_test(request: PlanTestRequest):
     file_id, output_path, filename = await generate_docx_from_state(
         state,
         orchestration=orchestration,
+        document_origin="quality_iterator",
     )
     stamp_agent_change_summary(file_id, extracted.get("assistant_note", ""))
     return {
@@ -548,22 +551,25 @@ async def download_generated(file_id: str):
     path = get_generated_file(file_id)
     if path is None:
         raise HTTPException(status_code=404, detail="文件不存在或已过期")
-    # Archive side-effect: save DOCX + snapshot + update Excel on download.
-    try:
-        from services.plan_archive import get_archive_store
-        store = get_archive_store()
-        # Primary: state persisted alongside the generated document.
-        session_state = get_generated_state(file_id)
-        # Fallback: locate session that holds this file_id.
-        if session_state is None:
-            for _sid, session in _chat_sessions.items():
-                gen = session.get("generated")
-                if gen and gen.get("file_id") == file_id:
-                    session_state = session.get("state")
-                    break
-        store.archive(file_id, path, state=session_state)
-    except Exception as exc:
-        print(f"[Archive] 归档失败 (file_id={file_id}): {exc}")
+    if is_archive_eligible(file_id):
+        try:
+            from services.plan_archive import get_archive_store
+            store = get_archive_store()
+            session_state = get_generated_state(file_id)
+            if session_state is None:
+                for _sid, session in _chat_sessions.items():
+                    gen = session.get("generated")
+                    if gen and gen.get("file_id") == file_id:
+                        session_state = session.get("state")
+                        break
+            store.archive(file_id, path, state=session_state)
+        except Exception as exc:
+            print(f"[Archive] 归档失败 (file_id={file_id}): {exc}")
+    else:
+        print(
+            f"[Archive] 跳过非主对话文档 "
+            f"(file_id={file_id}, origin={get_generated_origin(file_id)})"
+        )
     return FileResponse(
         path=str(path),
         filename=path.name,
@@ -595,7 +601,11 @@ async def render_generated_document(file_id: str):
     # personnel / schedule changes are captured for archive diff.
     doc_state = extract_state_from_document(data)
     merged_state = {**parent_state, **doc_state}
-    new_file_id, _path, filename = render_docx(data, state=merged_state)
+    new_file_id, _path, filename = render_docx(
+        data,
+        state=merged_state,
+        document_origin=get_generated_origin(file_id),
+    )
     return {
         "status": "generated",
         "file_id": new_file_id,

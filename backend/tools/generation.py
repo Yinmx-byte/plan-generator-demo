@@ -84,6 +84,7 @@ def build_generate_maintenance_plan_tool(
             state,
             orchestration=orchestration,
             edit_instruction=edit_instruction,
+            document_origin="main_chat",
         )
         generated = {
             "file_id": file_id,
