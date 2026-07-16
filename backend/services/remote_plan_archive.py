@@ -337,8 +337,8 @@ class RemoteArchiveStore:
                 clauses.append(f" AND {column} {operator} %s")
                 params.append(value)
         if filters.get("system_name"):
-            clauses.append(" AND system_name LIKE %s")
-            params.append(f"%{filters['system_name']}%")
+            clauses.append(" AND REPLACE(system_name, ' ', '') LIKE %s")
+            params.append(f"%{filters['system_name'].replace(' ', '')}%")
         if filters.get("person"):
             clauses.append(" AND (provider LIKE %s OR executor LIKE %s OR reviewer LIKE %s OR security_officer LIKE %s)")
             params.extend([f"%{filters['person']}%"] * 4)
