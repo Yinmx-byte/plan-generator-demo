@@ -38,6 +38,11 @@ MASTER_TOOL_GROUPS: dict[str, dict[str, Any]] = {
             "product counts. Never perform cloud mutations."
         ),
     },
+    "history": {
+        "description": "Historical maintenance record lookup and report generation.",
+        "active": False,
+        "notes": "Use to query past maintenance records for similar systems/actions and generate a brief analysis report.",
+    },
 }
 
 DEFAULT_MASTER_TOOL_GROUPS = tuple(MASTER_TOOL_GROUPS.keys())

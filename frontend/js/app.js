@@ -426,6 +426,13 @@ function classifyTraceMessage(text) {
       tone: 'intent',
     };
   }
+  if (/lookup_maintenance_history/.test(toolName)) {
+    return {
+      stage: '历史查询',
+      detail: toolMatch ? `${toolMatch[1]} · ${toolName}` : firstLine,
+      tone: 'context',
+    };
+  }
   if (/list_registered_skills|retrieve_knowledge|prepare_plan_context/.test(toolName)) {
     return {
       stage: '依据准备',
