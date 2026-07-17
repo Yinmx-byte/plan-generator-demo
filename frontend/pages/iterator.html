@@ -6,7 +6,6 @@
         <h3>Skill 质量迭代</h3>
         <p>先生成候选文档，再从结构、风险、操作、回滚与格式维度评估，并给出可审阅的 Skill 优化建议。</p>
       </div>
-      <span class="iterator-step-mark">01 配置评估</span>
     </div>
 
     <div class="iterator-setup-grid">
@@ -14,23 +13,15 @@
         <span class="field-label">待评估 Skill</span>
         <select id="iteratorSkillSelect"></select>
       </label>
-      <div class="iterator-setup-field">
-        <span class="field-label">高质量参考方案</span>
-        <div class="iterator-reference-source">
-          <strong id="iteratorReferenceStatus">正在读取远程参考库...</strong>
-          <small>系统按产品、动作和网络环境自动匹配。</small>
+      <div class="iterator-parameter-bar">
+        <div>
+          <span class="field-label">结构化测试参数</span>
+          <strong id="iteratorStateSummary">尚未填写参数</strong>
         </div>
+        <button id="openIteratorStateBtn" type="button">填写参数</button>
       </div>
     </div>
-
-    <div class="iterator-parameter-bar">
-      <div>
-        <span class="field-label">结构化测试参数</span>
-        <p>通过表单填写本次测试所需的检修场景、人员、环境和技术参数。</p>
-        <strong id="iteratorStateSummary">尚未填写参数</strong>
-      </div>
-      <button id="openIteratorStateBtn" type="button">填写参数</button>
-    </div>
+    <span class="visually-hidden" id="iteratorReferenceStatus">正在读取远程参考库...</span>
     <textarea class="visually-hidden" id="iteratorStateJson" spellcheck="false" readonly tabindex="-1" aria-hidden="true"></textarea>
 
     <label class="check-option">

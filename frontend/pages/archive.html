@@ -1,4 +1,4 @@
-<section class="tool-page">
+<section class="tool-page archive-page">
   <div class="tool-main">
     <div class="panel-head">
       <div>
@@ -12,7 +12,8 @@
     </div>
 
     <div class="archive-body">
-      <div class="filter-bar" id="archiveFilterBar">
+      <div class="filter-bar archive-filter-bar" id="archiveFilterBar">
+        <div class="archive-filter-fields">
       <input id="archiveFilterSystem" type="text" placeholder="系统名称">
       <input id="archiveFilterPerson" type="text" placeholder="人员">
       <select id="archiveFilterProduct">
@@ -48,12 +49,16 @@
       </select>
       <input id="archiveFilterStartDate" type="date" placeholder="开始日期">
       <input id="archiveFilterEndDate" type="date" placeholder="结束日期">
-      <button id="archiveFilterBtn" type="button">筛选</button>
-      <button id="archiveFilterResetBtn" type="button" class="ghost">重置</button>
-      <label class="check-option" style="margin-left:4px;">
-        <input type="checkbox" id="archiveLatestOnlyCb">
-        仅显示最新版本
-      </label>
+        </div>
+        <div class="archive-filter-actions">
+          <label class="check-option archive-latest-option">
+            <input type="checkbox" id="archiveLatestOnlyCb">
+            <span>仅显示最新版本</span>
+          </label>
+          <button id="archiveFilterBtn" type="button">筛选</button>
+          <button id="archiveFilterResetBtn" type="button" class="ghost">重置</button>
+          <button id="archiveCleanupOpenBtn" type="button" class="ghost">数据清理</button>
+        </div>
     </div>
 
     <div class="archive-table-wrap">
@@ -79,12 +84,16 @@
     </div>
   </div>
 
-  <div class="tool-card collapsible" id="archiveCleanupPanel">
-    <h3 class="collapse-header" id="archiveCleanupToggle" role="button" tabindex="0">
-      数据清理
-      <span class="collapse-arrow">&#9660;</span>
-    </h3>
-    <div class="collapse-body" id="archiveCleanupBody">
+  <dialog class="modal archive-cleanup-dialog" id="archiveCleanupDialog">
+    <div class="modal-card archive-cleanup-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Archive Cleanup</p>
+          <h3>数据清理</h3>
+          <p>仅删除归档文件，数据库记录与汇总表保留。</p>
+        </div>
+        <button class="ghost" id="archiveCleanupCloseBtn" type="button">关闭</button>
+      </div>
       <div class="cleanup-controls">
         <label for="archiveCleanupStart">开始日期</label>
         <input id="archiveCleanupStart" type="date">
@@ -101,7 +110,7 @@
       </div>
       <p class="hint">清理操作仅删除物理文件，Excel 和数据库记录保留。操作不可恢复，请谨慎执行。</p>
     </div>
-  </div>
+  </dialog>
 </section>
 
 <dialog class="modal modal-wide" id="archiveSeriesDialog">

@@ -2124,9 +2124,9 @@ function initArchivePage() {
   const diffDialog = document.getElementById('archiveDiffDialog');
   const diffCloseBtn = document.getElementById('archiveDiffCloseBtn');
   const latestOnlyCb = document.getElementById('archiveLatestOnlyCb');
-  const cleanupToggle = document.getElementById('archiveCleanupToggle');
-  const cleanupBody = document.getElementById('archiveCleanupBody');
-  const cleanupPanel = document.getElementById('archiveCleanupPanel');
+  const cleanupDialog = document.getElementById('archiveCleanupDialog');
+  const cleanupOpenBtn = document.getElementById('archiveCleanupOpenBtn');
+  const cleanupCloseBtn = document.getElementById('archiveCleanupCloseBtn');
   const cleanupScopeBtn = document.getElementById('archiveCleanupScopeBtn');
   const cleanupOldBtn = document.getElementById('archiveCleanupOldBtn');
   const cleanupAllBtn = document.getElementById('archiveCleanupAllBtn');
@@ -2265,12 +2265,11 @@ function initArchivePage() {
   // ── latest_only toggle ──────────────────────────────────────────
   latestOnlyCb?.addEventListener('change', () => loadSummary());
 
-  // ── cleanup panel ───────────────────────────────────────────────
-  cleanupToggle?.addEventListener('click', () => {
-    cleanupPanel?.classList.toggle('open');
+  cleanupOpenBtn?.addEventListener('click', () => {
+    if (cleanupResult) cleanupResult.style.display = 'none';
+    cleanupDialog?.showModal();
   });
-  // Start collapsed.
-  cleanupPanel?.classList.remove('open');
+  cleanupCloseBtn?.addEventListener('click', () => cleanupDialog?.close());
 
   async function loadCleanupScope() {
     const start = cleanupStart?.value || '';

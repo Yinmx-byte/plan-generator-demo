@@ -633,6 +633,7 @@ button.document-open-btn {
   font-size: 13px;
   user-select: none;
 }
+.check-option[hidden] { display: none !important; }
 .check-option input { width: 16px; height: 16px; margin: 0; }
 
 .tool-page,
@@ -642,6 +643,9 @@ button.document-open-btn {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 14px;
+}
+.archive-page {
+  grid-template-columns: minmax(0, 1fr);
 }
 .tool-main {
   min-height: 0;
@@ -954,22 +958,12 @@ button.ghost {
 .iterator-intro p {
   max-width: 780px;
 }
-.iterator-step-mark {
-  flex: 0 0 auto;
-  padding: 7px 10px;
-  border: 1px solid #c7d9e8;
-  border-radius: 999px;
-  background: #f3f8fc;
-  color: var(--blue-dark);
-  font-size: 12px;
-  font-weight: 800;
-}
 .iterator-setup-grid {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.28fr);
   gap: 12px;
-  align-items: stretch;
+  align-items: end;
 }
 .iterator-setup-grid label,
 .iterator-setup-field {
@@ -999,30 +993,26 @@ button.ghost {
   color: var(--muted);
 }
 .iterator-parameter-bar {
-  grid-column: 1 / -1;
   display: flex;
   width: 100%;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  min-height: 82px;
-  padding: 12px 16px;
+  gap: 12px;
+  min-height: 58px;
+  padding: 7px 10px 7px 12px;
   border: 1px solid #cfdae5;
   border-radius: 8px;
-  background: linear-gradient(135deg, #f7fafc 0%, #eef5fb 100%);
-}
-.iterator-parameter-bar p {
-  margin: 3px 0 5px;
-  color: var(--muted);
-  font-size: 12px;
+  background: #f5f8fb;
 }
 .iterator-parameter-bar strong {
+  display: block;
+  margin-top: 4px;
   color: var(--blue-dark);
   font-size: 13px;
 }
 .iterator-parameter-bar button {
   flex: 0 0 auto;
-  min-width: 118px;
+  min-width: 108px;
   min-height: 38px;
 }
 .iterator-control > .check-option {
@@ -1801,26 +1791,39 @@ button.danger:hover {
 
 /* ── Archive page ────────────────────────────────────────────────── */
 .filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 2px 6px;
-  flex-wrap: wrap;
-  padding: 4px 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 12px;
   background: #f5f6f8;
   border: 1px solid var(--line);
   border-radius: 6px;
+}
+.archive-filter-fields {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+.archive-filter-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .archive-body {
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
 }
-.filter-bar input,
+.filter-bar input:not([type="checkbox"]),
 .filter-bar select {
-  height: 30px;
-  min-width: 90px;
-  max-width: 150px;
-  padding: 2px 8px;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 34px;
+  padding: 4px 8px;
   font-size: 12px;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -1828,14 +1831,24 @@ button.danger:hover {
   background: #fff;
 }
 .filter-bar input[type="date"] {
-  min-width: 115px;
   font-size: 11px;
 }
 .filter-bar button {
-  height: 30px;
+  height: 34px;
   padding: 0 14px;
   font-size: 12px;
   white-space: nowrap;
+}
+.archive-latest-option {
+  min-height: 34px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+.archive-latest-option input {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--blue);
 }
 .archive-table-wrap {
   width: 100%;
@@ -1992,7 +2005,13 @@ button.danger:disabled {
 }
 
 @media (max-width: 1280px) {
-  .iterator-setup-grid { grid-template-columns: minmax(0, 1fr) minmax(240px, 0.8fr); }
+  .iterator-setup-grid { grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1.25fr); }
+}
+.archive-cleanup-dialog {
+  width: min(680px, calc(100vw - 32px));
+}
+.archive-cleanup-card {
+  gap: 14px;
 }
 
 @media (max-width: 980px) {
@@ -2037,6 +2056,7 @@ button.danger:disabled {
     grid-template-columns: 1fr;
   }
   .iterator-setup-grid { grid-template-columns: 1fr; }
+  .archive-filter-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .iterator-control { grid-template-columns: 1fr; }
   .iterator-control > .check-option,
   .iterator-actions { grid-column: 1; }
@@ -2073,6 +2093,15 @@ button.danger:disabled {
   .topbar-actions,
   .button-row,
   .composer-actions button {
+    width: 100%;
+  }
+  .archive-filter-fields { grid-template-columns: 1fr; }
+  .archive-filter-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .archive-filter-actions button,
+  .archive-latest-option {
     width: 100%;
   }
   .knowledge-statusbar {
