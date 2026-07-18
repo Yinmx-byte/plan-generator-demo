@@ -350,6 +350,10 @@ class RemoteArchiveStore:
                 cursor.execute("SELECT 1 FROM maintenance_plan_archive_log WHERE file_id = %s LIMIT 1", [file_id])
                 return cursor.fetchone() is not None
 
+    def is_archived(self, file_id: str) -> bool:
+        """Return whether a generated document has entered the formal archive."""
+        return bool(file_id) and self._already_archived(file_id)
+
     def _match_series(self, title: str, system_name: str, action: str, product_type: str, schedule_start: str = "") -> tuple[str, int, Optional[str]]:
         target_date = _maintenance_date({"schedule_start": schedule_start})
         with self._connection() as conn:

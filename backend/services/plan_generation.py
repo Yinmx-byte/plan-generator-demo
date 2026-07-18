@@ -31,6 +31,7 @@ _generated_files: dict[str, Path] = {}
 _generated_documents: dict[str, dict[str, Any]] = {}
 _generated_states: dict[str, dict[str, Any]] = {}
 _generated_origins: dict[str, str] = {}
+_generated_parent_ids: dict[str, str] = {}
 DEFAULT_DEPARTMENT = "云运营中心平台运维处"
 
 
@@ -177,6 +178,11 @@ def get_generated_state(file_id: str | None) -> Optional[dict[str, Any]]:
 
 def get_generated_origin(file_id: str | None) -> str:
     return _generated_origins.get(file_id or "", "unspecified")
+
+
+def get_generated_parent_id(file_id: str | None) -> str:
+    """Return the document that this rendered revision was based on."""
+    return _generated_parent_ids.get(file_id or "", "")
 
 
 def is_archive_eligible(file_id: str | None) -> bool:
@@ -1037,6 +1043,7 @@ def render_docx(
     state: Optional[dict[str, Any]] = None,
     *,
     document_origin: str = "unspecified",
+    parent_file_id: str = "",
 ) -> tuple[str, Path, str]:
     """Render validated plan JSON into a Word document and register download."""
     data = normalize_document_metadata(deepcopy(data))
@@ -1052,6 +1059,8 @@ def render_docx(
     _generated_files[file_id] = output_path
     _generated_documents[file_id] = deepcopy(data)
     _generated_origins[file_id] = document_origin.strip() or "unspecified"
+    if parent_file_id:
+        _generated_parent_ids[file_id] = parent_file_id
     if state:
         _generated_states[file_id] = deepcopy(state)
 
@@ -1071,6 +1080,7 @@ def render_docx(
                 _generated_documents.pop(old_id, None)
                 _generated_states.pop(old_id, None)
                 _generated_origins.pop(old_id, None)
+                _generated_parent_ids.pop(old_id, None)
 
     return file_id, output_path, filename
 

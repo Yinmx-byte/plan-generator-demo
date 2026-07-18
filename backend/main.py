@@ -15,7 +15,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -52,6 +52,7 @@ from services.plan_generation import (
     get_generated_document,
     get_generated_file,
     get_generated_origin,
+    get_generated_parent_id,
     get_generated_state,
     is_archive_eligible,
     render_docx,
@@ -546,8 +547,20 @@ async def reset_chat(request: ChatResetRequest):
     return {"status": "ok"}
 
 
+def has_archived_parent(file_id: str, store: Any) -> bool:
+    """Edited copies of a formal plan remain formal versions on download."""
+    parent_id = get_generated_parent_id(file_id)
+    seen: set[str] = set()
+    while parent_id and parent_id not in seen:
+        if store.is_archived(parent_id):
+            return True
+        seen.add(parent_id)
+        parent_id = get_generated_parent_id(parent_id)
+    return False
+
+
 @app.get("/api/download/{file_id}")
-async def download_generated(file_id: str):
+async def download_generated(file_id: str, archive: bool = Query(False)):
     path = get_generated_file(file_id)
     if path is None:
         raise HTTPException(status_code=404, detail="文件不存在或已过期")
@@ -555,14 +568,18 @@ async def download_generated(file_id: str):
         try:
             from services.plan_archive import get_archive_store
             store = get_archive_store()
-            session_state = get_generated_state(file_id)
-            if session_state is None:
-                for _sid, session in _chat_sessions.items():
-                    gen = session.get("generated")
-                    if gen and gen.get("file_id") == file_id:
-                        session_state = session.get("state")
-                        break
-            store.archive(file_id, path, state=session_state)
+            archive_required = archive or has_archived_parent(file_id, store)
+            if not archive_required:
+                print(f"[Archive] Skip download without formal archive request (file_id={file_id})")
+            else:
+                session_state = get_generated_state(file_id)
+                if session_state is None:
+                    for _sid, session in _chat_sessions.items():
+                        gen = session.get("generated")
+                        if gen and gen.get("file_id") == file_id:
+                            session_state = session.get("state")
+                            break
+                store.archive(file_id, path, state=session_state)
         except Exception as exc:
             print(f"[Archive] 归档失败 (file_id={file_id}): {exc}")
     else:
@@ -605,6 +622,7 @@ async def render_generated_document(file_id: str):
         data,
         state=merged_state,
         document_origin=get_generated_origin(file_id),
+        parent_file_id=file_id,
     )
     return {
         "status": "generated",

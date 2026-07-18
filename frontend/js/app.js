@@ -31,6 +31,7 @@ let currentPage = 'plan';
 let messagesEl = null;
 let pageAgentMessagesEl = null;
 let showToolTrace = Boolean(planSessionState.showToolTrace);
+let archiveOnDownload = Boolean(planSessionState.archiveOnDownload);
 let currentDocumentFileId = planSessionState.fileId || null;
 let currentDocumentDownloadUrl = planSessionState.downloadUrl || '';
 let currentDocumentFilename = planSessionState.filename || '';
@@ -109,6 +110,7 @@ function persistPlanState() {
     sessionId,
     messagesHtml: messagesEl?.innerHTML || planSessionState.messagesHtml || '',
     showToolTrace,
+    archiveOnDownload,
     fileId: currentDocumentFileId,
     downloadUrl: currentDocumentDownloadUrl,
     filename: currentDocumentFilename,
@@ -125,6 +127,25 @@ function bindStoredDocumentActions(container = messagesEl) {
         button.dataset.filename || currentDocumentFilename,
       );
     });
+  });
+  container?.querySelectorAll('.download[data-download-url]').forEach((link) => {
+    link.addEventListener('click', () => {
+      link.href = buildDownloadUrl(link.dataset.downloadUrl || '');
+    });
+  });
+}
+
+function buildDownloadUrl(url) {
+  if (!url) return '#';
+  const target = new URL(url, window.location.origin);
+  if (archiveOnDownload) target.searchParams.set('archive', 'true');
+  else target.searchParams.delete('archive');
+  return `${target.pathname}${target.search}${target.hash}`;
+}
+
+function refreshDownloadLinks() {
+  document.querySelectorAll('.download[data-download-url]').forEach((link) => {
+    link.href = buildDownloadUrl(link.dataset.downloadUrl || '');
   });
 }
 
@@ -777,13 +798,18 @@ function setDocumentDownload(url, filename) {
   if (!documentDownloadLink) return;
   if (!url) {
     documentDownloadLink.href = '#';
+    delete documentDownloadLink.dataset.downloadUrl;
     documentDownloadLink.classList.add('disabled');
     documentDownloadLink.setAttribute('aria-disabled', 'true');
     documentDownloadLink.textContent = '下载 DOCX';
     persistPlanState();
     return;
   }
-  documentDownloadLink.href = url;
+  documentDownloadLink.dataset.downloadUrl = url;
+  documentDownloadLink.href = buildDownloadUrl(url);
+  documentDownloadLink.onclick = () => {
+    documentDownloadLink.href = buildDownloadUrl(url);
+  };
   documentDownloadLink.classList.remove('disabled');
   documentDownloadLink.removeAttribute('aria-disabled');
   documentDownloadLink.textContent = filename ? `下载 ${filename}` : '下载 DOCX';
@@ -1238,6 +1264,7 @@ function initPlanPage() {
   const inputEl = document.getElementById('messageInput');
   const sendBtn = document.getElementById('sendBtn');
   const executeValidationInput = document.getElementById('executeValidationInput');
+  const archiveOnDownloadInput = document.getElementById('archiveOnDownloadInput');
   const showToolTraceInput = document.getElementById('showToolTraceInput');
   documentJsonEditor = document.getElementById('documentJsonEditor');
   documentPreview = document.getElementById('documentPreview');
@@ -1262,6 +1289,14 @@ function initPlanPage() {
     showToolTraceInput.addEventListener('change', () => {
       showToolTrace = showToolTraceInput.checked;
       applyTraceVisibility(messagesEl);
+      persistPlanState();
+    });
+  }
+  if (archiveOnDownloadInput) {
+    archiveOnDownloadInput.checked = archiveOnDownload;
+    archiveOnDownloadInput.addEventListener('change', () => {
+      archiveOnDownload = archiveOnDownloadInput.checked;
+      refreshDownloadLinks();
       persistPlanState();
     });
   }
@@ -1379,7 +1414,7 @@ function initPlanPage() {
             data-file-id="${escapeHtml(currentDocumentFileId || '')}"
             data-download-url="${escapeHtml(currentDocumentDownloadUrl)}"
             data-filename="${escapeHtml(currentDocumentFilename)}">查看/编辑文档</button>
-          <a class="download" href="${escapeHtml(currentDocumentDownloadUrl)}">下载检修方案</a>
+          <a class="download" data-download-url="${escapeHtml(currentDocumentDownloadUrl)}" href="${escapeHtml(buildDownloadUrl(currentDocumentDownloadUrl))}">下载检修方案</a>
         `;
         msg.appendChild(wrap);
         bindStoredDocumentActions(wrap);
