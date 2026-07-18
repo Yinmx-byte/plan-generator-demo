@@ -3,7 +3,7 @@
 
 流程：用户输入 → Master ReActAgent 自主规划 → Skill/RAG 依据准备 → Word 文档
 
-Skill 装卸：RDS/OSS 保存远程版本，backend/.runtime_skills/ 提供 AgentScope 本地缓存。
+Skill 装卸：RDS/OSS 保存远程版本，项目根目录 .runtime_skills/ 提供 AgentScope 本地缓存。
 """
 
 import json

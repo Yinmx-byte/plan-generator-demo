@@ -21,7 +21,9 @@ from skills_runtime import SkillRegistry
 
 ROOT = Path(__file__).parent
 SKILLS_SEED_ROOT = ROOT / "skills"
-SKILLS_ROOT = Path(os.getenv("SKILLS_RUNTIME_ROOT", ROOT / ".runtime_skills"))
+# Downloaded Skill packages are a runtime cache.  Keep the default cache outside
+# ``backend`` so Uvicorn's ``--reload`` watcher does not restart on a sync.
+SKILLS_ROOT = Path(os.getenv("SKILLS_RUNTIME_ROOT", ROOT.parent / ".runtime_skills"))
 
 load_dotenv(ROOT / ".env", override=True)
 

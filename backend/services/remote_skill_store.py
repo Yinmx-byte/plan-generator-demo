@@ -236,19 +236,46 @@ class RemoteSkillStore:
                 published += 1
         active = {row["skill_name"]: row for row in self._list_active()}
 
+        active_names = set(active)
+        removed = 0
         for child in runtime_root.iterdir():
+            if child.name in active_names:
+                continue
             if child.is_dir():
                 shutil.rmtree(child)
             else:
                 child.unlink()
+            removed += 1
+
+        updated = 0
         for skill_name, record in active.items():
-            package = self._get_object(str(record["package_object_key"]))
             target = runtime_root / skill_name
-            _restore_skill_package(package, target)
+            expected_checksum = str(record.get("package_checksum") or "")
+            current_checksum = ""
+            if target.is_dir() and (target / "SKILL.md").is_file():
+                current_checksum = _skill_tree_checksum(target)
+            if expected_checksum and current_checksum == expected_checksum:
+                continue
+
+            # Stage the download before replacing a usable local cache.  This
+            # also avoids changing the target when a remote package is invalid.
+            package = self._get_object(str(record["package_object_key"]))
+            with tempfile.TemporaryDirectory(prefix="skill-sync-") as temp_name:
+                staged = Path(temp_name) / skill_name
+                _restore_skill_package(package, staged)
+                if target.exists():
+                    shutil.rmtree(target)
+                shutil.move(str(staged), str(target))
             tree_checksum = _skill_tree_checksum(target)
             if tree_checksum != record.get("package_checksum"):
                 self._update_package_checksum(int(record["id"]), tree_checksum)
-        return {"active": len(active), "published": published}
+            updated += 1
+        return {
+            "active": len(active),
+            "published": published,
+            "updated": updated,
+            "removed": removed,
+        }
 
     def status(self) -> dict[str, Any]:
         with self._connection() as conn:
