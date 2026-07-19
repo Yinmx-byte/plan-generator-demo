@@ -141,10 +141,10 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 ## Master Agent 工具组配置
 
-Master Agent 的工具实现位于 `backend/tools/`，由 `backend/tools/master_toolkit.py` 统一注册。默认注册 `context`、`planning`、`generation`、`document`、`cloud_query` 五个工具组；如需临时收窄工具面，可设置：
+Master Agent 的工具实现位于 `backend/tools/`，由 `backend/tools/master_toolkit.py` 统一注册。默认注册 `context`、`planning`、`generation`、`document`、`cloud_query`、`history` 六个工具组；如需临时收窄工具面，可设置：
 
 ```env
-MASTER_AGENT_TOOL_GROUPS=context,planning,generation,document,cloud_query
+MASTER_AGENT_TOOL_GROUPS=context,planning,generation,document,cloud_query,history
 ```
 
 设置为 `all` 或不配置时启用全部工具组，设置为 `none`、`off` 或 `disabled` 时不注册分组工具。工具执行逻辑保留在 Python 函数中，稳定规则和业务约束继续放在 Skill 中。
