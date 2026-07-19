@@ -460,6 +460,126 @@ def _disk_device_candidates(disks: list[dict[str, Any]]) -> list[str]:
     return list(dict.fromkeys(candidates))
 
 
+def describe_security_group_attribute(
+    *,
+    region_id: str,
+    security_group_id: str,
+    direction: str = "all",
+) -> dict[str, Any]:
+    from alibabacloud_ecs20140526 import models as ecs_models
+
+    request = ecs_models.DescribeSecurityGroupAttributeRequest(
+        region_id=region_id,
+        security_group_id=security_group_id,
+        direction=direction,
+    )
+    payload = _call_client(
+        _ecs_client(region_id),
+        ("describe_security_group_attribute", "describe_security_group_attribute_with_options"),
+        request,
+    )
+    perms_raw = payload.get("Permissions") or {}
+    permissions = _as_list(perms_raw, "Permission") if isinstance(perms_raw, dict) else []
+    return {
+        "security_group_id": payload.get("SecurityGroupId", security_group_id),
+        "security_group_name": payload.get("SecurityGroupName", ""),
+        "description": payload.get("Description", ""),
+        "vpc_id": payload.get("VpcId", ""),
+        "permissions": permissions,
+    }
+
+
+def describe_load_balancers(
+    *,
+    region_id: str,
+    vpc_id: str = "",
+    load_balancer_id: str = "",
+    page_size: int = 50,
+) -> list[dict[str, Any]]:
+    try:
+        from alibabacloud_slb20140515.client import Client as SLBClient
+        from alibabacloud_slb20140515 import models as slb_models
+    except ModuleNotFoundError as exc:
+        raise AliyunCloudSDKError(
+            "缺少 alibabacloud-slb20140515，请在 backend 环境执行 pip install -r requirements.txt"
+        ) from exc
+
+    client = SLBClient(_build_config(f"slb.{region_id}.aliyuncs.com", region_id))
+    request = slb_models.DescribeLoadBalancersRequest(
+        region_id=region_id,
+        vpc_id=vpc_id or None,
+        load_balancer_id=load_balancer_id or None,
+        page_number=1,
+        page_size=page_size,
+    )
+    payload = _call_client(
+        client,
+        ("describe_load_balancers", "describe_load_balancers_with_options"),
+        request,
+    )
+    lbs = payload.get("LoadBalancers") or {}
+    return _as_list(lbs, "LoadBalancer") if isinstance(lbs, dict) else []
+
+
+def describe_health_status(
+    *,
+    region_id: str,
+    load_balancer_id: str,
+) -> list[dict[str, Any]]:
+    try:
+        from alibabacloud_slb20140515.client import Client as SLBClient
+        from alibabacloud_slb20140515 import models as slb_models
+    except ModuleNotFoundError as exc:
+        raise AliyunCloudSDKError(
+            "缺少 alibabacloud-slb20140515，请在 backend 环境执行 pip install -r requirements.txt"
+        ) from exc
+
+    client = SLBClient(_build_config(f"slb.{region_id}.aliyuncs.com", region_id))
+    request = slb_models.DescribeHealthStatusRequest(
+        region_id=region_id,
+        load_balancer_id=load_balancer_id,
+    )
+    payload = _call_client(
+        client,
+        ("describe_health_status", "describe_health_status_with_options"),
+        request,
+    )
+    backends = payload.get("BackendServers") or {}
+    return _as_list(backends, "BackendServer") if isinstance(backends, dict) else []
+
+
+def describe_db_instances(
+    *,
+    region_id: str,
+    vpc_id: str = "",
+    db_instance_id: str = "",
+    page_size: int = 50,
+) -> list[dict[str, Any]]:
+    try:
+        from alibabacloud_rds20140815.client import Client as RDSClient
+        from alibabacloud_rds20140815 import models as rds_models
+    except ModuleNotFoundError as exc:
+        raise AliyunCloudSDKError(
+            "缺少 alibabacloud-rds20140815，请在 backend 环境执行 pip install -r requirements.txt"
+        ) from exc
+
+    client = RDSClient(_build_config(f"rds.{region_id}.aliyuncs.com", region_id))
+    request = rds_models.DescribeDBInstancesRequest(
+        region_id=region_id,
+        vpc_id=vpc_id or None,
+        db_instance_id=db_instance_id or None,
+        page_number=1,
+        page_size=page_size,
+    )
+    payload = _call_client(
+        client,
+        ("describe_db_instances", "describe_db_instances_with_options"),
+        request,
+    )
+    items = payload.get("Items") or {}
+    return _as_list(items, "DBInstance") if isinstance(items, dict) else []
+
+
 def describe_metric_list(
     *,
     region_id: str,

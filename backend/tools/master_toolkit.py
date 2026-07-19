@@ -24,6 +24,7 @@ from .generation import (
     build_prepare_plan_context_tool,
 )
 from .history import build_lookup_history_tool
+from .impact_verification import build_analyze_impact_tool
 from .planning import (
     build_check_missing_requirements_tool,
     build_update_requirements_tool,
@@ -109,6 +110,11 @@ def _build_tool_specs(session: dict[str, Any], runtime: Any) -> list[MasterToolS
             func=build_query_resource_group_products_tool(),
             group_name="cloud_query",
             func_name="query_resource_group_products",
+        ),
+        MasterToolSpec(
+            func=build_analyze_impact_tool(session),
+            group_name="cloud_query",
+            func_name="analyze_maintenance_impact",
         ),
     ]
 

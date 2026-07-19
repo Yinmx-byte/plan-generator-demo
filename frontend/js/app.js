@@ -454,6 +454,13 @@ function classifyTraceMessage(text) {
       tone: 'context',
     };
   }
+  if (/analyze_maintenance_impact/.test(toolName)) {
+    return {
+      stage: '影响分析',
+      detail: toolMatch ? `${toolMatch[1]} · ${toolName}` : firstLine,
+      tone: 'context',
+    };
+  }
   if (/list_registered_skills|retrieve_knowledge|prepare_plan_context/.test(toolName)) {
     return {
       stage: '依据准备',
