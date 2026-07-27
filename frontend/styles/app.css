@@ -273,6 +273,21 @@ body.sidebar-collapsed .nav {
   align-items: center;
   gap: 8px;
 }
+.topbar-feedback {
+  max-width: 0;
+  overflow: hidden;
+  color: #23624a;
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0;
+  white-space: nowrap;
+  transition: max-width 180ms ease, opacity 180ms ease;
+}
+.topbar-feedback.visible {
+  max-width: 180px;
+  opacity: 1;
+}
+.topbar-feedback[data-tone="error"] { color: var(--red); }
 .workspace.tool-workspace {
   grid-template-rows: minmax(0, 1fr);
   gap: 0;
@@ -549,6 +564,8 @@ body.sidebar-collapsed .nav {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.trace-without-stage summary { gap: 0; }
+.trace-without-stage .trace-detail { width: 100%; }
 .trace-intent .trace-stage { background: #e8ecff; color: #34428a; }
 .trace-context .trace-stage { background: #e9f5ef; color: #23624a; }
 .trace-generate .trace-stage { background: #fff0d3; color: #80520b; }

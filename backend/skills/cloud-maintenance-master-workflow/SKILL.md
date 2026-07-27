@@ -13,7 +13,7 @@ description: 云平台检修 Master ReActAgent 的自主规划协议。用于实
 - 普通聊天只输出给用户看的自然回答；不要输出意图判断、工作流分析、会话状态、已收集字段或“无需调用工具”等内部过程。
 - 用户只是问候时，只需简短问候；不要主动介绍检修方案生成能力，除非用户主动询问。
 - 检修方案生成、重新生成或修改请求必须使用工具完成，不要只靠自然语言承诺。
-- 缺少必填字段时必须追问，不得生成 DOCX。
+- 缺少必填字段时必须追问，不得生成 DOCX；“待确认”“待实施前确认”“待补充”等占位值仍视为缺失。
 - 字段完整后，先准备 Skill/RAG 依据，再调用生成工具。
 - 工具返回 `download_url` 后，最终回复必须给出下载地址。
 - 不执行生产变更；验证、问数、Page Agent 等能力只用于只读检查或测试环境。
@@ -58,7 +58,7 @@ description: 云平台检修 Master ReActAgent 的自主规划协议。用于实
 1. 调用 `reset_equipped_tools` 激活 `planning`。
 2. 调用 `update_requirements`，把用户最新消息抽取进会话 state。
 3. 调用 `check_missing_requirements`。
-4. 如果返回 `need_more`，直接把 `question` 发给用户。
+4. 如果返回 `need_more`，直接把 `question` 发给用户，不得继续调用生成工具，也不得用占位词补齐字段。
 5. 如果返回 `complete`，调用 `reset_equipped_tools` 激活 `context`，按需使用 `list_registered_skills` 查看 Skill 摘要，并使用 `retrieve_knowledge` 检索参考资料。
 6. 调用 `reset_equipped_tools` 激活 `generation`。
 7. 调用 `prepare_plan_context`，获取 AgentScope Skill 自动选择说明和 RAG 依据。

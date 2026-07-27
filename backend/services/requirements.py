@@ -21,6 +21,17 @@ REQUIRED_FIELDS = {
     "security_officer": "安全责任人",
     "ascm_account": "ASCM 授权账号",
     "bastion_account": "堡垒机账号",
+    "tech_params": "技术参数（目标对象、当前/目标配置及相关网络参数）",
+}
+
+PLACEHOLDER_VALUES = {
+    "待确认",
+    "待实施前确认",
+    "待补充",
+    "未提供",
+    "未知",
+    "tbd",
+    "todo",
 }
 
 FORM_FIELDS = [
@@ -76,16 +87,25 @@ def normalize_value(value: Any) -> str:
 def merge_updates(state: dict[str, str], updates: dict[str, Any]) -> None:
     for key in FORM_FIELDS:
         value = normalize_value(updates.get(key))
-        if value:
+        if value and not is_missing_value(value):
             state[key] = value
 
 
+def is_missing_value(value: Any) -> bool:
+    """Treat model-generated placeholders as missing requirement values."""
+    normalized = normalize_value(value)
+    if not normalized:
+        return True
+    compact = re.sub(r"[\s。；;，,：:]+", "", normalized).lower()
+    return compact in PLACEHOLDER_VALUES
+
+
 def find_missing_fields(state: dict[str, str]) -> list[str]:
-    return [key for key in REQUIRED_FIELDS if not state.get(key, "").strip()]
+    return [key for key in REQUIRED_FIELDS if is_missing_value(state.get(key, ""))]
 
 
 def build_missing_question(missing: list[str]) -> str:
-    labels = [REQUIRED_FIELDS[key] for key in missing[:4]]
+    labels = [REQUIRED_FIELDS[key] for key in missing]
     if not labels:
         return ""
     return "还需要补充：" + "、".join(labels) + "。请直接回复这些信息即可。"
@@ -217,6 +237,7 @@ async def extract_chat_updates(state: dict[str, str], user_message: str) -> dict
   "assistant_note": "对已收到信息的简短确认，不超过60字"
 }}
 
+只抽取用户明确提供的信息。用户没有提供的字段保持为空，不得填写“待确认”“待补充”“未知”或推测值。
 不要输出 markdown，不要解释。"""
     inferred_updates = infer_updates_from_text(user_message)
     try:

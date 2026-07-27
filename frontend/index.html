@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>云平台智能运维助手</title>
-<link rel="stylesheet" href="/styles/app.css?v=6">
+<link rel="stylesheet" href="/styles/app.css?v=7">
 </head>
 <body>
 <div class="shell">
@@ -40,6 +40,7 @@
         <h2 id="pageTitle">方案生成</h2>
       </div>
       <div class="topbar-actions">
+        <span class="topbar-feedback" id="topbarFeedback" role="status" aria-live="polite"></span>
         <button id="refreshAllBtn" type="button">刷新数据</button>
         <button id="resetBtn" type="button">新建对话</button>
       </div>
@@ -49,16 +50,6 @@
   </main>
 </div>
 
-<script>
-// Fallback handlers — guaranteed to run before the ES module loads.
-document.getElementById('resetBtn')?.addEventListener('click', function() {
-  sessionStorage.removeItem('planGeneratorTabState');
-  location.reload();
-});
-document.getElementById('refreshAllBtn')?.addEventListener('click', function() {
-  location.reload();
-});
-</script>
-<script type="module" src="/js/app.js?v=3"></script>
+<script type="module" src="/js/app.js?v=4"></script>
 </body>
 </html>

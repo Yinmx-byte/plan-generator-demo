@@ -5,8 +5,10 @@ const navItems = [...document.querySelectorAll('.nav-item')];
 const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
 const resetBtn = document.getElementById('resetBtn');
 const refreshAllBtn = document.getElementById('refreshAllBtn');
+const topbarFeedback = document.getElementById('topbarFeedback');
 const workspaceEl = document.querySelector('.workspace');
 const planSessionStorageKey = 'planGeneratorTabState';
+let topbarFeedbackTimer = null;
 
 const pageMeta = {
   plan: { title: '智能对话', eyebrow: 'Conversation' },
@@ -406,10 +408,14 @@ function addTraceMessage(container, text) {
   const details = document.createElement('details');
   details.className = `msg trace trace-collapsible trace-${meta.tone}`;
   const summary = document.createElement('summary');
-  summary.innerHTML = `
-    <span class="trace-stage">${escapeHtml(meta.stage)}</span>
-    <span class="trace-detail">${escapeHtml(meta.detail)}</span>
-  `;
+  const isPageAgentTrace = container === pageAgentMessagesEl;
+  if (isPageAgentTrace) details.classList.add('trace-without-stage');
+  summary.innerHTML = isPageAgentTrace
+    ? `<span class="trace-detail">${escapeHtml(meta.detail)}</span>`
+    : `
+      <span class="trace-stage">${escapeHtml(meta.stage)}</span>
+      <span class="trace-detail">${escapeHtml(meta.detail)}</span>
+    `;
   const pre = document.createElement('pre');
   pre.textContent = text;
   details.appendChild(summary);
@@ -515,8 +521,8 @@ function setSidebarCollapsed(collapsed) {
   localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
 }
 
-async function loadPage(page) {
-  if (currentPage === 'plan') persistPlanState();
+async function loadPage(page, { persistCurrent = true } = {}) {
+  if (persistCurrent && currentPage === 'plan') persistPlanState();
   // Close any open dialogs from the current page before switching.
   document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   currentPage = page;
@@ -541,6 +547,17 @@ async function loadPage(page) {
   } catch (err) {
     console.error(`初始化页面 ${page} 失败:`, err);
   }
+}
+
+function showTopbarFeedback(message, tone = 'success') {
+  if (!topbarFeedback) return;
+  if (topbarFeedbackTimer) window.clearTimeout(topbarFeedbackTimer);
+  topbarFeedback.textContent = message;
+  topbarFeedback.dataset.tone = tone;
+  topbarFeedback.classList.add('visible');
+  topbarFeedbackTimer = window.setTimeout(() => {
+    topbarFeedback.classList.remove('visible');
+  }, 2400);
 }
 
 function renderItemGrid(container, items, emptyText, render) {
@@ -2397,15 +2414,13 @@ async function resetChat() {
     currentDocumentData = null;
     planSessionState = {};
     sessionStorage.removeItem(planSessionStorageKey);
-    await loadPage('plan');
+    messagesEl = null;
+    await loadPage('plan', { persistCurrent: false });
+    showTopbarFeedback('已创建新对话');
   } finally {
     if (resetBtn) resetBtn.textContent = '新建对话';
   }
 }
-
-// Expose handlers globally for inline onclick fallback.
-window._appReset = resetChat;
-window._appRefresh = () => loadPage(currentPage);
 
 navItems.forEach((item) => {
   item.addEventListener('click', () => loadPage(item.dataset.page));
@@ -2418,8 +2433,14 @@ sidebarToggleBtn?.addEventListener('click', () => {
 if (resetBtn) resetBtn.addEventListener('click', resetChat);
 if (refreshAllBtn) refreshAllBtn.addEventListener('click', async () => {
   if (refreshAllBtn) refreshAllBtn.textContent = '刷新中...';
-  try { await loadPage(currentPage); }
-  finally { if (refreshAllBtn) refreshAllBtn.textContent = '刷新数据'; }
+  try {
+    await loadPage(currentPage);
+    showTopbarFeedback('当前页面已刷新');
+  } catch (err) {
+    showTopbarFeedback(`刷新失败：${err.message}`, 'error');
+  } finally {
+    if (refreshAllBtn) refreshAllBtn.textContent = '刷新数据';
+  }
 });
 
 setSidebarCollapsed(localStorage.getItem('sidebarCollapsed') === '1');
