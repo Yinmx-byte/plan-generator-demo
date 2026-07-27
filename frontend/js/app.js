@@ -4,7 +4,6 @@ const pageEyebrow = document.getElementById('pageEyebrow');
 const navItems = [...document.querySelectorAll('.nav-item')];
 const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
 const resetBtn = document.getElementById('resetBtn');
-const refreshAllBtn = document.getElementById('refreshAllBtn');
 const topbarFeedback = document.getElementById('topbarFeedback');
 const workspaceEl = document.querySelector('.workspace');
 const planSessionStorageKey = 'planGeneratorTabState';
@@ -560,6 +559,24 @@ function showTopbarFeedback(message, tone = 'success') {
   }, 2400);
 }
 
+async function runPageRefresh(button, loader) {
+  if (!button) return;
+  button.disabled = true;
+  button.textContent = '刷新中...';
+  let succeeded = false;
+  try {
+    succeeded = await loader();
+  } catch (_err) {
+    succeeded = false;
+  }
+  button.textContent = succeeded === false ? '刷新失败' : '已刷新';
+  window.setTimeout(() => {
+    if (!button.isConnected) return;
+    button.disabled = false;
+    button.textContent = '刷新数据';
+  }, 1200);
+}
+
 function renderItemGrid(container, items, emptyText, render) {
   container.innerHTML = '';
   if (!items.length) {
@@ -633,8 +650,10 @@ async function loadSkills() {
       item.querySelector('[data-action="delete"]').addEventListener('click', () => deleteSkill(skill.name, displayName));
       return item;
     });
+    return true;
   } catch (err) {
     listEl.innerHTML = `<div class="msg error">Skill 加载失败：${escapeHtml(err.message)}</div>`;
+    return false;
   }
 }
 
@@ -1469,6 +1488,7 @@ function initSkillsPage() {
   const uploadDialog = document.getElementById('skillUploadDialog');
   const editDialog = document.getElementById('skillEditDialog');
   const openUploadBtn = document.getElementById('openSkillUploadBtn');
+  const refreshSkillsBtn = document.getElementById('refreshSkillsBtn');
   const skillNameInput = document.getElementById('skillNameInput');
   const skillFileInput = document.getElementById('skillFileInput');
   const skillDropzone = document.getElementById('skillDropzone');
@@ -1477,6 +1497,7 @@ function initSkillsPage() {
   const skillEditStatus = document.getElementById('skillEditStatus');
   const saveSkillBtn = document.getElementById('saveSkillBtn');
   loadSkills();
+  refreshSkillsBtn?.addEventListener('click', () => runPageRefresh(refreshSkillsBtn, loadSkills));
   bindUploadDropzone(skillDropzone, skillFileInput, skillFileName);
   openUploadBtn.addEventListener('click', () => uploadDialog.showModal());
   uploadForm.addEventListener('submit', async (event) => {
@@ -2177,6 +2198,7 @@ function initArchivePage() {
   const tableBody = document.getElementById('archiveTableBody');
   const filterBtn = document.getElementById('archiveFilterBtn');
   const filterResetBtn = document.getElementById('archiveFilterResetBtn');
+  const refreshArchiveBtn = document.getElementById('refreshArchiveBtn');
   const downloadExcelBtn = document.getElementById('archiveDownloadExcelBtn');
   const seriesDialog = document.getElementById('archiveSeriesDialog');
   const seriesCloseBtn = document.getElementById('archiveSeriesCloseBtn');
@@ -2218,17 +2240,17 @@ function initArchivePage() {
       if (latestOnlyCb?.checked) filters.latest_only = 'true';
       const qs = buildQuery(filters);
       const resp = await fetch(`/api/archive/summary?${qs}`);
-      if (!resp.ok) return;
+      if (!resp.ok) return false;
       const data = await resp.json();
       const records = data.records || [];
       if (countEl) countEl.textContent = `${records.length} 条`;
-      if (!tableBody) return;
+      if (!tableBody) return true;
       tableBody.innerHTML = '';
       if (!records.length) {
         const tr = document.createElement('tr');
         tr.innerHTML = '<td colspan="11" style="text-align:center;color:#999;">暂无归档记录</td>';
         tableBody.appendChild(tr);
-        return;
+        return true;
       }
       records.forEach((r) => {
         const personnel = [r.provider, r.executor, r.reviewer, r.security_officer]
@@ -2253,8 +2275,10 @@ function initArchivePage() {
       tableBody.querySelectorAll('button[data-action="history"]').forEach((btn) => {
         btn.addEventListener('click', () => showSeriesHistory(btn.dataset.series));
       });
+      return true;
     } catch (_err) {
       // Silently ignore fetch errors on page init.
+      return false;
     }
   }
 
@@ -2303,6 +2327,7 @@ function initArchivePage() {
   }
 
   filterBtn?.addEventListener('click', loadSummary);
+  refreshArchiveBtn?.addEventListener('click', () => runPageRefresh(refreshArchiveBtn, loadSummary));
   filterResetBtn?.addEventListener('click', () => {
     ['archiveFilterSystem', 'archiveFilterPerson', 'archiveFilterStartDate', 'archiveFilterEndDate'].forEach((id) => {
       const el = document.getElementById(id);
@@ -2431,17 +2456,6 @@ sidebarToggleBtn?.addEventListener('click', () => {
 });
 
 if (resetBtn) resetBtn.addEventListener('click', resetChat);
-if (refreshAllBtn) refreshAllBtn.addEventListener('click', async () => {
-  if (refreshAllBtn) refreshAllBtn.textContent = '刷新中...';
-  try {
-    await loadPage(currentPage);
-    showTopbarFeedback('当前页面已刷新');
-  } catch (err) {
-    showTopbarFeedback(`刷新失败：${err.message}`, 'error');
-  } finally {
-    if (refreshAllBtn) refreshAllBtn.textContent = '刷新数据';
-  }
-});
 
 setSidebarCollapsed(localStorage.getItem('sidebarCollapsed') === '1');
 loadPage('plan');
