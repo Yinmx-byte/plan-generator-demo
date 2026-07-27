@@ -1799,11 +1799,52 @@ button.danger:hover {
   display: none;
 }
 .document-actions {
-  display: flex;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: flex-end;
+  gap: 16px;
+  padding-top: 2px;
+}
+.document-file-summary {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.document-file-summary span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.document-file-summary strong {
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.document-action-buttons {
+  display: grid;
+  grid-template-columns: 104px 142px 112px;
+  align-items: stretch;
   gap: 8px;
-  flex-wrap: wrap;
+}
+.document-action-buttons button,
+.document-action-buttons .download {
+  min-width: 0;
+  min-height: 38px;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  overflow: hidden;
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Archive page ────────────────────────────────────────────────── */
@@ -2088,6 +2129,13 @@ button.danger:disabled {
   .iterator-state-card { height: min(900px, calc(100vh - 28px)); }
   .document-preview {
     padding: 14px;
+  }
+  .document-actions {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .document-action-buttons {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .doc-page {
     padding: 34px 28px 44px;

@@ -43,6 +43,7 @@ let documentOutline = null;
 let documentStatus = null;
 let documentTitleEl = null;
 let documentDownloadLink = null;
+let documentFilenameEl = null;
 let documentEditStatus = null;
 let documentDialog = null;
 let documentEvalSkillSelect = null;
@@ -838,6 +839,11 @@ function setDocumentEditorState(status, message) {
 function setDocumentDownload(url, filename) {
   currentDocumentDownloadUrl = url || '';
   currentDocumentFilename = filename || '';
+  if (documentFilenameEl) {
+    const displayName = filename || '尚未生成可下载文档';
+    documentFilenameEl.textContent = displayName;
+    documentFilenameEl.title = filename || '';
+  }
   if (!documentDownloadLink) return;
   if (!url) {
     documentDownloadLink.href = '#';
@@ -845,6 +851,7 @@ function setDocumentDownload(url, filename) {
     documentDownloadLink.classList.add('disabled');
     documentDownloadLink.setAttribute('aria-disabled', 'true');
     documentDownloadLink.textContent = '下载 DOCX';
+    documentDownloadLink.title = '下载 DOCX';
     persistPlanState();
     return;
   }
@@ -855,7 +862,8 @@ function setDocumentDownload(url, filename) {
   };
   documentDownloadLink.classList.remove('disabled');
   documentDownloadLink.removeAttribute('aria-disabled');
-  documentDownloadLink.textContent = filename ? `下载 ${filename}` : '下载 DOCX';
+  documentDownloadLink.textContent = '下载 DOCX';
+  documentDownloadLink.title = filename ? `下载 ${filename}` : '下载 DOCX';
   persistPlanState();
 }
 
@@ -1315,6 +1323,7 @@ function initPlanPage() {
   documentStatus = document.getElementById('documentStatus');
   documentTitleEl = document.getElementById('documentTitle');
   documentDownloadLink = document.getElementById('documentDownloadLink');
+  documentFilenameEl = document.getElementById('documentFilename');
   documentEditStatus = document.getElementById('documentEditStatus');
   documentDialog = document.getElementById('documentDialog');
   documentEvalSkillSelect = document.getElementById('documentEvalSkillSelect');
@@ -1367,7 +1376,7 @@ function initPlanPage() {
       documentVisualDirty = false;
       documentJsonEditor.value = JSON.stringify(data, null, 2);
       renderDocumentPreview(data);
-      setDocumentEditorState('已格式化', 'JSON 已格式化，尚未保存。');
+      setDocumentEditorState('已格式化', 'JSON 已校验并整理，文档预览已刷新；尚未保存为 DOCX。');
     } catch (err) {
       setDocumentEditorState('JSON错误', err.message);
     }

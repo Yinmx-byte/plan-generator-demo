@@ -82,9 +82,15 @@
       </details>
 
       <div class="document-actions">
-        <button id="formatDocumentJsonBtn" type="button">格式化</button>
-        <button id="saveDocumentBtn" type="button">保存并重新渲染</button>
-        <a id="documentDownloadLink" class="download disabled" href="#" aria-disabled="true">下载 DOCX</a>
+        <div class="document-file-summary">
+          <span>当前文件</span>
+          <strong id="documentFilename">尚未生成可下载文档</strong>
+        </div>
+        <div class="document-action-buttons">
+          <button id="formatDocumentJsonBtn" type="button" title="校验并整理结构化 JSON，同时刷新文档预览；不会保存 DOCX">格式化 JSON</button>
+          <button id="saveDocumentBtn" type="button">保存并重新渲染</button>
+          <a id="documentDownloadLink" class="download disabled" href="#" aria-disabled="true">下载 DOCX</a>
+        </div>
       </div>
       <p class="status-text" id="documentEditStatus">未生成文档。</p>
     </form>
