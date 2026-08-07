@@ -23,7 +23,7 @@ from .generation import (
     build_generate_maintenance_plan_tool,
     build_prepare_plan_context_tool,
 )
-from .history import build_lookup_history_tool
+from .history import build_list_archive_inventory_tool, build_lookup_history_tool
 from .impact_verification import build_analyze_impact_tool
 from .planning import (
     build_check_missing_requirements_tool,
@@ -95,6 +95,11 @@ def _build_tool_specs(session: dict[str, Any], runtime: Any) -> list[MasterToolS
             func=build_lookup_history_tool(session),
             group_name="history",
             func_name="lookup_maintenance_history",
+        ),
+        MasterToolSpec(
+            func=build_list_archive_inventory_tool(),
+            group_name="history",
+            func_name="list_maintenance_archives",
         ),
         MasterToolSpec(
             func=build_query_cloud_inventory_tool(),

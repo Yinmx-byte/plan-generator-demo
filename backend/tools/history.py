@@ -290,6 +290,130 @@ def _fallback_report(scored: list[tuple[dict, int]], start_date: str = "", end_d
     return "\n".join(lines)
 
 
+def _archive_inventory_report(
+    records: list[dict],
+    *,
+    version_record_count: int,
+    current_plan_count: int,
+    include_versions: bool,
+    truncated: bool,
+) -> str:
+    """Render exact archive counts without asking a model to infer totals."""
+    mode_label = "全部版本" if include_versions else "每个方案的最新版本"
+    lines = [
+        "## 检修方案归档清单",
+        "",
+        (
+            f"归档库当前共有 **{version_record_count} 条版本记录**，"
+            f"对应 **{current_plan_count} 份当前有效方案**。"
+            f"下表按“{mode_label}”展示。"
+        ),
+        "",
+    ]
+    if not records:
+        lines.append("当前筛选条件下没有归档记录。")
+        return "\n".join(lines)
+
+    lines.extend(
+        [
+            "| # | 方案标题 | 产品 | 动作 | 版本 | 检修日期 | 归档日期 |",
+            "|---:|---|---|---|---:|---|---|",
+        ]
+    )
+    for index, record in enumerate(records, start=1):
+        lines.append(
+            "| {index} | {title} | {product} | {action} | v{version} | {schedule} | {archive} |".format(
+                index=index,
+                title=str(record.get("title") or "无标题").replace("|", "\\|"),
+                product=str(record.get("product_type") or "-"),
+                action=str(record.get("action") or "-"),
+                version=record.get("version") or 1,
+                schedule=str(record.get("schedule_start") or "-")[:10],
+                archive=str(record.get("archive_date") or "-"),
+            )
+        )
+    if truncated:
+        lines.extend(["", "仅展示前若干条；统计数字仍是符合筛选条件的完整结果。"])
+    return "\n".join(lines)
+
+
+def build_list_archive_inventory_tool() -> Callable[..., Any]:
+    def list_maintenance_archives(
+        product_type: str = "",
+        action: str = "",
+        system_name: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        include_versions: bool = False,
+        max_records: int = 20,
+    ) -> ToolResponse:
+        """List archived maintenance plans and return exact deterministic counts.
+
+        Use this tool for archive inventory questions such as how many plans exist,
+        which plans are archived, whether the list is complete, or requests to list
+        archived documents. Do not use it for finding similar reference plans; use
+        lookup_maintenance_history for that purpose.
+
+        Counts have two explicit meanings:
+        - version_record_count: every archived version, matching the archive page when
+          "仅显示最新版本" is not selected.
+        - current_plan_count: one latest version per plan series.
+
+        Args:
+            product_type: Optional exact cloud-product filter, such as ECS or RDS.
+            action: Optional maintenance-action filter.
+            system_name: Optional fuzzy system-name filter.
+            start_date: Optional archive-date start in YYYY-MM-DD format.
+            end_date: Optional archive-date end in YYYY-MM-DD format.
+            include_versions: True lists every version; False lists current plans only.
+            max_records: Maximum rows returned in the report (1-100). Counts are never truncated.
+        """
+        filters = {
+            key: value.strip()
+            for key, value in {
+                "product_type": product_type,
+                "action": action,
+                "system_name": system_name,
+                "start_date": start_date,
+                "end_date": end_date,
+            }.items()
+            if isinstance(value, str) and value.strip()
+        }
+        max_records = max(1, min(100, max_records))
+
+        try:
+            store = get_archive_store()
+            version_records = store.query_summary(filters, latest_only=False)
+            current_records = store.query_summary(filters, latest_only=True)
+        except Exception:
+            return json_tool_response({
+                "status": "archive_unavailable",
+                "message": "查询归档库失败，请检查数据库连接和归档存储配置。",
+            })
+
+        selected_records = version_records if include_versions else current_records
+        visible_records = selected_records[:max_records]
+        report = _archive_inventory_report(
+            visible_records,
+            version_record_count=len(version_records),
+            current_plan_count=len(current_records),
+            include_versions=include_versions,
+            truncated=len(selected_records) > len(visible_records),
+        )
+        return json_tool_response({
+            "status": "ok",
+            "version_record_count": len(version_records),
+            "current_plan_count": len(current_records),
+            "display_mode": "all_versions" if include_versions else "latest_versions",
+            "displayed_count": len(visible_records),
+            "filters_applied": filters,
+            "report": report,
+            "records": [_summarize_record(record, 0) for record in visible_records],
+        })
+
+    return list_maintenance_archives
+
+
 def build_lookup_history_tool(session: dict[str, Any]) -> Callable[..., Any]:
     async def lookup_maintenance_history(
         product_type: str = "",

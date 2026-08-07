@@ -39,9 +39,12 @@ MASTER_TOOL_GROUPS: dict[str, dict[str, Any]] = {
         ),
     },
     "history": {
-        "description": "Historical maintenance record lookup and report generation.",
+        "description": "Maintenance archive inventory and similar-record analysis.",
         "active": False,
-        "notes": "Use to query past maintenance records for similar systems/actions and generate a brief analysis report.",
+        "notes": (
+            "Use list_maintenance_archives for exact archive counts and lists. "
+            "Use lookup_maintenance_history only for similar-record analysis."
+        ),
     },
 }
 
