@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(BACKEND_ROOT / ".env", override=True)
+load_dotenv(BACKEND_ROOT / ".env", override=False)
 
 _initialized = False
 _status: dict[str, Any] = {

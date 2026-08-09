@@ -101,7 +101,30 @@ python quality_iterator/scripts/import_quality_references.py "D:\个人工作\20
 
 评估总分由确定性规则（40%）、同产品同动作优质文档对比（30%）和独立评估 Agent（30%）组成。产品 Skill 不参与定义自己的评分标准，只接收评估缺陷形成的候选修改。
 
-### 3. 启动服务
+### 3. 统一启动（推荐）
+
+在项目根目录选择启动目标：
+
+```powershell
+# 同时启动业务后端和 AgentScope Studio
+.\start.cmd all
+
+# 仅启动业务后端
+.\start.cmd backend
+
+# 仅启动 AgentScope Studio
+.\start.cmd studio
+```
+
+启动脚本会优先使用当前 Python 环境，并可从 Conda 环境清单自动定位 `plan-generator`。不带参数执行 `.\start.cmd` 时默认使用 `all`。需要自定义端口或关闭后端热重载时，直接调用 PowerShell 入口：
+
+```powershell
+.\start.ps1 -Target all -BackendPort 8000 -StudioPort 3000 -NoReload
+```
+
+`all` 模式会复用已在目标端口运行的 Studio，并在退出时清理本次命令启动的子进程。
+
+### 4. 手动启动后端
 
 ```bash
 cd backend
@@ -110,7 +133,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 访问 `http://localhost:8000`。
 
-### 4. 启动 AgentScope Studio（可选）
+### 5. 手动启动 AgentScope Studio（可选）
 
 Studio 是独立的开发观测页面，不会把底层 Prompt、模型调用和工具参数直接展示在业务前端。首次使用先安装：
 
@@ -121,8 +144,7 @@ npm install -g @agentscope/studio
 启动 Studio：
 
 ```powershell
-cd backend
-powershell -ExecutionPolicy Bypass -File scripts/start_agentscope_studio.ps1
+.\start.ps1 -Target studio
 ```
 
 浏览器访问 `http://127.0.0.1:3000`，再启动后端并发起一次对话。Studio 中可查看 Agent、LLM、工具、格式化器调用层级、耗时和异常。后端连接状态可通过 `GET /api/observability/status` 检查。若不需要追踪，将 `AGENTSCOPE_OBSERVABILITY_ENABLED=false` 即可，现有 SSE 流程不受影响。
