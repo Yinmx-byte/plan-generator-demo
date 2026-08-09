@@ -756,7 +756,7 @@ async def describe_bailian_file(file_id: str):
         return {
             "file": file_detail,
             "index_document": index_detail,
-            "message": "百炼接口不直接返回原始文档正文；如果文件提供解析结果下载地址，则这里会返回解析文本预览。",
+            "message": "百炼远程文件与当前索引状态。",
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

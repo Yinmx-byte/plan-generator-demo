@@ -199,7 +199,6 @@ def describe_file(file_id: str) -> dict[str, Any]:
     data = data_of(build_client().describe_file(workspace_id(), file_id, DescribeFileRequest()))
     if data is None:
         raise RuntimeError("未找到百炼远程文件")
-    parse_result_download_url = getattr(data, "parse_result_download_url", None)
     return {
         "file_id": getattr(data, "file_id", None),
         "file_name": getattr(data, "file_name", None),
@@ -210,29 +209,13 @@ def describe_file(file_id: str) -> dict[str, Any]:
         "category_id": getattr(data, "category_id", None),
         "create_time": getattr(data, "create_time", None),
         "tags": getattr(data, "tags", None) or [],
-        "parse_result_download_url": parse_result_download_url,
-        "content_preview": load_parse_result_preview(parse_result_download_url),
     }
-
-
-def load_parse_result_preview(url: str | None) -> str:
-    if not url:
-        return ""
-    try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        content_type = response.headers.get("content-type", "")
-        if "text" not in content_type and "json" not in content_type and "xml" not in content_type:
-            return ""
-        response.encoding = response.encoding or "utf-8"
-        return response.text[:20000]
-    except Exception:
-        return ""
 
 
 def get_index_file_detail(file_id: str, index_id: str | None = None) -> dict[str, Any] | None:
     client = build_client()
     page = 1
+    inspected = 0
     while True:
         response = client.list_index_file_details(
             workspace_id(),
@@ -244,6 +227,7 @@ def get_index_file_detail(file_id: str, index_id: str | None = None) -> dict[str
         )
         data = data_of(response)
         documents = getattr(data, "documents", None) or []
+        inspected += len(documents)
         for item in documents:
             if getattr(item, "id", None) == file_id:
                 return {
@@ -261,7 +245,7 @@ def get_index_file_detail(file_id: str, index_id: str | None = None) -> dict[str
                     "gmt_modified": item.gmt_modified,
                 }
         total = int(getattr(data, "total_count", 0) or 0)
-        if page * 100 >= total or not documents:
+        if inspected >= total or not documents:
             return None
         page += 1
 

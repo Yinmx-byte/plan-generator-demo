@@ -49,6 +49,8 @@ let documentDialog = null;
 let documentEvalSkillSelect = null;
 let documentEvaluationResult = null;
 let documentVisualDirty = false;
+let skillCatalog = [];
+let knowledgeCatalog = [];
 
 const iteratorStateFields = [
   { key: 'background', label: '检修背景/检修事项', type: 'textarea', required: true },
@@ -578,18 +580,6 @@ async function runPageRefresh(button, loader) {
   }, 1200);
 }
 
-function renderItemGrid(container, items, emptyText, render) {
-  container.innerHTML = '';
-  if (!items.length) {
-    const empty = document.createElement('div');
-    empty.className = 'item-card';
-    empty.innerHTML = `<div class="item-title">${emptyText}</div>`;
-    container.appendChild(empty);
-    return;
-  }
-  items.forEach((item) => container.appendChild(render(item)));
-}
-
 function bindUploadDropzone(dropzone, input, fileNameEl) {
   if (!dropzone || !input) return;
   const updateName = () => {
@@ -620,42 +610,67 @@ function bindUploadDropzone(dropzone, input, fileNameEl) {
 
 async function loadSkills() {
   const listEl = document.getElementById('skillList');
-  const countEl = document.getElementById('skillCount');
   if (!listEl) return;
   try {
     const resp = await fetch('/api/skills?scope=maintenance');
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || '加载失败');
-    const skills = data.skills || [];
-    if (countEl) countEl.textContent = `${skills.length} 个`;
-    renderItemGrid(listEl, skills, '暂无 Skill', (skill) => {
-      const item = document.createElement('div');
-      item.className = 'item-card';
-      const displayName = skill.display_name || skill.name;
-      const versionText = skill.version ? `v${skill.version}` : '未标版本';
-      item.innerHTML = `
-        <div>
-          <div class="item-title-row">
-            <div class="item-title">${escapeHtml(displayName)}</div>
-            <span class="status-pill skill-version-pill">${escapeHtml(versionText)}</span>
-          </div>
-          <div class="item-alias">${escapeHtml(skill.name)}</div>
-        </div>
-        <div class="item-meta">${escapeHtml(skill.description || '未填写描述')}</div>
-        <div class="card-actions">
-          <button class="icon-action" data-action="edit" type="button" title="编辑 SKILL.md" aria-label="编辑 ${escapeHtml(displayName)}">编辑</button>
-          <button class="icon-action danger" data-action="delete" type="button" title="删除 Skill" aria-label="删除 ${escapeHtml(displayName)}">删除</button>
-        </div>
-      `;
-      item.querySelector('[data-action="edit"]').addEventListener('click', () => openSkillEditor(skill.name));
-      item.querySelector('[data-action="delete"]').addEventListener('click', () => deleteSkill(skill.name, displayName));
-      return item;
-    });
+    skillCatalog = data.skills || [];
+    applySkillFilters();
     return true;
   } catch (err) {
-    listEl.innerHTML = `<div class="msg error">Skill 加载失败：${escapeHtml(err.message)}</div>`;
+    listEl.innerHTML = `<tr><td colspan="5"><div class="msg error">Skill 加载失败：${escapeHtml(err.message)}</div></td></tr>`;
     return false;
   }
+}
+
+function applySkillFilters() {
+  const nameQuery = document.getElementById('skillFilterName')?.value.trim().toLowerCase() || '';
+  const versionQuery = (document.getElementById('skillFilterVersion')?.value.trim().toLowerCase() || '').replace(/^v/, '');
+  const filtered = skillCatalog.filter((skill) => {
+    const names = `${skill.display_name || ''} ${skill.name || ''}`.toLowerCase();
+    const version = String(skill.version || '').toLowerCase().replace(/^v/, '');
+    return (!nameQuery || names.includes(nameQuery)) && (!versionQuery || version.includes(versionQuery));
+  });
+  renderSkillRows(filtered);
+}
+
+function renderSkillRows(skills) {
+  const listEl = document.getElementById('skillList');
+  const countEl = document.getElementById('skillCount');
+  if (!listEl) return;
+  if (countEl) {
+    countEl.textContent = skills.length === skillCatalog.length
+      ? `${skillCatalog.length} 个`
+      : `${skills.length} / ${skillCatalog.length} 个`;
+  }
+  if (!skills.length) {
+    listEl.innerHTML = '<tr><td colspan="5" class="empty-table-state">没有符合条件的检修方案 Skill。</td></tr>';
+    return;
+  }
+  listEl.innerHTML = skills.map((skill) => {
+    const displayName = skill.display_name || skill.name;
+    const versionText = skill.version ? `v${skill.version}` : '未标版本';
+    return `
+      <tr>
+        <td class="skill-name-cell"><strong>${escapeHtml(displayName)}</strong></td>
+        <td class="alias-cell">${escapeHtml(skill.name)}</td>
+        <td><span class="status-pill">${escapeHtml(versionText)}</span></td>
+        <td class="description-cell">${escapeHtml(skill.description || '未填写描述')}</td>
+        <td class="actions-cell">
+          <button class="icon-action" data-action="edit" data-skill-name="${escapeHtml(skill.name)}" type="button">编辑</button>
+          <button class="icon-action danger" data-action="delete" data-skill-name="${escapeHtml(skill.name)}" type="button">删除</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+  listEl.querySelectorAll('[data-action="edit"]').forEach((button) => {
+    button.addEventListener('click', () => openSkillEditor(button.dataset.skillName));
+  });
+  listEl.querySelectorAll('[data-action="delete"]').forEach((button) => {
+    const skill = skillCatalog.find((item) => item.name === button.dataset.skillName);
+    button.addEventListener('click', () => deleteSkill(button.dataset.skillName, skill?.display_name || button.dataset.skillName));
+  });
 }
 
 async function deleteSkill(skillName, displayName = skillName) {
@@ -778,50 +793,98 @@ async function loadKnowledge() {
     const filesData = await filesResp.json();
     if (!statusResp.ok) throw new Error(status.detail || '状态加载失败');
     if (!filesResp.ok) throw new Error(filesData.detail || '文件加载失败');
-    renderKnowledgeStatus(status, filesData.files || []);
-    renderRemoteFiles(listEl, filesData.files || []);
+    knowledgeCatalog = filesData.files || [];
+    renderKnowledgeStatus(status, knowledgeCatalog);
+    applyKnowledgeFilters();
+    return true;
   } catch (err) {
-    listEl.innerHTML = `<div class="msg error">远程知识库加载失败：${escapeHtml(err.message)}</div>`;
+    listEl.innerHTML = `<tr><td colspan="7"><div class="msg error">远程知识库加载失败：${escapeHtml(err.message)}</div></td></tr>`;
+    return false;
   }
 }
 
 function renderKnowledgeStatus(status, files) {
   const workspaceEl = document.getElementById('bailianWorkspace');
-  const countEl = document.getElementById('bailianFileCount');
   const docCountEl = document.getElementById('knowledgeDocCount');
   const ragEl = document.getElementById('bailianRagStatus');
   const categoryEl = document.getElementById('bailianCategory');
   if (workspaceEl) workspaceEl.textContent = status.workspace_id || '-';
-  if (countEl) countEl.textContent = `${files.length} 个`;
   if (docCountEl) docCountEl.textContent = `${files.length} 个`;
   if (ragEl) ragEl.textContent = status.rag_enabled ? '已启用' : '未启用';
   if (categoryEl) categoryEl.textContent = status.category_name || 'plan-generator-ecs';
 }
 
-function renderRemoteFiles(container, files) {
-  container.innerHTML = '';
+function applyKnowledgeFilters() {
+  const nameQuery = document.getElementById('knowledgeFilterName')?.value.trim().toLowerCase() || '';
+  const startDate = document.getElementById('knowledgeFilterStartDate')?.value || '';
+  const endDate = document.getElementById('knowledgeFilterEndDate')?.value || '';
+  const statusQuery = document.getElementById('knowledgeFilterStatus')?.value || '';
+  const filtered = knowledgeCatalog.filter((file) => {
+    const filename = String(file.file_name || '').toLowerCase();
+    const created = String(file.create_time || '').slice(0, 10);
+    const rawStatus = String(file.status || '').toUpperCase();
+    const statusMatches = !statusQuery
+      || rawStatus === statusQuery
+      || (statusQuery === 'PARSING' && ['PROCESSING', 'UPLOADING', 'PENDING'].includes(rawStatus));
+    return (!nameQuery || filename.includes(nameQuery))
+      && (!startDate || created >= startDate)
+      && (!endDate || created <= endDate)
+      && statusMatches;
+  });
+  renderKnowledgeRows(filtered);
+}
+
+function knowledgeStatusLabel(status) {
+  const value = String(status || '').toUpperCase();
+  return {
+    PARSE_SUCCESS: '解析成功',
+    PARSING: '解析中',
+    PROCESSING: '解析中',
+    UPLOADING: '上传中',
+    PENDING: '等待解析',
+    PARSE_FAILED: '解析失败',
+  }[value] || status || '-';
+}
+
+function knowledgeStatusTone(status) {
+  const value = String(status || '').toUpperCase();
+  if (value === 'PARSE_SUCCESS') return 'success';
+  if (value === 'PARSE_FAILED') return 'error';
+  return 'pending';
+}
+
+function renderKnowledgeRows(files) {
+  const container = document.getElementById('knowledgeList');
+  const countEl = document.getElementById('knowledgeDocCount');
+  if (!container) return;
+  if (countEl) {
+    countEl.textContent = files.length === knowledgeCatalog.length
+      ? `${knowledgeCatalog.length} 个`
+      : `${files.length} / ${knowledgeCatalog.length} 个`;
+  }
   if (!files.length) {
-    container.innerHTML = '<div class="item-card"><div class="item-title">远程类目中暂无文件</div></div>';
+    container.innerHTML = '<tr><td colspan="7" class="empty-table-state">没有符合条件的知识文档。</td></tr>';
     return;
   }
-  files.forEach((file) => {
-    const item = document.createElement('div');
-    item.className = 'remote-file-row';
-    item.innerHTML = `
-      <div>
-        <div class="item-title">${escapeHtml(file.file_name || file.file_id)}</div>
-        <div class="item-meta">
-          ${escapeHtml(file.status || '-')}&nbsp;&nbsp;${escapeHtml(file.file_type || '-')}&nbsp;&nbsp;${formatKb(file.size_in_bytes)}
-        </div>
-      </div>
-      <div class="card-actions">
+  container.innerHTML = files.map((file) => `
+    <tr>
+      <td class="filename-cell"><strong>${escapeHtml(file.file_name || file.file_id)}</strong></td>
+      <td>${escapeHtml(file.file_type || '-')}</td>
+      <td>${escapeHtml(formatKb(file.size_in_bytes))}</td>
+      <td><span class="parse-status parse-status-${knowledgeStatusTone(file.status)}">${escapeHtml(knowledgeStatusLabel(file.status))}</span></td>
+      <td>${escapeHtml(file.parser || '-')}</td>
+      <td>${escapeHtml(file.create_time || '-')}</td>
+      <td class="actions-cell">
         <button class="ghost" type="button" data-action="view" data-file-id="${escapeHtml(file.file_id)}">查看</button>
         <button class="danger ghost" type="button" data-action="delete" data-file-id="${escapeHtml(file.file_id)}">删除</button>
-      </div>
-    `;
-    item.querySelector('[data-action="view"]').addEventListener('click', () => openKnowledgeFile(file.file_id));
-    item.querySelector('[data-action="delete"]').addEventListener('click', () => deleteRemoteFile(file.file_id));
-    container.appendChild(item);
+      </td>
+    </tr>
+  `).join('');
+  container.querySelectorAll('[data-action="view"]').forEach((button) => {
+    button.addEventListener('click', () => openKnowledgeFile(button.dataset.fileId));
+  });
+  container.querySelectorAll('[data-action="delete"]').forEach((button) => {
+    button.addEventListener('click', () => deleteRemoteFile(button.dataset.fileId));
   });
 }
 
@@ -1268,14 +1331,12 @@ async function openKnowledgeFile(fileId) {
   const title = document.getElementById('knowledgeViewTitle');
   const meta = document.getElementById('knowledgeViewMeta');
   const detailEl = document.getElementById('knowledgeViewDetail');
-  const previewEl = document.getElementById('knowledgeContentPreview');
   const indexEl = document.getElementById('knowledgeIndexDetail');
   if (!dialog || !fileId) return;
   title.textContent = '查看知识文档';
   meta.textContent = fileId;
   detailEl.innerHTML = '<div class="item-card"><div class="item-title">正在读取百炼远程文件...</div></div>';
-  previewEl.textContent = '-';
-  indexEl.textContent = '-';
+  indexEl.innerHTML = '<div class="empty-table-state">正在读取索引信息...</div>';
   dialog.showModal();
   try {
     const resp = await fetch(`/api/bailian/files/${encodeURIComponent(fileId)}`);
@@ -1294,19 +1355,36 @@ async function openKnowledgeFile(fileId) {
       ['类目 ID', file.category_id],
       ['创建时间', file.create_time],
       ['标签', (file.tags || []).join('，')],
-      ['解析结果地址', file.parse_result_download_url],
     ].map(([label, value]) => `
       <div class="detail-item">
         <span>${escapeHtml(label)}</span>
         <strong>${escapeHtml(value || '-')}</strong>
       </div>
     `).join('');
-    previewEl.textContent = file.content_preview || '百炼当前未返回该文件的解析文本预览。';
-    indexEl.textContent = data.index_document
-      ? JSON.stringify(data.index_document, null, 2)
-      : '当前索引中未找到该文件，可能需要重建索引。';
+    const index = data.index_document;
+    if (!index) {
+      indexEl.innerHTML = '<div class="empty-table-state">当前索引中未找到该文件，可在文档变更后等待索引任务完成。</div>';
+    } else {
+      indexEl.innerHTML = [
+        ['索引状态', index.status],
+        ['索引文档名', index.name],
+        ['文档类型', index.document_type],
+        ['分块方式', index.chunk_mode],
+        ['分块大小', index.chunk_size],
+        ['分块重叠', index.overlap_size],
+        ['分隔符', index.separator],
+        ['更新时间', index.gmt_modified],
+        ['错误信息', index.error],
+      ].map(([label, value]) => `
+        <div class="detail-item">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value ?? '-')}</strong>
+        </div>
+      `).join('');
+    }
   } catch (err) {
     detailEl.innerHTML = `<div class="msg error">查看失败：${escapeHtml(err.message)}</div>`;
+    indexEl.innerHTML = '';
   }
 }
 
@@ -1505,10 +1583,23 @@ function initSkillsPage() {
   const skillEditor = document.getElementById('skillEditor');
   const skillEditStatus = document.getElementById('skillEditStatus');
   const saveSkillBtn = document.getElementById('saveSkillBtn');
+  const filterName = document.getElementById('skillFilterName');
+  const filterVersion = document.getElementById('skillFilterVersion');
+  const filterBtn = document.getElementById('skillFilterBtn');
+  const resetFilterBtn = document.getElementById('skillFilterResetBtn');
   loadSkills();
   refreshSkillsBtn?.addEventListener('click', () => runPageRefresh(refreshSkillsBtn, loadSkills));
+  filterBtn?.addEventListener('click', applySkillFilters);
+  resetFilterBtn?.addEventListener('click', () => {
+    filterName.value = '';
+    filterVersion.value = '';
+    applySkillFilters();
+  });
+  [filterName, filterVersion].forEach((input) => input?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') applySkillFilters();
+  }));
   bindUploadDropzone(skillDropzone, skillFileInput, skillFileName);
-  openUploadBtn.addEventListener('click', () => uploadDialog.showModal());
+  openUploadBtn?.addEventListener('click', () => uploadDialog.showModal());
   uploadForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (event.submitter?.value === 'cancel') {
@@ -1585,10 +1676,35 @@ function initKnowledgePage() {
   const retrieveQueryInput = document.getElementById('retrieveQueryInput');
   const runRetrieveBtn = document.getElementById('runRetrieveBtn');
   const retrieveResults = document.getElementById('retrieveResults');
+  const retrieveDialog = document.getElementById('knowledgeRetrieveDialog');
+  const openRetrieveBtn = document.getElementById('openRetrieveDialogBtn');
+  const closeRetrieveBtn = document.getElementById('closeRetrieveDialogBtn');
+  const filterName = document.getElementById('knowledgeFilterName');
+  const filterStart = document.getElementById('knowledgeFilterStartDate');
+  const filterEnd = document.getElementById('knowledgeFilterEndDate');
+  const filterStatus = document.getElementById('knowledgeFilterStatus');
+  const filterBtn = document.getElementById('knowledgeFilterBtn');
+  const resetFilterBtn = document.getElementById('knowledgeFilterResetBtn');
   loadKnowledge();
   bindUploadDropzone(knowledgeDropzone, fileInput, knowledgeFileName);
-  openUploadBtn.addEventListener('click', () => uploadDialog.showModal());
-  refreshBtn.addEventListener('click', loadKnowledge);
+  openUploadBtn?.addEventListener('click', () => uploadDialog.showModal());
+  refreshBtn?.addEventListener('click', () => runPageRefresh(refreshBtn, loadKnowledge));
+  filterBtn?.addEventListener('click', applyKnowledgeFilters);
+  resetFilterBtn?.addEventListener('click', () => {
+    filterName.value = '';
+    filterStart.value = '';
+    filterEnd.value = '';
+    filterStatus.value = '';
+    applyKnowledgeFilters();
+  });
+  filterName?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') applyKnowledgeFilters();
+  });
+  openRetrieveBtn?.addEventListener('click', () => {
+    retrieveDialog?.showModal();
+    window.setTimeout(() => retrieveQueryInput?.focus(), 0);
+  });
+  closeRetrieveBtn?.addEventListener('click', () => retrieveDialog?.close());
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
