@@ -110,6 +110,23 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 访问 `http://localhost:8000`。
 
+### 4. 启动 AgentScope Studio（可选）
+
+Studio 是独立的开发观测页面，不会把底层 Prompt、模型调用和工具参数直接展示在业务前端。首次使用先安装：
+
+```powershell
+npm install -g @agentscope/studio
+```
+
+启动 Studio：
+
+```powershell
+cd backend
+powershell -ExecutionPolicy Bypass -File scripts/start_agentscope_studio.ps1
+```
+
+浏览器访问 `http://127.0.0.1:3000`，再启动后端并发起一次对话。Studio 中可查看 Agent、LLM、工具、格式化器调用层级、耗时和异常。后端连接状态可通过 `GET /api/observability/status` 检查。若不需要追踪，将 `AGENTSCOPE_OBSERVABILITY_ENABLED=false` 即可，现有 SSE 流程不受影响。
+
 ## 当前工作流
 
 ```text

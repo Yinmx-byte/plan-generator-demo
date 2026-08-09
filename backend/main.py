@@ -15,6 +15,10 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
+from observability import initialize_agentscope_observability
+
+initialize_agentscope_observability()
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -26,6 +30,7 @@ from api.admin_routes import router as admin_router
 from api.archive_routes import router as archive_router
 from api.cloud_routes import router as cloud_router
 from api.quality_reference_routes import router as quality_reference_router
+from api.observability_routes import router as observability_router
 from agents.master_agent import (
     MasterAgentRuntime,
     get_simple_direct_reply,
@@ -241,6 +246,7 @@ app.include_router(admin_router)
 app.include_router(archive_router)
 app.include_router(cloud_router)
 app.include_router(quality_reference_router)
+app.include_router(observability_router)
 
 
 @app.post("/api/dev/plan-test")
