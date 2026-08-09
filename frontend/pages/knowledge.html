@@ -19,15 +19,27 @@
       <div class="management-body">
         <div class="filter-bar management-filter-bar">
           <div class="management-filter-fields knowledge-filter-fields">
-            <input id="knowledgeFilterName" type="search" placeholder="文档名称">
-            <input id="knowledgeFilterStartDate" type="date" aria-label="创建开始日期">
-            <input id="knowledgeFilterEndDate" type="date" aria-label="创建结束日期">
-            <select id="knowledgeFilterStatus" aria-label="解析状态">
-              <option value="">全部解析状态</option>
-              <option value="PARSE_SUCCESS">解析成功</option>
-              <option value="PARSING">解析中</option>
-              <option value="PARSE_FAILED">解析失败</option>
-            </select>
+            <label class="filter-field">
+              <span>文档名称</span>
+              <input id="knowledgeFilterName" type="search" placeholder="输入文档名称">
+            </label>
+            <label class="filter-field">
+              <span>起始时间</span>
+              <input id="knowledgeFilterStartDate" type="date" aria-label="创建起始时间">
+            </label>
+            <label class="filter-field">
+              <span>结束时间</span>
+              <input id="knowledgeFilterEndDate" type="date" aria-label="创建结束时间">
+            </label>
+            <label class="filter-field">
+              <span>解析状态</span>
+              <select id="knowledgeFilterStatus" aria-label="解析状态">
+                <option value="">全部解析状态</option>
+                <option value="PARSE_SUCCESS">解析成功</option>
+                <option value="PARSING">解析中</option>
+                <option value="PARSE_FAILED">解析失败</option>
+              </select>
+            </label>
           </div>
           <div class="management-filter-actions">
             <button id="knowledgeFilterBtn" type="button">筛选</button>

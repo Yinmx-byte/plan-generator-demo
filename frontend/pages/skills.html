@@ -9,18 +9,24 @@
       <div class="panel-actions">
         <span class="pill" id="skillCount">0 个</span>
         <button id="refreshSkillsBtn" class="ghost" type="button">刷新数据</button>
-        <button id="openSkillUploadBtn" type="button">上传 Skill</button>
       </div>
     </div>
     <div class="management-body">
       <div class="filter-bar management-filter-bar">
         <div class="management-filter-fields skill-filter-fields">
-          <input id="skillFilterName" type="search" placeholder="Skill 名称或标识">
-          <input id="skillFilterVersion" type="search" placeholder="版号，例如 0.2.0">
+          <label class="filter-field">
+            <span>Skill 名称</span>
+            <input id="skillFilterName" type="search" placeholder="名称或标识">
+          </label>
+          <label class="filter-field">
+            <span>版本号</span>
+            <input id="skillFilterVersion" type="search" placeholder="例如 0.2.0">
+          </label>
         </div>
         <div class="management-filter-actions">
           <button id="skillFilterBtn" type="button">筛选</button>
           <button id="skillFilterResetBtn" class="ghost" type="button">重置</button>
+          <button id="openSkillUploadBtn" class="primary" type="button">上传 Skill</button>
         </div>
       </div>
       <div class="status-text management-status" id="uploadStatus"></div>

@@ -9,7 +9,6 @@ import subprocess
 import sys
 import tempfile
 import zipfile
-from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
@@ -215,42 +214,47 @@ def build_iterator_skill_draft(skill, current_content: str, result: dict) -> dic
     findings = evaluation.get("findings") or []
     if not findings:
         return {"has_changes": False, "content": current_content, "diff": "", "suggested_version": ""}
-    summary = evaluation.get("recommended_patch_summary") or ""
-    score = evaluation.get("score")
-    dimension_scores = evaluation.get("component_scores") or evaluation.get("dimension_scores") or {}
+    summary = str(evaluation.get("recommended_patch_summary") or "").strip()
     suggestions: list[str] = []
     seen_suggestions: set[str] = set()
     for finding in findings:
         change = str(finding.get("suggested_skill_change") or "").strip()
-        category = str(finding.get("category") or "quality").strip()
-        severity = str(finding.get("severity") or "medium").strip()
         if not change or change in seen_suggestions:
             continue
         seen_suggestions.add(change)
-        suggestions.append(f"- 【{severity}/{category}】{change}")
+        suggestions.append(change)
     if not suggestions and not summary:
         return {"has_changes": False, "content": current_content, "diff": "", "suggested_version": ""}
 
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # Evaluation scores, timestamps and run logs belong to the evaluation
+    # report/version metadata. SKILL.md only receives reusable rules that a
+    # reviewer can approve, so one test case cannot become permanent history.
+    quality_section_re = re.compile(r"(?ms)^## 质量增强规则\s*\n.*?(?=^##\s|\Z)")
+    legacy_log_re = re.compile(r"(?ms)^## 质量迭代记录\s*\n.*?(?=^##\s|\Z)")
+    existing_match = quality_section_re.search(current_content)
+    existing_rules: list[str] = []
+    if existing_match:
+        existing_rules = [
+            line[2:].strip()
+            for line in existing_match.group(0).splitlines()
+            if line.strip().startswith("- ")
+        ]
+    incoming_rules = suggestions or ([summary] if summary else [])
+    has_legacy_log = legacy_log_re.search(current_content) is not None
+    new_rules = [rule for rule in incoming_rules if rule not in existing_rules]
+    if not new_rules and not has_legacy_log:
+        return {"has_changes": False, "content": current_content, "diff": "", "suggested_version": ""}
+    candidate_rules = [*existing_rules, *new_rules]
+    rules = list(dict.fromkeys(rule for rule in candidate_rules if rule))
+    base_content = legacy_log_re.sub("", quality_section_re.sub("", current_content)).rstrip()
     block = [
+        "## 质量增强规则",
         "",
-        "## 质量迭代记录",
+        "以下规则来自生成文档评估，仅保留可跨方案复用的约束；应用前必须人工确认，禁止写入测试样例中的业务名称、实例、人员或一次性参数。",
         "",
-        f"### {timestamp}",
-        "",
-        "以下内容来自生成文档与优质历史方案的对比评估。应用前请人工审阅差异，确认不会把一次测试样例的个性化内容固化进通用 Skill。",
+        *[f"- {rule}" for rule in rules],
     ]
-    if score is not None:
-        block.extend(["", f"生成文档总分：{score}"])
-    if dimension_scores:
-        score_text = "、".join(f"{name}={value}" for name, value in dimension_scores.items())
-        block.extend(["", f"分项得分：{score_text}"])
-    if summary:
-        block.extend(["", f"总体建议：{summary}"])
-    if suggestions:
-        block.extend(["", "待固化规则：", *suggestions])
-
-    draft = current_content.rstrip() + "\n" + "\n".join(block) + "\n"
+    draft = base_content + "\n\n" + "\n".join(block) + "\n"
     draft, suggested_version = bump_skill_version(draft)
     return {
         "has_changes": draft != current_content,

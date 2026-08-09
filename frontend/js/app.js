@@ -940,7 +940,11 @@ function editableAttrs(extra = '') {
   return `contenteditable="true" spellcheck="false" ${extra}`.trim();
 }
 
-function renderDocumentTable(block, sectionIndex, blockIndex) {
+function documentContentAttrs(isEditable, extra = '') {
+  return isEditable ? editableAttrs(extra) : '';
+}
+
+function renderDocumentTable(block, sectionIndex, blockIndex, isEditable = true) {
   const columns = Array.isArray(block.columns) ? block.columns : [];
   const rows = Array.isArray(block.rows) ? block.rows : [];
   if (!columns.length) return '';
@@ -957,7 +961,7 @@ function renderDocumentTable(block, sectionIndex, blockIndex) {
             <tr>
               ${columns.map((column) => {
                 const key = column.key || column.label || '';
-                return `<td ${editableAttrs(`data-table-cell data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-row-index="${rowIndex}" data-column-key="${escapeHtml(key)}"`)}>${escapeHtml(row?.[key] ?? '')}</td>`;
+                return `<td ${documentContentAttrs(isEditable, `data-table-cell data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-row-index="${rowIndex}" data-column-key="${escapeHtml(key)}"`)}>${escapeHtml(row?.[key] ?? '')}</td>`;
               }).join('')}
             </tr>
           `).join('')}
@@ -967,31 +971,31 @@ function renderDocumentTable(block, sectionIndex, blockIndex) {
   `;
 }
 
-function renderDocumentBlock(block, sectionIndex, blockIndex) {
+function renderDocumentBlock(block, sectionIndex, blockIndex, isEditable = true) {
   if (typeof block === 'string') {
-    return `<p ${editableAttrs(`data-block-text data-section-index="${sectionIndex}" data-block-index="${blockIndex}"`)}>${escapeHtml(block)}</p>`;
+    return `<p ${documentContentAttrs(isEditable, `data-block-text data-section-index="${sectionIndex}" data-block-index="${blockIndex}"`)}>${escapeHtml(block)}</p>`;
   }
   if (!block || typeof block !== 'object') return '';
   const type = block.type || 'paragraph';
   if (type === 'heading') {
     const level = Math.min(Math.max(Number(block.level || 3), 2), 4);
-    return `<h${level} ${editableAttrs(`data-block-text data-section-index="${sectionIndex}" data-block-index="${blockIndex}"`)}>${escapeHtml(block.text || '')}</h${level}>`;
+    return `<h${level} ${documentContentAttrs(isEditable, `data-block-text data-section-index="${sectionIndex}" data-block-index="${blockIndex}"`)}>${escapeHtml(block.text || '')}</h${level}>`;
   }
   if (type === 'paragraph') {
     const className = block.bold ? ' class="strong-line"' : '';
-    return `<p${className} ${editableAttrs(`data-block-text data-section-index="${sectionIndex}" data-block-index="${blockIndex}"`)}>${escapeHtml(block.text || '')}</p>`;
+    return `<p${className} ${documentContentAttrs(isEditable, `data-block-text data-section-index="${sectionIndex}" data-block-index="${blockIndex}"`)}>${escapeHtml(block.text || '')}</p>`;
   }
   if (type === 'paragraphs') {
     const items = Array.isArray(block.items) ? block.items : [];
-    return items.map((item, itemIndex) => `<p ${editableAttrs(`data-block-item data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"`)}>${escapeHtml(item)}</p>`).join('');
+    return items.map((item, itemIndex) => `<p ${documentContentAttrs(isEditable, `data-block-item data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"`)}>${escapeHtml(item)}</p>`).join('');
   }
   if (type === 'numbered_list') {
     const items = Array.isArray(block.items) ? block.items : [];
-    return `<ol>${items.map((item, itemIndex) => `<li ${editableAttrs(`data-block-item data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"`)}>${escapeHtml(item)}</li>`).join('')}</ol>`;
+    return `<ol>${items.map((item, itemIndex) => `<li ${documentContentAttrs(isEditable, `data-block-item data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"`)}>${escapeHtml(item)}</li>`).join('')}</ol>`;
   }
   if (type === 'plain_list') {
     const items = Array.isArray(block.items) ? block.items : [];
-    return `<ul>${items.map((item, itemIndex) => `<li ${editableAttrs(`data-block-item data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"`)}>${escapeHtml(item)}</li>`).join('')}</ul>`;
+    return `<ul>${items.map((item, itemIndex) => `<li ${documentContentAttrs(isEditable, `data-block-item data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"`)}>${escapeHtml(item)}</li>`).join('')}</ul>`;
   }
   if (type === 'checkbox_group') {
     const items = Array.isArray(block.items) ? block.items : [];
@@ -999,7 +1003,7 @@ function renderDocumentBlock(block, sectionIndex, blockIndex) {
       <div class="doc-checkbox-grid">
         ${items.map((item, itemIndex) => {
           const checked = item?.checked ? 'checked' : '';
-          return `<span class="${checked}" data-checkbox-item data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"><i></i><b ${editableAttrs('')}>${escapeHtml(item?.label || '')}${item?.extra ? ` ${escapeHtml(item.extra)}` : ''}</b></span>`;
+          return `<span class="${checked}" data-checkbox-item data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"><i></i><b ${documentContentAttrs(isEditable)}>${escapeHtml(item?.label || '')}${item?.extra ? ` ${escapeHtml(item.extra)}` : ''}</b></span>`;
         }).join('')}
       </div>
     `;
@@ -1011,14 +1015,14 @@ function renderDocumentBlock(block, sectionIndex, blockIndex) {
         ${items.map((item, itemIndex) => `
           <div>
             <dt>${escapeHtml(item?.label || '')}</dt>
-            <dd ${editableAttrs(`data-key-value data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"`)}>${escapeHtml(item?.value || '')}</dd>
+            <dd ${documentContentAttrs(isEditable, `data-key-value data-section-index="${sectionIndex}" data-block-index="${blockIndex}" data-item-index="${itemIndex}"`)}>${escapeHtml(item?.value || '')}</dd>
           </div>
         `).join('')}
       </dl>
     `;
   }
   if (type === 'table') {
-    return renderDocumentTable(block, sectionIndex, blockIndex);
+    return renderDocumentTable(block, sectionIndex, blockIndex, isEditable);
   }
   if (type === 'spacer') {
     return '<div class="doc-spacer"></div>';
@@ -2092,7 +2096,7 @@ function renderIteratorResult(container, payload) {
         <span class="status-pill">${draft.has_changes ? escapeHtml(draft.suggested_version ? `v${draft.suggested_version}` : '待确认') : '无变更'}</span>
       </div>
       ${draft.has_changes ? `
-        <p>已根据评估结果生成候选 SKILL.md 更新。请先查看差异，再决定是否应用。</p>
+        <p>已从评估问题中提炼可复用规则。评分、时间和本轮评估记录只保留在迭代报告中，不会写入 SKILL.md；请先查看差异，再决定是否应用。</p>
         <pre class="diff-view">${escapeHtml(draft.diff || '')}</pre>
         <div class="card-actions">
           <button class="primary" data-action="apply-iterator-draft" type="button">应用候选更新</button>
@@ -2312,6 +2316,36 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;');
 }
 
+function renderReadOnlyDocumentPreview(container, data) {
+  if (!container) return;
+  const title = data?.title || data?.document?.title || '未命名检修方案';
+  const department = data?.department || data?.document?.department || '云运营中心平台运维处';
+  const dateText = data?.date || data?.document?.date || '';
+  const sections = collectDocumentSections(data);
+  if (!sections.length) {
+    container.innerHTML = '<div class="empty-document"><strong>暂无可预览内容</strong><span>该版本的结构化快照为空或已清理。</span></div>';
+    return;
+  }
+  container.innerHTML = `
+    <article class="doc-page">
+      <header class="doc-cover">
+        <div class="doc-logo">国网</div>
+        <h1>${escapeHtml(title)}</h1>
+        <p>${escapeHtml(department)}</p>
+        <time>${escapeHtml(dateText)}</time>
+      </header>
+      ${sections.map((section, sectionIndex) => `
+        <section class="doc-section">
+          <h2>${escapeHtml(section.heading || section.title || '未命名章节')}</h2>
+          ${(Array.isArray(section.blocks) ? section.blocks : [])
+            .map((block, blockIndex) => renderDocumentBlock(block, sectionIndex, blockIndex, false))
+            .join('')}
+        </section>
+      `).join('')}
+    </article>
+  `;
+}
+
 // ── Archive page ─────────────────────────────────────────────────
 function initArchivePage() {
   const countEl = document.getElementById('archiveCount');
@@ -2324,7 +2358,10 @@ function initArchivePage() {
   const seriesCloseBtn = document.getElementById('archiveSeriesCloseBtn');
   const diffDialog = document.getElementById('archiveDiffDialog');
   const diffCloseBtn = document.getElementById('archiveDiffCloseBtn');
-  const latestOnlyCb = document.getElementById('archiveLatestOnlyCb');
+  const previewDialog = document.getElementById('archivePreviewDialog');
+  const previewCloseBtn = document.getElementById('archivePreviewCloseBtn');
+  const previewContainer = document.getElementById('archiveDocumentPreview');
+  const previewDownload = document.getElementById('archivePreviewDownload');
   const cleanupDialog = document.getElementById('archiveCleanupDialog');
   const cleanupOpenBtn = document.getElementById('archiveCleanupOpenBtn');
   const cleanupCloseBtn = document.getElementById('archiveCleanupCloseBtn');
@@ -2357,7 +2394,7 @@ function initArchivePage() {
   async function loadSummary() {
     try {
       const filters = getFilters();
-      if (latestOnlyCb?.checked) filters.latest_only = 'true';
+      filters.latest_only = 'true';
       const qs = buildQuery(filters);
       const resp = await fetch(`/api/archive/summary?${qs}`);
       if (!resp.ok) return false;
@@ -2387,13 +2424,19 @@ function initArchivePage() {
           `<td title="${escapeHtml(r.title || '')}">${escapeHtml((r.title || '').slice(0, 30))}${(r.title || '').length > 30 ? '...' : ''}</td>`,
           `<td>${escapeHtml(personnel)}</td>`,
           `<td>${escapeHtml((r.change_summary || '-').slice(0, 40))}</td>`,
-          `<td class="actions-cell"><button class="ghost" data-action="history" data-series="${escapeHtml(r.series_id)}">${r.version > 1 ? '对比' : '查看'}</button></td>`,
+          `<td class="actions-cell archive-row-actions">
+            <button class="ghost" data-action="preview" data-record="${r.id}">查看</button>
+            <button class="ghost" data-action="history" data-series="${escapeHtml(r.series_id)}">历史版本</button>
+          </td>`,
         ].join('');
         tableBody.appendChild(tr);
       });
 
       tableBody.querySelectorAll('button[data-action="history"]').forEach((btn) => {
         btn.addEventListener('click', () => showSeriesHistory(btn.dataset.series));
+      });
+      tableBody.querySelectorAll('button[data-action="preview"]').forEach((btn) => {
+        btn.addEventListener('click', () => showArchivedDocument(btn.dataset.record));
       });
       return true;
     } catch (_err) {
@@ -2403,34 +2446,59 @@ function initArchivePage() {
   }
 
   async function showSeriesHistory(seriesId) {
-    const resp = await fetch(`/api/archive/series/${seriesId}`);
+    const resp = await fetch(`/api/archive/series/${encodeURIComponent(seriesId)}`);
+    if (!resp.ok) throw new Error('版本历史加载失败');
     const data = await resp.json();
     const records = data.records || [];
     document.getElementById('archiveSeriesTitle').textContent = `版本历史 — ${records[0]?.title || seriesId}`;
     const body = document.getElementById('archiveSeriesBody');
     if (!body) return;
     body.innerHTML = records.map((r, i) => {
-      const prev = i > 0 ? records[i - 1] : null;
+      const previousVersion = records[i + 1] || null;
       return `<tr>
         <td><span class="pill">v${r.version}</span></td>
         <td>${r.archive_date || ''}</td>
         <td>${r.downloaded_at || ''}</td>
         <td>${escapeHtml((r.change_summary || '-').slice(0, 50))}</td>
         <td class="actions">
-          ${prev
-            ? `<button class="ghost compare-btn" data-series="${seriesId}" data-from="${prev.version}" data-to="${r.version}">对比 v${prev.version}→v${r.version}</button>`
-            : '<span style="color:#999;">初始版本</span>'}
+          <button class="ghost history-preview-btn" data-record="${r.id}">查看</button>
+          <a class="history-download-link" href="/api/archive/files/${r.id}/download" target="_blank">下载</a>
+          ${previousVersion
+            ? `<button class="ghost compare-btn" data-series="${escapeHtml(seriesId)}" data-from="${previousVersion.version}" data-to="${r.version}">对比</button>`
+            : '<button class="ghost" type="button" disabled title="初始版本没有可对比的上一版本">对比</button>'}
         </td>
       </tr>`;
     }).join('');
     body.querySelectorAll('.compare-btn').forEach((btn) => {
       btn.addEventListener('click', () => showDiff(btn.dataset.series, btn.dataset.from, btn.dataset.to));
     });
+    body.querySelectorAll('.history-preview-btn').forEach((btn) => {
+      btn.addEventListener('click', () => showArchivedDocument(btn.dataset.record));
+    });
     seriesDialog?.showModal();
   }
 
+  async function showArchivedDocument(recordId) {
+    if (!recordId) return;
+    if (previewContainer) {
+      previewContainer.innerHTML = '<div class="empty-document"><strong>正在加载归档文档</strong></div>';
+    }
+    previewDialog?.showModal();
+    const resp = await fetch(`/api/archive/files/${encodeURIComponent(recordId)}/preview`);
+    const payload = await resp.json();
+    if (!resp.ok) {
+      if (previewContainer) previewContainer.innerHTML = `<div class="msg error">${escapeHtml(payload.detail || '文档预览加载失败')}</div>`;
+      return;
+    }
+    document.getElementById('archivePreviewTitle').textContent = `${payload.title || '归档文档'} · v${payload.version || 1}`;
+    if (previewDownload) previewDownload.href = `/api/archive/files/${encodeURIComponent(recordId)}/download`;
+    renderReadOnlyDocumentPreview(previewContainer, payload.document || {});
+  }
+
   async function showDiff(seriesId, fromVer, toVer) {
-    const resp = await fetch(`/api/archive/compare?series_id=${seriesId}&from_version=${fromVer}&to_version=${toVer}`);
+    const params = new URLSearchParams({ series_id: seriesId, from_version: fromVer, to_version: toVer });
+    const resp = await fetch(`/api/archive/compare?${params.toString()}`);
+    if (!resp.ok) throw new Error('版本对比加载失败');
     const data = await resp.json();
     document.getElementById('archiveDiffTitle').textContent = `版本对比: v${fromVer} → v${toVer}`;
     const summaryEl = document.getElementById('archiveDiffSummary');
@@ -2438,10 +2506,18 @@ function initArchivePage() {
     const sectionsEl = document.getElementById('archiveDiffSections');
     if (sectionsEl) {
       const diffs = data.section_diffs || [];
-      sectionsEl.innerHTML = diffs.map((d) => {
+      sectionsEl.innerHTML = diffs.filter((d) => d.status !== 'unchanged').map((d) => {
         const badge = { added: '新增', removed: '删除', modified: '已修改', unchanged: '未变化' }[d.status] || d.status;
-        return `<div class="diff-item"><span class="pill pill-${d.status}">${badge}</span> ${escapeHtml(d.heading || '')}</div>`;
-      }).join('');
+        const removed = (d.removed || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+        const added = (d.added || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+        return `<div class="diff-item">
+          <div class="diff-item-head"><span class="pill pill-${d.status}">${badge}</span><strong>${escapeHtml(d.heading || '')}</strong></div>
+          <div class="diff-detail-grid">
+            ${removed ? `<div class="diff-removed"><span>原版本删除</span><ul>${removed}</ul></div>` : ''}
+            ${added ? `<div class="diff-added"><span>新版本新增</span><ul>${added}</ul></div>` : ''}
+          </div>
+        </div>`;
+      }).join('') || '<div class="empty-table-state">两个版本的章节内容没有显著差异。</div>';
     }
     diffDialog?.showModal();
   }
@@ -2460,14 +2536,11 @@ function initArchivePage() {
     loadSummary();
   });
   downloadExcelBtn?.addEventListener('click', () => {
-    const lp = latestOnlyCb?.checked ? '?latest_only=true' : '';
-    window.open('/api/archive/summary/excel' + lp, '_blank');
+    window.open('/api/archive/summary/excel?latest_only=true', '_blank');
   });
   seriesCloseBtn?.addEventListener('click', () => seriesDialog?.close());
   diffCloseBtn?.addEventListener('click', () => diffDialog?.close());
-
-  // ── latest_only toggle ──────────────────────────────────────────
-  latestOnlyCb?.addEventListener('change', () => loadSummary());
+  previewCloseBtn?.addEventListener('click', () => previewDialog?.close());
 
   cleanupOpenBtn?.addEventListener('click', () => {
     if (cleanupResult) cleanupResult.style.display = 'none';

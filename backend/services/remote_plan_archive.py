@@ -263,7 +263,7 @@ class RemoteArchiveStore:
         with self._connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "SELECT * FROM maintenance_plan_archive_records WHERE series_id = %s ORDER BY version",
+                    "SELECT * FROM maintenance_plan_archive_records WHERE series_id = %s ORDER BY version DESC",
                     [series_id],
                 )
                 return list(cursor.fetchall())
@@ -320,6 +320,29 @@ class RemoteArchiveStore:
         if not record:
             raise FileNotFoundError("归档记录不存在或其文件已清理")
         return self._get_object(record["docx_path"]), f"{safe_docx_filename(record['title'])}.docx"
+
+    def read_archived_snapshot(self, record_id: int) -> dict:
+        """Return one archived structured document for a read-only preview."""
+        with self._connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT id, series_id, version, title, json_path "
+                    "FROM maintenance_plan_archive_records WHERE id = %s",
+                    [record_id],
+                )
+                record = cursor.fetchone()
+        if not record:
+            raise FileNotFoundError("归档记录不存在")
+        snapshot = self._load_snapshot_by_path(record["json_path"])
+        if not snapshot:
+            raise FileNotFoundError("归档结构化快照不存在或已清理")
+        return {
+            "id": record["id"],
+            "series_id": record["series_id"],
+            "version": record["version"],
+            "title": record["title"],
+            "document": snapshot,
+        }
 
     # ── database and object helpers ─────────────────────────────────
 

@@ -432,6 +432,8 @@ def _compute_section_diffs(old_data: dict, new_data: dict) -> list[dict]:
         for name in dict.fromkeys([*old_sections, *new_sections]):
             old_signatures = _block_sigs(old_sections[name]) if name in old_sections else []
             new_signatures = _block_sigs(new_sections[name]) if name in new_sections else []
+            removed = [item for item in old_signatures if item not in new_signatures]
+            added = [item for item in new_signatures if item not in old_signatures]
             if old_signatures == new_signatures:
                 status = "unchanged"
             elif not old_signatures:
@@ -441,10 +443,22 @@ def _compute_section_diffs(old_data: dict, new_data: dict) -> list[dict]:
             else:
                 status = "modified"
             section = new_sections.get(name) or old_sections.get(name) or {}
-            diffs.append({"heading": section.get("heading", ""), "status": status})
+            diffs.append({
+                "heading": section.get("heading", ""),
+                "status": status,
+                "removed": [_display_block_signature(item) for item in removed],
+                "added": [_display_block_signature(item) for item in added],
+            })
     except Exception:
         return []
     return diffs
+
+
+def _display_block_signature(signature: str) -> str:
+    """Convert an internal block signature into compact text for the UI."""
+    parts = [part.strip() for part in str(signature).split("|")[1:] if part.strip()]
+    text = "；".join(parts)
+    return text[:500] + ("…" if len(text) > 500 else "")
 
 
 def write_summary_excel(records: list[dict], output_path: Path) -> None:

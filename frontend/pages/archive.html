@@ -15,9 +15,9 @@
     <div class="archive-body">
       <div class="filter-bar archive-filter-bar" id="archiveFilterBar">
         <div class="archive-filter-fields">
-      <input id="archiveFilterSystem" type="text" placeholder="系统名称">
-      <input id="archiveFilterPerson" type="text" placeholder="人员">
-      <select id="archiveFilterProduct">
+      <label class="filter-field"><span>系统名称</span><input id="archiveFilterSystem" type="text" placeholder="输入系统名称"></label>
+      <label class="filter-field"><span>人员</span><input id="archiveFilterPerson" type="text" placeholder="输入人员姓名"></label>
+      <label class="filter-field"><span>产品</span><select id="archiveFilterProduct">
         <option value="">全部产品</option>
         <option value="ECS">ECS</option>
         <option value="RDS">RDS</option>
@@ -28,8 +28,8 @@
         <option value="PolarDB">PolarDB</option>
         <option value="MQ">MQ</option>
         <option value="通用">通用</option>
-      </select>
-      <select id="archiveFilterAction">
+      </select></label>
+      <label class="filter-field"><span>动作</span><select id="archiveFilterAction">
         <option value="">全部动作</option>
         <option value="创建">创建</option>
         <option value="回收">回收</option>
@@ -47,15 +47,11 @@
         <option value="维护性重启">维护性重启</option>
         <option value="读写分离链路切换">读写分离链路切换</option>
         <option value="变更">变更</option>
-      </select>
-      <input id="archiveFilterStartDate" type="date" placeholder="开始日期">
-      <input id="archiveFilterEndDate" type="date" placeholder="结束日期">
+      </select></label>
+      <label class="filter-field"><span>起始时间</span><input id="archiveFilterStartDate" type="date" aria-label="归档起始时间"></label>
+      <label class="filter-field"><span>结束时间</span><input id="archiveFilterEndDate" type="date" aria-label="归档结束时间"></label>
         </div>
         <div class="archive-filter-actions">
-          <label class="check-option archive-latest-option">
-            <input type="checkbox" id="archiveLatestOnlyCb">
-            <span>仅显示最新版本</span>
-          </label>
           <button id="archiveFilterBtn" type="button">筛选</button>
           <button id="archiveFilterResetBtn" type="button" class="ghost">重置</button>
           <button id="archiveCleanupOpenBtn" type="button" class="ghost">数据清理</button>
@@ -96,9 +92,9 @@
         <button class="ghost" id="archiveCleanupCloseBtn" type="button">关闭</button>
       </div>
       <div class="cleanup-controls">
-        <label for="archiveCleanupStart">开始日期</label>
+        <label for="archiveCleanupStart">起始时间</label>
         <input id="archiveCleanupStart" type="date">
-        <label for="archiveCleanupEnd">结束日期</label>
+        <label for="archiveCleanupEnd">结束时间</label>
         <input id="archiveCleanupEnd" type="date">
         <button id="archiveCleanupScopeBtn" type="button">查询范围</button>
       </div>
@@ -134,6 +130,22 @@
         <tbody id="archiveSeriesBody"></tbody>
       </table>
     </div>
+  </div>
+</dialog>
+
+<dialog class="modal modal-wide archive-preview-dialog" id="archivePreviewDialog">
+  <div class="modal-card archive-preview-card">
+    <div class="modal-head">
+      <div>
+        <p class="eyebrow">Document Preview</p>
+        <h3 id="archivePreviewTitle">归档文档预览</h3>
+      </div>
+      <div class="modal-actions compact-actions">
+        <a class="button-link" id="archivePreviewDownload" href="#" target="_blank">下载 DOCX</a>
+        <button class="ghost" id="archivePreviewCloseBtn" type="button">关闭</button>
+      </div>
+    </div>
+    <div class="archive-document-preview" id="archiveDocumentPreview"></div>
   </div>
 </dialog>
 

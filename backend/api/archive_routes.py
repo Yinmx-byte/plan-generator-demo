@@ -85,6 +85,15 @@ async def archive_download_document(record_id: int):
     )
 
 
+@router.get("/api/archive/files/{record_id}/preview")
+async def archive_preview_document(record_id: int):
+    """Load the archived JSON snapshot used for a read-only document preview."""
+    try:
+        return get_archive_store().read_archived_snapshot(record_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/api/archive/series/{series_id}")
 async def archive_series_history(series_id: str):
     store = get_archive_store()

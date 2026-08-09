@@ -1762,6 +1762,11 @@ button.danger:hover {
   border: 1px solid var(--line);
   border-radius: 6px;
 }
+.archive-filter-bar {
+  margin: 10px 12px 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
 .archive-filter-fields {
   min-width: 0;
   display: grid;
@@ -1785,7 +1790,7 @@ button.danger:hover {
   width: 100%;
   min-width: 0;
   max-width: none;
-  height: 34px;
+  height: 38px;
   padding: 4px 8px;
   font-size: 12px;
   border: 1px solid var(--line);
@@ -1797,10 +1802,22 @@ button.danger:hover {
   font-size: 11px;
 }
 .filter-bar button {
-  height: 34px;
+  height: 38px;
   padding: 0 14px;
   font-size: 12px;
   white-space: nowrap;
+}
+.filter-field {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.filter-field > span {
+  min-height: 11px;
 }
 .management-body {
   min-height: 0;
@@ -1825,6 +1842,7 @@ button.danger:hover {
 }
 .management-filter-actions {
   display: flex;
+  align-items: flex-end;
   justify-content: flex-end;
   gap: 8px;
 }
@@ -1940,17 +1958,6 @@ button.danger:hover {
 }
 .retrieve-query-row button {
   min-width: 112px;
-}
-.archive-latest-option {
-  min-height: 34px;
-  padding: 0 4px;
-  white-space: nowrap;
-}
-.archive-latest-option input {
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
-  accent-color: var(--blue);
 }
 .archive-table-wrap {
   width: 100%;
@@ -2103,6 +2110,91 @@ button.danger:disabled {
 @media (max-width: 1280px) {
   .iterator-setup-grid { grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1.25fr); }
 }
+.diff-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.diff-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.diff-detail-grid > div {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 5px;
+}
+.diff-detail-grid span {
+  font-size: 11px;
+  font-weight: 800;
+}
+.diff-detail-grid ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--ink-soft);
+  white-space: normal;
+}
+.diff-removed { background: #fff3f1; }
+.diff-added { background: #edf8f0; }
+.archive-row-actions,
+#archiveSeriesBody .actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.history-download-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  text-decoration: none;
+}
+#archiveSeriesBody td.actions {
+  min-width: 220px;
+}
+.modal.modal-wide.archive-preview-dialog {
+  width: min(1220px, calc(100vw - 32px));
+}
+#archivePreviewDownload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.archive-preview-card {
+  width: 100%;
+  height: min(860px, calc(100vh - 48px));
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.archive-document-preview {
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+  background: #eef1ef;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.archive-document-preview .doc-page {
+  width: min(860px, 100%);
+  min-height: 100%;
+  margin: 0 auto;
+  box-shadow: 0 10px 26px rgba(22, 32, 44, 0.08);
+}
 .archive-cleanup-dialog {
   width: min(680px, calc(100vw - 32px));
 }
@@ -2140,6 +2232,7 @@ button.danger:disabled {
     grid-template-columns: 1fr;
   }
   .management-filter-bar { grid-template-columns: 1fr; }
+  .archive-filter-bar { grid-template-columns: 1fr; }
   .knowledge-filter-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .document-reader-grid {
     grid-template-columns: 1fr;
@@ -2215,9 +2308,10 @@ button.danger:disabled {
     flex-direction: column;
   }
   .archive-filter-actions button,
-  .archive-latest-option {
+  .archive-filter-actions {
     width: 100%;
   }
+  .diff-detail-grid { grid-template-columns: 1fr; }
   .card-actions button {
     width: 100%;
   }
