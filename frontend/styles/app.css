@@ -717,16 +717,6 @@ button.document-open-btn {
   word-break: break-word;
   overflow: auto;
 }
-button.icon-action {
-  min-height: 28px;
-  flex: 0 0 auto;
-  padding: 5px 8px;
-  border-color: #c9dcea;
-  background: #f4f8fb;
-  color: var(--blue-dark);
-  font-size: 12px;
-  font-weight: 700;
-}
 .card-actions {
   display: flex;
   align-items: center;
@@ -1870,27 +1860,35 @@ button.danger:hover {
 }
 .management-table .skill-name-cell,
 .management-table .filename-cell {
-  min-width: 220px;
   white-space: normal;
   word-break: break-word;
 }
+.skill-table {
+  min-width: 820px;
+}
+.skill-table .skill-name-cell {
+  min-width: 170px;
+}
+.knowledge-table .filename-cell {
+  min-width: 240px;
+}
 .management-table .alias-cell {
-  min-width: 210px;
+  min-width: 170px;
   color: var(--muted);
   font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: 11px;
 }
 .management-table .description-cell {
-  min-width: 340px;
-  max-width: 560px;
+  min-width: 280px;
+  max-width: 460px;
   white-space: normal;
   word-break: break-word;
 }
-.management-table .actions-cell {
+.data-table .actions-cell {
   min-width: 132px;
   white-space: nowrap;
 }
-.management-table .actions-cell button + button {
+.data-table .actions-cell button + button {
   margin-left: 6px;
 }
 .empty-table-state {
@@ -1988,12 +1986,6 @@ button.danger:hover {
 }
 .data-table tbody tr:hover {
   background: #f2f5f9;
-}
-.data-table td.actions {
-  white-space: nowrap;
-}
-.data-table td.actions button {
-  margin-right: 4px;
 }
 .archive-diff-summary {
   padding: 12px;

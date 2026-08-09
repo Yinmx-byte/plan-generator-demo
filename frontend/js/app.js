@@ -658,8 +658,8 @@ function renderSkillRows(skills) {
         <td><span class="status-pill">${escapeHtml(versionText)}</span></td>
         <td class="description-cell">${escapeHtml(skill.description || '未填写描述')}</td>
         <td class="actions-cell">
-          <button class="icon-action" data-action="edit" data-skill-name="${escapeHtml(skill.name)}" type="button">编辑</button>
-          <button class="icon-action danger" data-action="delete" data-skill-name="${escapeHtml(skill.name)}" type="button">删除</button>
+          <button class="ghost" data-action="edit" data-skill-name="${escapeHtml(skill.name)}" type="button">编辑</button>
+          <button class="danger ghost" data-action="delete" data-skill-name="${escapeHtml(skill.name)}" type="button">删除</button>
         </td>
       </tr>
     `;
@@ -1367,14 +1367,9 @@ async function openKnowledgeFile(fileId) {
     } else {
       indexEl.innerHTML = [
         ['索引状态', index.status],
-        ['索引文档名', index.name],
-        ['文档类型', index.document_type],
         ['分块方式', index.chunk_mode],
         ['分块大小', index.chunk_size],
         ['分块重叠', index.overlap_size],
-        ['分隔符', index.separator],
-        ['更新时间', index.gmt_modified],
-        ['错误信息', index.error],
       ].map(([label, value]) => `
         <div class="detail-item">
           <span>${escapeHtml(label)}</span>
@@ -2392,7 +2387,7 @@ function initArchivePage() {
           `<td title="${escapeHtml(r.title || '')}">${escapeHtml((r.title || '').slice(0, 30))}${(r.title || '').length > 30 ? '...' : ''}</td>`,
           `<td>${escapeHtml(personnel)}</td>`,
           `<td>${escapeHtml((r.change_summary || '-').slice(0, 40))}</td>`,
-          `<td class="actions"><button class="ghost" data-action="history" data-series="${escapeHtml(r.series_id)}">${r.version > 1 ? '对比' : '查看'}</button></td>`,
+          `<td class="actions-cell"><button class="ghost" data-action="history" data-series="${escapeHtml(r.series_id)}">${r.version > 1 ? '对比' : '查看'}</button></td>`,
         ].join('');
         tableBody.appendChild(tr);
       });
