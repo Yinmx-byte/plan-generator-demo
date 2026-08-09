@@ -32,13 +32,14 @@ def _instance_summary(inst: dict) -> dict:
     vpc = inst.get("VpcAttributes") or {}
     sgs = inst.get("SecurityGroupIds") or {}
     sg_list = sgs.get("SecurityGroupId", []) if isinstance(sgs, dict) else []
+    memory_mb = int(inst.get("Memory") or 0)
     return {
         "instance_id": inst.get("InstanceId", ""),
         "name": inst.get("InstanceName", ""),
         "status": inst.get("Status", ""),
         "spec": inst.get("InstanceType", ""),
         "cpu": inst.get("Cpu", 0),
-        "memory": inst.get("Memory", 0),
+        "memory": memory_mb / 1024 if memory_mb else 0,
         "private_ip": vpc.get("PrivateIpAddress", {}).get("IpAddress", [""])[0] if isinstance(vpc.get("PrivateIpAddress"), dict) else "",
         "vswitch_id": vpc.get("VSwitchId", ""),
         "security_group_ids": sg_list,
@@ -89,6 +90,7 @@ def analyze_impact(
     except Exception:
         pass
 
+    all_slb: list[dict[str, Any]] = []
     try:
         all_slb = describe_load_balancers(region_id=region_id, vpc_id=vpc_id)
         result["vpc_resources"]["slb"] = [
