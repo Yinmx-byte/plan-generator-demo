@@ -210,21 +210,21 @@ def deterministic_evaluation(candidate: DocProfile, state: dict[str, Any]) -> di
                 "severity": "high" if label in {"实施链路", "回滚闭环"} else "medium",
                 "category": "deterministic",
                 "message": f"确定性检查发现{label}缺失：" + "、".join(missing[:10]),
-                "suggested_skill_change": f"在生成规则中明确要求完整输出{label}，并在交付前逐项自检。",
+                "suggested_skill_change": f"必须完整输出{label}，并在交付前逐项自检。",
             })
     if generic_hits:
         findings.append({
             "severity": "medium",
             "category": "deterministic",
             "message": "实施内容包含空泛措辞：" + "、".join(generic_hits),
-            "suggested_skill_change": "禁止空泛措辞，要求每步写明入口、对象、参数、动作、预期结果和留痕。",
+            "suggested_skill_change": "实施步骤不得使用空泛措辞，每步必须写明入口、对象、参数、动作、预期结果和留痕。",
         })
     if duplicate_numbering:
         findings.append({
             "severity": "medium",
             "category": "deterministic",
             "message": "候选文档存在重复编号。",
-            "suggested_skill_change": "要求列表项正文不自带序号，由渲染工具统一生成编号。",
+            "suggested_skill_change": "列表项正文不得自带序号，必须由渲染工具统一生成编号。",
         })
     return {"score": score, "dimension_scores": scores, "findings": findings}
 
@@ -280,21 +280,21 @@ def reference_evaluation(candidate: DocProfile, references: list[DocProfile]) ->
             "severity": "medium",
             "category": "reference_comparison",
             "message": f"候选文档对同类优质方案稳定章节的覆盖率仅为 {structure_score}%。",
-            "suggested_skill_change": "补充同类方案中稳定出现的章节，但不要复制参考文档中的业务数据。",
+            "suggested_skill_change": "必须补充同类方案中稳定出现的章节，但不得复制参考文档中的业务数据。",
         })
     if operation_score < 75:
         findings.append({
             "severity": "high",
             "category": "reference_comparison",
             "message": f"实施步骤粒度低于同类优质方案，当前对比得分 {operation_score}。",
-            "suggested_skill_change": "要求操作步骤达到同类方案的动作数量和细节密度，写明控制台入口、目标对象、参数、动作和预期结果。",
+            "suggested_skill_change": "操作步骤必须达到同类方案的动作数量和细节密度，并写明控制台入口、目标对象、参数、动作和预期结果。",
         })
     if risk_score < 75:
         findings.append({
             "severity": "medium",
             "category": "reference_comparison",
             "message": f"风险覆盖低于同类优质方案，当前对比得分 {risk_score}。",
-            "suggested_skill_change": "按本次动作补齐影响范围、危险点、安全措施和验证留痕。",
+            "suggested_skill_change": "必须按本次动作补齐影响范围、危险点、安全措施和验证留痕。",
         })
     return {"score": score, "dimension_scores": scores, "findings": findings}
 

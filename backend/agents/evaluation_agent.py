@@ -40,11 +40,17 @@ EVALUATION_SYSTEM_PROMPT = """你是独立的检修方案质量评审员。你�
       "severity": "high|medium|low",
       "category": "model_review",
       "message": "具体问题及候选文档证据",
-      "suggested_skill_change": "可泛化到 Skill 的修改建议"
+      "suggested_skill_change": "可直接写入 SKILL.md 的正式规则"
     }
   ],
   "summary": "评审结论"
 }
+`suggested_skill_change` 不是评审建议或修改说明，而是准备直接写入候选 SKILL.md 的规则正文，必须满足：
+- 使用“必须”“不得”“仅当”等命令式表达，直接约束后续方案生成行为。
+- 不得出现“在 Skill 中要求”“建议在 Skill 中”“应修改 Skill”“本次评估认为”等元话语。
+- 不得包含评分、评估日期、评估来源、候选文档名称或本次测试的业务名称、实例、人员和一次性参数。
+- 只保留可跨同产品同动作方案复用的规则；无法泛化的问题只写入 `message`，并将 `suggested_skill_change` 留空。
+- 用户未提供且参考资料不能证明的产品能力、控制台路径、验证接口和安全机制不得写成规则。
 不得因为没有发现问题而虚构问题。"""
 
 

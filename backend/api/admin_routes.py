@@ -207,6 +207,24 @@ def bump_skill_version(content: str) -> tuple[str, str]:
     return content, ""
 
 
+def normalize_candidate_skill_rule(value: str) -> str:
+    """Convert evaluator advice into a rule that can live in SKILL.md."""
+    rule = re.sub(r"^\s*[-*+]\s+", "", str(value or "").strip())
+    meta_prefixes = (
+        r"^(?:建议|应当)?在\s*Skill\s*中(?:要求|建议|规定|设置|强化(?:指令)?|明确(?:要求)?)\s*",
+        r"^在生成规则中明确要求\s*",
+        r"^(?:建议|应当)修改\s*Skill(?:，|,|：|:)?\s*",
+    )
+    for pattern in meta_prefixes:
+        rule = re.sub(pattern, "", rule, flags=re.IGNORECASE)
+    rule = rule.lstrip("，,：:；; ").strip()
+    if rule.startswith("要求"):
+        rule = "必须满足以下要求：" + rule.removeprefix("要求").lstrip("，,：:；; ")
+    if rule and not re.match(r"^(?:必须|不得|禁止|仅当|只允许|允许|应当|应)", rule):
+        rule = "必须满足以下要求：" + rule
+    return rule
+
+
 def build_iterator_skill_draft(skill, current_content: str, result: dict) -> dict:
     evaluation = result.get("evaluation") or result
     if evaluation.get("evaluation_mode") != "generated_docx":
@@ -218,7 +236,7 @@ def build_iterator_skill_draft(skill, current_content: str, result: dict) -> dic
     suggestions: list[str] = []
     seen_suggestions: set[str] = set()
     for finding in findings:
-        change = str(finding.get("suggested_skill_change") or "").strip()
+        change = normalize_candidate_skill_rule(finding.get("suggested_skill_change") or "")
         if not change or change in seen_suggestions:
             continue
         seen_suggestions.add(change)
@@ -235,7 +253,7 @@ def build_iterator_skill_draft(skill, current_content: str, result: dict) -> dic
     existing_rules: list[str] = []
     if existing_match:
         existing_rules = [
-            line[2:].strip()
+            normalize_candidate_skill_rule(line[2:])
             for line in existing_match.group(0).splitlines()
             if line.strip().startswith("- ")
         ]
