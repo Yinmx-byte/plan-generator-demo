@@ -1246,12 +1246,16 @@ button.ghost {
 .iterator-state-actions {
   margin-top: 0;
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
 }
 .iterator-state-actions > div {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+.iterator-state-actions-end {
+  justify-content: flex-end;
 }
 .iterator-state-dialog {
   width: min(1120px, calc(100vw - 32px));
@@ -2404,6 +2408,17 @@ button.danger:disabled {
   .iterator-parameter-bar button { width: 100%; }
   .iterator-actions .card-actions { margin-left: 0; }
   .iterator-state-card { height: min(900px, calc(100vh - 28px)); }
+  .iterator-state-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .iterator-state-actions > div {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .iterator-state-actions-end button:last-child {
+    grid-column: 1 / -1;
+  }
   .document-preview {
     padding: 14px;
   }

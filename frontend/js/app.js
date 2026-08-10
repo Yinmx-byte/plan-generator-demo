@@ -7,6 +7,7 @@ const resetBtn = document.getElementById('resetBtn');
 const topbarFeedback = document.getElementById('topbarFeedback');
 const workspaceEl = document.querySelector('.workspace');
 const planSessionStorageKey = 'planGeneratorTabState';
+const planDraftStorageKey = 'planGeneratorDraftMessage';
 let topbarFeedbackTimer = null;
 
 const pageMeta = {
@@ -1507,6 +1508,12 @@ function initPlanPage() {
   const executeValidationInput = document.getElementById('executeValidationInput');
   const archiveOnDownloadInput = document.getElementById('archiveOnDownloadInput');
   const showToolTraceInput = document.getElementById('showToolTraceInput');
+  const pendingDraft = sessionStorage.getItem(planDraftStorageKey);
+  if (pendingDraft) {
+    inputEl.value = pendingDraft;
+    sessionStorage.removeItem(planDraftStorageKey);
+    window.requestAnimationFrame(() => inputEl.focus());
+  }
   documentJsonEditor = document.getElementById('documentJsonEditor');
   documentPreview = document.getElementById('documentPreview');
   documentOutline = document.getElementById('documentOutline');
@@ -1893,6 +1900,8 @@ async function initIteratorPage() {
   const runBtn = document.getElementById('runIteratorBtn');
   const clearStateBtn = document.getElementById('clearIteratorStateBtn');
   const fillSampleBtn = document.getElementById('fillIteratorSampleBtn');
+  const copyRequestBtn = document.getElementById('copyIteratorRequestBtn');
+  const useRequestBtn = document.getElementById('useIteratorRequestBtn');
   const writebackRulesBtn = document.getElementById('openIteratorWritebackRulesBtn');
   const scoringRulesBtn = document.getElementById('openIteratorScoringRulesBtn');
   const rulesDialog = document.getElementById('iteratorRulesDialog');
@@ -1932,6 +1941,37 @@ async function initIteratorPage() {
     const { label: _label, ...sampleState } = sample;
     fillIteratorState(stateFieldsEl, { ...iteratorSamples.defaults, ...sampleState });
     syncIteratorState();
+  });
+  copyRequestBtn?.addEventListener('click', async () => {
+    const requestText = buildPlanRequestText(syncIteratorState());
+    if (!requestText) {
+      statusEl.textContent = '请先填写至少一项结构化参数';
+      return;
+    }
+    const originalLabel = copyRequestBtn.textContent;
+    try {
+      await copyTextToClipboard(requestText);
+      copyRequestBtn.textContent = '已复制';
+      showTopbarFeedback('需求文本已复制，可直接粘贴到主流程');
+    } catch (_err) {
+      copyRequestBtn.textContent = '复制失败';
+      showTopbarFeedback('复制失败，请重试', 'error');
+    } finally {
+      window.setTimeout(() => {
+        if (copyRequestBtn.isConnected) copyRequestBtn.textContent = originalLabel;
+      }, 1200);
+    }
+  });
+  useRequestBtn?.addEventListener('click', async () => {
+    const requestText = buildPlanRequestText(syncIteratorState());
+    if (!requestText) {
+      statusEl.textContent = '请先填写至少一项结构化参数';
+      return;
+    }
+    sessionStorage.setItem(planDraftStorageKey, requestText);
+    stateDialog?.close();
+    await loadPage('plan');
+    showTopbarFeedback('参数已带入智能对话，确认后即可发送');
   });
 
   async function showIteratorRules(kind) {
@@ -2103,6 +2143,39 @@ function updateIteratorStateJson(container, stateInput) {
   const state = collectStateFromFields(container);
   stateInput.value = Object.keys(state).length ? JSON.stringify(state, null, 2) : '';
   return state;
+}
+
+function buildPlanRequestText(state) {
+  if (!state || !Object.keys(state).length) return '';
+  const lines = ['请根据以下信息生成一份检修方案。', ''];
+  const append = (label, value) => {
+    if (String(value || '').trim()) lines.push(`${label}：${String(value).trim()}`);
+  };
+  append('检修背景', state.background);
+  append('检修类型', state.maintenance_type);
+  append('网络环境', state.network);
+  append('实施地点', state.location);
+  append('涉及实例', state.instances);
+  append('计划年度', state.schedule_year);
+  if (state.schedule_start && state.schedule_end) {
+    append('检修窗口', `${state.schedule_start} 至 ${state.schedule_end}`);
+  } else {
+    append('检修开始时间', state.schedule_start);
+    append('检修结束时间', state.schedule_end);
+  }
+  append('方案提供人', state.provider);
+  append('检修执行人', state.executor);
+  append('检修复核人', state.reviewer);
+  append('安全责任人', state.security_officer);
+  append('ASCM 授权账号', state.ascm_account);
+  append('堡垒机账号', state.bastion_account);
+  if (String(state.tech_params || '').trim()) {
+    lines.push('', '技术参数：', String(state.tech_params).trim());
+  }
+  if (String(state.ops_detail || '').trim()) {
+    lines.push('', '补充要求：', String(state.ops_detail).trim());
+  }
+  return lines.join('\n').trim();
 }
 
 function validateIteratorGenerationInput(state) {
