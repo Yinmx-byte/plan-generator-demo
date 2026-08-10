@@ -15,7 +15,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
-from observability import initialize_agentscope_observability
+from observability import initialize_agentscope_observability, request_trace_span
 
 initialize_agentscope_observability()
 
@@ -399,9 +399,13 @@ async def execute_page_agent_task_stream(request: PageAgentTaskRequest):
     )
 
 
-async def stream_master_agent_response(request: ChatRequest, startup_message: str):
+async def stream_master_agent_response(
+    request: ChatRequest,
+    startup_message: str,
+    session_id: str | None = None,
+):
     """Shared SSE stream for the planner-first Master ReActAgent chain."""
-    session_id = request.session_id or uuid.uuid4().hex
+    session_id = session_id or request.session_id or uuid.uuid4().hex
     session = _chat_sessions.setdefault(
         session_id,
         {
@@ -533,12 +537,35 @@ async def stream_master_agent_response(request: ChatRequest, startup_message: st
                 pass
 
 
+async def stream_traced_master_agent_response(request: ChatRequest, startup_message: str):
+    """Wrap the business stream in a sanitized request-level OpenTelemetry span."""
+    session_id = request.session_id or uuid.uuid4().hex
+    with request_trace_span(
+        "plan-generator.chat.stream",
+        {
+            "app.route": "/api/chat/stream",
+            "app.session_id": session_id,
+        },
+    ) as trace_id:
+        if trace_id:
+            yield sse_event(
+                "trace_context",
+                {"session_id": session_id, "trace_id": trace_id},
+            )
+        async for chunk in stream_master_agent_response(
+            request,
+            startup_message,
+            session_id=session_id,
+        ):
+            yield chunk
+
+
 @app.post("/api/chat/stream")
 @app.post("/api/agent/stream")
 async def master_agent_stream(request: ChatRequest):
     """Planner-first Master ReActAgent stream entry."""
     return StreamingResponse(
-        stream_master_agent_response(
+        stream_traced_master_agent_response(
             request,
             "正在启动 Master ReActAgent 自主规划主链路...",
         ),

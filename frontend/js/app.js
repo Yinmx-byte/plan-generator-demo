@@ -33,6 +33,7 @@ let messagesEl = null;
 let pageAgentMessagesEl = null;
 let showToolTrace = Boolean(planSessionState.showToolTrace);
 let archiveOnDownload = Boolean(planSessionState.archiveOnDownload);
+let currentTraceId = planSessionState.traceId || '';
 let currentDocumentFileId = planSessionState.fileId || null;
 let currentDocumentDownloadUrl = planSessionState.downloadUrl || '';
 let currentDocumentFilename = planSessionState.filename || '';
@@ -48,6 +49,10 @@ let documentEditStatus = null;
 let documentDialog = null;
 let documentEvalSkillSelect = null;
 let documentEvaluationResult = null;
+let traceViewerDialog = null;
+let traceViewerSummary = null;
+let traceViewerTree = null;
+let traceViewerStatus = null;
 let documentVisualDirty = false;
 let skillCatalog = [];
 let knowledgeCatalog = [];
@@ -115,6 +120,7 @@ function persistPlanState() {
     messagesHtml: messagesEl?.innerHTML || planSessionState.messagesHtml || '',
     showToolTrace,
     archiveOnDownload,
+    traceId: currentTraceId,
     fileId: currentDocumentFileId,
     downloadUrl: currentDocumentDownloadUrl,
     filename: currentDocumentFilename,
@@ -136,6 +142,9 @@ function bindStoredDocumentActions(container = messagesEl) {
     link.addEventListener('click', () => {
       link.href = buildDownloadUrl(link.dataset.downloadUrl || '');
     });
+  });
+  container?.querySelectorAll('.trace-open-btn[data-trace-id]').forEach((button) => {
+    button.addEventListener('click', () => openTraceViewer(button.dataset.traceId || ''));
   });
 }
 
@@ -671,6 +680,110 @@ function renderSkillRows(skills) {
     const skill = skillCatalog.find((item) => item.name === button.dataset.skillName);
     button.addEventListener('click', () => deleteSkill(button.dataset.skillName, skill?.display_name || button.dataset.skillName));
   });
+}
+
+function appendTraceAction(message, traceId) {
+  if (!message || !traceId) return;
+  let actions = message.querySelector('.document-message-actions');
+  if (!actions) {
+    actions = document.createElement('div');
+    actions.className = 'document-message-actions';
+    message.appendChild(actions);
+  }
+  const button = document.createElement('button');
+  button.className = 'trace-open-btn';
+  button.type = 'button';
+  button.dataset.traceId = traceId;
+  button.textContent = '查看完整追踪';
+  button.addEventListener('click', () => openTraceViewer(traceId));
+  actions.appendChild(button);
+}
+
+const traceCategoryLabels = {
+  workflow: '流程',
+  agent: '智能体',
+  model: '模型',
+  tool: '工具',
+  formatter: '格式化',
+  retrieval: '检索',
+};
+
+function traceSpanDetail(span) {
+  const attrs = span.attributes || {};
+  return attrs['gen_ai.agent.name']
+    || attrs['gen_ai.tool.name']
+    || attrs['gen_ai.request.model']
+    || attrs['agentscope.format.target']
+    || attrs['agentscope.function.name']
+    || '';
+}
+
+function renderTraceViewer(data) {
+  const spans = Array.isArray(data.spans) ? data.spans : [];
+  traceViewerSummary.innerHTML = `
+    <div><span>Trace ID</span><strong>${escapeHtml(data.trace_id || '-')}</strong></div>
+    <div><span>调用节点</span><strong>${Number(data.span_count || spans.length)}</strong></div>
+    <div><span>输入 Token</span><strong>${Number(data.input_tokens || 0)}</strong></div>
+    <div><span>输出 Token</span><strong>${Number(data.output_tokens || 0)}</strong></div>
+  `;
+  if (!spans.length) {
+    traceViewerTree.innerHTML = '<div class="trace-viewer-empty">本轮追踪尚未产生可展示节点。</div>';
+    return;
+  }
+  const spanIds = new Set(spans.map((span) => span.span_id));
+  const children = new Map();
+  spans.forEach((span) => {
+    const parentId = spanIds.has(span.parent_span_id) ? span.parent_span_id : '';
+    if (!children.has(parentId)) children.set(parentId, []);
+    children.get(parentId).push(span);
+  });
+  const renderBranch = (span, depth = 0) => {
+    const detail = traceSpanDetail(span);
+    const duration = span.duration_ms == null ? '执行中' : `${Number(span.duration_ms).toFixed(1)} ms`;
+    const descendants = (children.get(span.span_id) || []).map((child) => renderBranch(child, depth + 1)).join('');
+    return `
+      <div class="trace-tree-row${depth === 0 ? ' trace-tree-root' : ''}" style="--trace-depth:${Math.min(depth, 8)}">
+        <span class="trace-node-mark trace-node-${escapeHtml(span.category || 'workflow')}"></span>
+        <div class="trace-node-copy">
+          <div class="trace-node-title">
+            <span class="trace-node-category">${escapeHtml(traceCategoryLabels[span.category] || '流程')}</span>
+            <strong>${escapeHtml(span.name || 'unknown')}</strong>
+          </div>
+          ${detail ? `<span class="trace-node-detail">${escapeHtml(String(detail))}</span>` : ''}
+        </div>
+        <span class="trace-node-status trace-status-${escapeHtml(span.status || 'unset')}">${escapeHtml(span.status === 'error' ? '异常' : span.status === 'running' ? '运行中' : '完成')}</span>
+        <span class="trace-node-duration">${escapeHtml(duration)}</span>
+      </div>
+      ${descendants}
+    `;
+  };
+  traceViewerTree.innerHTML = (children.get('') || spans).map((span) => renderBranch(span)).join('');
+}
+
+async function openTraceViewer(traceId) {
+  if (!traceId || !traceViewerDialog) return;
+  traceViewerDialog.showModal();
+  traceViewerSummary.innerHTML = '<span>正在读取本轮追踪...</span>';
+  traceViewerTree.innerHTML = '<div class="trace-viewer-empty">正在汇总 AgentScope Span。</div>';
+  traceViewerStatus.textContent = '正在加载脱敏追踪数据...';
+  try {
+    let response;
+    let data = {};
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      response = await fetch(`/api/observability/traces/${encodeURIComponent(traceId)}`, { cache: 'no-store' });
+      data = await response.json().catch(() => ({}));
+      if (!response.ok && response.status !== 404) break;
+      if (response.ok && data.status !== 'running') break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (!response.ok) throw new Error(data.detail || '追踪数据读取失败');
+    renderTraceViewer(data);
+    traceViewerStatus.textContent = '已隐藏 Prompt、工具参数、工具结果和用户文档正文。';
+  } catch (err) {
+    traceViewerSummary.innerHTML = '<span>追踪暂不可用</span>';
+    traceViewerTree.innerHTML = `<div class="trace-viewer-empty trace-viewer-error">${escapeHtml(err.message)}</div>`;
+    traceViewerStatus.textContent = '请确认业务后端已启用 AgentScope 追踪；完整开发追踪可通过 start.cmd all 同时启动 Studio。';
+  }
 }
 
 async function deleteSkill(skillName, displayName = skillName) {
@@ -1405,6 +1518,11 @@ function initPlanPage() {
   documentDialog = document.getElementById('documentDialog');
   documentEvalSkillSelect = document.getElementById('documentEvalSkillSelect');
   documentEvaluationResult = document.getElementById('documentEvaluationResult');
+  traceViewerDialog = document.getElementById('traceViewerDialog');
+  traceViewerSummary = document.getElementById('traceViewerSummary');
+  traceViewerTree = document.getElementById('traceViewerTree');
+  traceViewerStatus = document.getElementById('traceViewerStatus');
+  document.getElementById('closeTraceViewerBtn')?.addEventListener('click', () => traceViewerDialog?.close());
   const formatDocumentJsonBtn = document.getElementById('formatDocumentJsonBtn');
   const saveDocumentBtn = document.getElementById('saveDocumentBtn');
   const evaluateDocumentBtn = document.getElementById('evaluateDocumentBtn');
@@ -1472,6 +1590,7 @@ function initPlanPage() {
     if (!text) return;
     addMessage(messagesEl, 'user', text);
     inputEl.value = '';
+    currentTraceId = '';
     setBusy(true);
     try {
       const resp = await fetch('/api/chat/stream', {
@@ -1511,6 +1630,11 @@ function initPlanPage() {
       sessionId = data.session_id;
       persistPlanState();
     }
+    if (event === 'trace_context') {
+      currentTraceId = data.trace_id || '';
+      persistPlanState();
+      return;
+    }
     if (event === 'status' || event === 'collected') {
       addMessage(messagesEl, 'status', data.message || '处理中...');
       return;
@@ -1547,11 +1671,13 @@ function initPlanPage() {
         `;
         msg.appendChild(wrap);
         bindStoredDocumentActions(wrap);
+        appendTraceAction(msg, currentTraceId);
         setDocumentDownload(currentDocumentDownloadUrl, currentDocumentFilename);
         persistPlanState();
       } else {
         const msg = addMessage(messagesEl, 'assistant', '');
         await typeInto(msg, data.message || '');
+        appendTraceAction(msg, currentTraceId);
       }
       return;
     }
@@ -2630,6 +2756,7 @@ async function resetChat() {
     currentDocumentDownloadUrl = '';
     currentDocumentFilename = '';
     currentDocumentData = null;
+    currentTraceId = '';
     planSessionState = {};
     sessionStorage.removeItem(planSessionStorageKey);
     messagesEl = null;

@@ -634,6 +634,16 @@ button.document-open-btn {
   font-size: 13px;
   user-select: none;
 }
+button.trace-open-btn {
+  border-color: #c5d2df;
+  background: #fff;
+  color: #2d4a66;
+  font-weight: 800;
+}
+button.trace-open-btn:hover {
+  border-color: #8da9c2;
+  background: #f5f9fc;
+}
 .check-option[hidden] { display: none !important; }
 .check-option input { width: 16px; height: 16px; margin: 0; }
 
@@ -920,6 +930,145 @@ button.ghost {
   grid-template-columns: auto minmax(0, 1fr);
   padding: 14px 18px;
   gap: 8px 12px;
+}
+
+.trace-viewer-dialog.modal-wide {
+  width: min(1120px, calc(100vw - 36px));
+}
+.trace-viewer-card {
+  max-height: min(820px, calc(100vh - 36px));
+  grid-template-rows: auto auto minmax(280px, 1fr) auto;
+  overflow: hidden;
+}
+.trace-viewer-card .modal-head > button {
+  flex: 0 0 auto;
+  min-width: 64px;
+  white-space: nowrap;
+}
+.trace-viewer-summary {
+  display: grid;
+  grid-template-columns: minmax(240px, 2fr) repeat(3, minmax(110px, 0.65fr));
+  border: 1px solid #d5dfe8;
+  border-radius: 6px;
+  background: #f8fafb;
+}
+.trace-viewer-summary > div {
+  min-width: 0;
+  padding: 12px 14px;
+  border-right: 1px solid #dfe6ec;
+}
+.trace-viewer-summary > div:last-child { border-right: 0; }
+.trace-viewer-summary span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.trace-viewer-summary strong {
+  display: block;
+  overflow: hidden;
+  color: #172536;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trace-viewer-tree {
+  min-height: 280px;
+  overflow: auto;
+  border: 1px solid #d5dfe8;
+  border-radius: 6px;
+  background: #fff;
+}
+.trace-viewer-empty {
+  min-height: 280px;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  color: var(--muted);
+  text-align: center;
+}
+.trace-viewer-error { color: var(--red); }
+.trace-tree-row {
+  min-height: 56px;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) 64px 92px;
+  align-items: center;
+  gap: 10px;
+  margin-left: calc(var(--trace-depth) * 24px);
+  padding: 8px 14px;
+  border-bottom: 1px solid #edf1f4;
+  position: relative;
+}
+.trace-tree-row:last-child { border-bottom: 0; }
+.trace-tree-row::before {
+  content: "";
+  width: 12px;
+  position: absolute;
+  inset: 0 auto 0 -14px;
+  border-left: 1px solid #d5dfe8;
+}
+.trace-tree-root::before { display: none; }
+.trace-node-mark {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #6f8295;
+  box-shadow: 0 0 0 4px #edf1f4;
+}
+.trace-node-agent { background: #32649a; box-shadow: 0 0 0 4px #e8f0f8; }
+.trace-node-model { background: #7b5b9e; box-shadow: 0 0 0 4px #f0eaf6; }
+.trace-node-tool { background: #b87920; box-shadow: 0 0 0 4px #fbf0df; }
+.trace-node-retrieval { background: #2d7a61; box-shadow: 0 0 0 4px #e5f2ed; }
+.trace-node-formatter { background: #66737f; box-shadow: 0 0 0 4px #edf0f2; }
+.trace-node-copy { min-width: 0; }
+.trace-node-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.trace-node-title strong {
+  overflow: hidden;
+  color: #1b2938;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trace-node-category {
+  flex: 0 0 auto;
+  color: #5f7183;
+  font-size: 11px;
+  font-weight: 800;
+}
+.trace-node-detail {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trace-node-status,
+.trace-node-duration {
+  color: #657789;
+  font-size: 11px;
+  text-align: right;
+}
+.trace-status-error { color: var(--red); font-weight: 800; }
+.trace-status-running { color: #936217; font-weight: 800; }
+
+@media (max-width: 720px) {
+  .trace-viewer-summary { grid-template-columns: 1fr 1fr; }
+  .trace-viewer-summary > div:nth-child(2) { border-right: 0; }
+  .trace-viewer-summary > div:nth-child(-n+2) { border-bottom: 1px solid #dfe6ec; }
+  .trace-tree-row {
+    grid-template-columns: 12px minmax(0, 1fr) 70px;
+    margin-left: calc(var(--trace-depth) * 12px);
+  }
+  .trace-node-status { display: none; }
 }
 .iterator-intro {
   grid-column: 1 / -1;

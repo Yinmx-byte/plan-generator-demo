@@ -11,6 +11,8 @@ from urllib.request import urlopen
 import agentscope
 from dotenv import load_dotenv
 
+from .local_trace_store import register_local_trace_processor
+
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(BACKEND_ROOT / ".env", override=False)
@@ -87,6 +89,7 @@ def initialize_agentscope_observability() -> dict[str, Any]:
             "error": f"{type(exc).__name__}: {exc}",
         }
     else:
+        local_trace_enabled = register_local_trace_processor()
         _status = {
             "enabled": True,
             "initialized": True,
@@ -96,6 +99,7 @@ def initialize_agentscope_observability() -> dict[str, Any]:
             "service_name": service_name,
             "studio_url": _public_url(studio_url) if studio_url else "",
             "tracing_url_configured": bool(tracing_url),
+            "local_trace_enabled": local_trace_enabled,
         }
     _initialized = True
     print(f"[AgentScope] Observability: {_status}")

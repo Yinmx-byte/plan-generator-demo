@@ -95,4 +95,24 @@
       <p class="status-text" id="documentEditStatus">未生成文档。</p>
     </form>
   </dialog>
+
+  <dialog class="modal modal-wide trace-viewer-dialog" id="traceViewerDialog">
+    <div class="modal-card trace-viewer-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">OpenTelemetry</p>
+          <h3>本轮完整追踪</h3>
+          <p>展示脱敏后的 Agent、模型、工具与格式化调用层级。</p>
+        </div>
+        <button class="ghost" id="closeTraceViewerBtn" type="button">关闭</button>
+      </div>
+      <div class="trace-viewer-summary" id="traceViewerSummary">
+        <span>尚未加载追踪数据</span>
+      </div>
+      <div class="trace-viewer-tree" id="traceViewerTree">
+        <div class="trace-viewer-empty">完成一次对话后，可从回答下方打开完整追踪。</div>
+      </div>
+      <p class="status-text" id="traceViewerStatus">仅保留最近一小时的脱敏追踪，不展示 Prompt、工具参数或结果正文。</p>
+    </div>
+  </dialog>
 </section>

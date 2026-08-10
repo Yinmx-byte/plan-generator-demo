@@ -149,6 +149,18 @@ npm install -g @agentscope/studio
 
 浏览器访问 `http://127.0.0.1:3000`，再启动后端并发起一次对话。Studio 中可查看 Agent、LLM、工具、格式化器调用层级、耗时和异常。后端连接状态可通过 `GET /api/observability/status` 检查。若不需要追踪，将 `AGENTSCOPE_OBSERVABILITY_ENABLED=false` 即可，现有 SSE 流程不受影响。
 
+### 6. 业务页面轻量追踪
+
+启用 AgentScope 追踪后，主对话的每轮回答下方会显示“查看完整追踪”。该视图面向业务演示，仅展示本轮工作流、Agent、模型、工具、格式化与检索节点的层级、状态、耗时和 Token 汇总；不会返回 Prompt、用户文档正文、工具参数或工具结果。
+
+轻量追踪暂存在后端内存中，默认最多保留 80 条、保留 1 小时，服务重启后清空。可通过 `LOCAL_TRACE_MAX_TRACES` 和 `LOCAL_TRACE_TTL_SECONDS` 调整。接口如下：
+
+```text
+GET /api/observability/traces/{trace_id}
+```
+
+业务页面轻量追踪用于快速说明“本轮做了什么”；AgentScope Studio 用于开发人员查看更完整的原生 OpenTelemetry Trace。
+
 ## 当前工作流
 
 ```text
