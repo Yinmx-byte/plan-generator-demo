@@ -80,7 +80,21 @@ PLAN_ARCHIVE_OSS_PREFIX=maintenance-plan-archive
 ITERATED_SKILL_OSS_BUCKET=iterated-skill
 ITERATED_SKILL_OSS_REGION=cn-beijing
 ITERATED_SKILL_OSS_PREFIX=skill-versions
+
+# 主对话记忆：同一 session_id 复用一个 Master ReActAgent。
+MASTER_AGENT_MEMORY_COMPRESSION=true
+MASTER_AGENT_MEMORY_CHAR_THRESHOLD=60000
+MASTER_AGENT_MEMORY_KEEP_RECENT=8
+MASTER_AGENT_HISTORY_RESTORE_LIMIT=30
+CHAT_SESSION_HISTORY_LIMIT=100
 ```
+
+主对话采用两层会话记忆：AgentScope `InMemoryMemory` 保存当前 Master Agent
+的消息与工具过程，并在达到阈值后使用框架原生压缩；Python 会话状态保存已确认
+需求、生成结果和有界的用户/助手历史，作为业务事实来源，也用于 Skill 更新后重建
+Agent 时恢复最近对话。`POST /api/chat/reset` 会中断并清空该会话 Agent；服务重启
+后内存会话不会保留。方案归档、Skill 版本和 RAG 文档属于远程业务数据或知识，
+不等同于对话记忆。
 
 Skill 质量迭代使用同一 RDS 中的 `quality_reference_documents` 表保存优质方案元数据，原始 DOCX 存放在独立的私有 OSS Bucket。配置示例：
 

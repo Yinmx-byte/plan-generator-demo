@@ -50,6 +50,11 @@ async def reset_skill_runtime() -> None:
     _skill_toolkit = None
     _toolkit = None
     reset_knowledge_base()
+    # Existing session agents keep serving their current turn, then rebuild
+    # from external history before the next turn so edited Skills take effect.
+    from services.chat_sessions import get_chat_session_store
+
+    get_chat_session_store().invalidate_master_agents()
     if has_mcp_clients:
         try:
             await asyncio.wait_for(

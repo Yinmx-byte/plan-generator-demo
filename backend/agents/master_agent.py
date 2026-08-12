@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 from dataclasses import dataclass
@@ -12,10 +11,11 @@ from typing import Any, Awaitable, Callable, Optional
 from agentscope.agent import ReActAgent
 from agentscope.memory import InMemoryMemory
 from agentscope.message import Msg
+from agentscope.token import CharTokenCounter
 from agentscope.tool import Toolkit, ToolResponse
 
 from agents.plan_agent import format_agent_trace
-from services.requirements import default_form_state
+from services.chat_sessions import get_chat_session_store
 from tools.master_toolkit import build_master_toolkit
 
 
@@ -24,6 +24,8 @@ MASTER_SYSTEM_PROMPT = (
     "业务流程、场景判断和工具调用顺序只以已注册的 AgentScope Skills 为准，"
     "其中 cloud-maintenance-master-workflow 是主控工作流的唯一规则来源。"
     "根据 Skill 目录摘要判断并读取所需 SKILL.md，再自主选择已注册工具完成任务。"
+    "每次收到的 Msg 都是用户本轮原始消息；需要已确认的检修字段、最近历史或已有文档时，"
+    "调用 get_session_snapshot 获取权威会话状态，不得仅凭模型记忆补造业务事实。"
     "只能通过已注册工具执行受控动作，不得执行真实生产变更。"
     "不得暴露内部推理、工作流分析或隐藏上下文；用户明确询问系统架构时，可以解释公开的技术实现。"
     "最终回答必须且只能写在 <user_answer> 与 </user_answer> 标签之间，"
@@ -34,16 +36,10 @@ USER_ANSWER_RE = re.compile(
     r"<user_answer>\s*(.*?)(?:\s*</user_answer>|\Z)",
     re.DOTALL,
 )
-
-SIMPLE_GREETINGS = {
-    "你好",
-    "您好",
-    "hello",
-    "hi",
-    "hey",
-    "在吗",
-}
-SIMPLE_TEST_MESSAGES = {"test", "测试"}
+PROTOCOL_TAIL_RE = re.compile(
+    r"\s*<[^>]*DSML[^>]*>.*$",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 @dataclass(frozen=True)
@@ -68,10 +64,30 @@ async def create_master_agent(
         formatter=runtime.get_formatter(),
         toolkit=await build_master_toolkit(session, runtime),
         memory=InMemoryMemory(),
+        compression_config=build_memory_compression_config(),
         max_iters=int(os.getenv("MASTER_AGENT_MAX_ITERS", "12")),
     )
     agent.set_console_output_enabled(False)
     return agent
+
+
+def build_memory_compression_config() -> ReActAgent.CompressionConfig | None:
+    """Bound long-running session memory with AgentScope native compression."""
+    enabled = os.getenv("MASTER_AGENT_MEMORY_COMPRESSION", "true").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return None
+    return ReActAgent.CompressionConfig(
+        enable=True,
+        agent_token_counter=CharTokenCounter(),
+        trigger_threshold=max(
+            10_000,
+            int(os.getenv("MASTER_AGENT_MEMORY_CHAR_THRESHOLD", "60000")),
+        ),
+        keep_recent=max(
+            2,
+            int(os.getenv("MASTER_AGENT_MEMORY_KEEP_RECENT", "8")),
+        ),
+    )
 
 
 async def run_master_agent_turn(
@@ -80,70 +96,73 @@ async def run_master_agent_turn(
     runtime: MasterAgentRuntime,
     trace_callback: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> Any:
-    """Run one autonomous master-agent turn, optionally streaming traces."""
-    session.setdefault("state", default_form_state())
-    session.setdefault("history", [])
-    session["history"].append({"role": "user", "content": message})
-    simple_reply = get_simple_direct_reply(message)
-    if simple_reply:
-        response = Msg("assistant", simple_reply, "assistant")
-        session["history"].append({"role": "assistant", "content": simple_reply})
-        return response
-    state_preview = {
-        key: value
-        for key, value in session.get("state", {}).items()
-        if isinstance(value, str) and value.strip()
-    }
-    generated = session.get("generated") or {}
-    prompt = f"""请读取并遵循已注册的 cloud-maintenance-master-workflow Skill，处理本轮用户消息。
+    """Run one turn on the session-scoped Master Agent."""
+    session_store = get_chat_session_store()
+    lock = session.setdefault("_master_agent_lock", asyncio.Lock())
+    async with lock:
+        agent = await session_store.get_master_agent(
+            session,
+            runtime,
+            create_master_agent,
+        )
+        # Tool-group activation is turn-local even though the Agent is reused.
+        agent.toolkit.reset_equipped_tools()
+        session_store.append_history(session, "user", message)
+        user_msg = Msg("user", message, "user")
 
-<conversation_context>
-已确认的检修需求字段：
-{json.dumps(state_preview, ensure_ascii=False, indent=2)}
+        if not trace_callback:
+            response = await agent(user_msg)
+        else:
+            response = await _run_streaming_agent_turn(
+                agent,
+                user_msg,
+                runtime,
+                trace_callback,
+            )
 
-是否已有生成文档：{bool(generated)}
-上一版生成文档元数据：{json.dumps(generated, ensure_ascii=False)}
-</conversation_context>
-
-<user_message>
-{message}
-</user_message>
-
-会话上下文只用于辅助判断，不得把未确认字段当成用户事实。最终只返回面向用户的回答。
-"""
-    agent = await create_master_agent(session, runtime)
-    if not trace_callback:
-        response = await agent(Msg("user", prompt, "user"))
         text = normalize_user_answer(response, runtime.get_response_text)
-        session["history"].append({"role": "assistant", "content": text})
+        # AgentScope 1.0.20 does not append the normal text-only reply in one
+        # exit branch, so persist it explicitly for reliable multi-turn chat.
+        await agent.memory.add(response)
+        session_store.append_history(session, "assistant", text)
         return response
 
+
+async def _run_streaming_agent_turn(
+    agent: ReActAgent,
+    user_msg: Msg,
+    runtime: MasterAgentRuntime,
+    trace_callback: Callable[[str], Awaitable[None]],
+) -> Any:
     queue: asyncio.Queue = asyncio.Queue(maxsize=100)
     agent.set_msg_queue_enabled(True, queue)
-    task = asyncio.create_task(agent(Msg("user", prompt, "user")))
-
+    task = asyncio.create_task(agent(user_msg))
     try:
         while True:
             if task.done() and queue.empty():
                 break
             try:
-                msg, last, _speech = await asyncio.wait_for(queue.get(), timeout=0.2)
+                msg, last, _speech = await asyncio.wait_for(
+                    queue.get(),
+                    timeout=0.2,
+                )
             except asyncio.TimeoutError:
                 continue
-            for trace in format_agent_trace(msg, runtime.get_response_text, last):
+            for trace in format_agent_trace(
+                msg,
+                runtime.get_response_text,
+                last,
+            ):
                 await trace_callback(trace)
-
-        response = await task
+        return await task
     finally:
+        agent.set_msg_queue_enabled(False)
         if not task.done():
             task.cancel()
             try:
                 await asyncio.wait_for(task, timeout=2)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
-    text = normalize_user_answer(response, runtime.get_response_text)
-    session["history"].append({"role": "assistant", "content": text})
-    return response
 
 
 def normalize_user_answer(
@@ -155,15 +174,6 @@ def normalize_user_answer(
     match = USER_ANSWER_RE.search(text)
     if match:
         text = match.group(1).strip()
-        response.content = text
+    text = PROTOCOL_TAIL_RE.sub("", text).strip()
+    response.content = text
     return text
-
-
-def get_simple_direct_reply(message: str) -> str:
-    """Return a direct reply for standalone greetings/tests."""
-    normalized = message.strip().lower().strip("。！？!?,，~～ ")
-    if normalized in SIMPLE_GREETINGS:
-        return "你好！"
-    if normalized in SIMPLE_TEST_MESSAGES:
-        return "收到。"
-    return ""

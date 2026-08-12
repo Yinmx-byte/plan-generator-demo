@@ -33,7 +33,6 @@ from api.quality_reference_routes import router as quality_reference_router
 from api.observability_routes import router as observability_router
 from agents.master_agent import (
     MasterAgentRuntime,
-    get_simple_direct_reply,
     run_master_agent_turn,
 )
 from runtime import (
@@ -50,6 +49,7 @@ from runtime import (
     reset_skill_runtime,
 )
 from services.json_utils import get_response_text
+from services.chat_sessions import get_chat_session_store
 from services.plan_generation import (
     build_generation_orchestration_context,
     extract_state_from_document,
@@ -80,7 +80,7 @@ from services.remote_skill_store import get_remote_skill_store, mirror_seed_skil
 
 # ── Skill 注册 ──────────────────────────────────────────────────
 _rag_enabled: bool = False
-_chat_sessions: dict[str, dict[str, Any]] = {}
+_chat_session_store = get_chat_session_store()
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
@@ -147,6 +147,7 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        await _chat_session_store.clear()
         try:
             await asyncio.wait_for(
                 close_mcp_clients(),
@@ -308,14 +309,7 @@ async def dev_plan_test(request: PlanTestRequest):
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
     session_id = request.session_id or uuid.uuid4().hex
-    session = _chat_sessions.setdefault(
-        session_id,
-        {
-            "state": default_form_state(),
-            "history": [],
-            "generated": None,
-        },
-    )
+    session = _chat_session_store.get_or_create(session_id)
     message = request.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="请输入需求描述或问题")
@@ -406,14 +400,7 @@ async def stream_master_agent_response(
 ):
     """Shared SSE stream for the planner-first Master ReActAgent chain."""
     session_id = session_id or request.session_id or uuid.uuid4().hex
-    session = _chat_sessions.setdefault(
-        session_id,
-        {
-            "state": default_form_state(),
-            "history": [],
-            "generated": None,
-        },
-    )
+    session = _chat_session_store.get_or_create(session_id)
     message = request.message.strip()
     if not message:
         yield sse_event(
@@ -421,26 +408,6 @@ async def stream_master_agent_response(
             {"session_id": session_id, "message": "请输入需求描述或问题"},
         )
         return
-    simple_reply = get_simple_direct_reply(message)
-    if simple_reply:
-        session.setdefault("history", [])
-        session["history"].append({"role": "user", "content": message})
-        session["history"].append({"role": "assistant", "content": simple_reply})
-        yield sse_event(
-            "done",
-            {
-                "session_id": session_id,
-                "status": "done",
-                "message": simple_reply,
-                "generated": None,
-                "download_url": None,
-                "filename": None,
-                "validation_result": None,
-                "collected": session["state"],
-            },
-        )
-        return
-
     agent_task: asyncio.Task | None = None
     try:
         yield sse_event(
@@ -576,7 +543,7 @@ async def master_agent_stream(request: ChatRequest):
 
 @app.post("/api/chat/reset")
 async def reset_chat(request: ChatResetRequest):
-    _chat_sessions.pop(request.session_id, None)
+    await _chat_session_store.reset(request.session_id)
     return {"status": "ok"}
 
 
@@ -607,7 +574,7 @@ async def download_generated(file_id: str, archive: bool = Query(False)):
             else:
                 session_state = get_generated_state(file_id)
                 if session_state is None:
-                    for _sid, session in _chat_sessions.items():
+                    for _sid, session in _chat_session_store.sessions.items():
                         gen = session.get("generated")
                         if gen and gen.get("file_id") == file_id:
                             session_state = session.get("state")
